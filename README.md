@@ -125,6 +125,40 @@ eas build --profile development --platform ios
 eas build --profile development --platform android
 ```
 
+### iPhone With Cable: Development vs Standalone
+
+Use **Debug** while developing. Debug builds need Metro, so keep `npm start` running:
+
+```bash
+npm start
+npx expo run:ios --device
+```
+
+Use **Release** when you want the installed iPhone app to work without your Mac or Metro. Release embeds the JS bundle inside the app:
+
+```bash
+npx expo run:ios --device --configuration Release
+```
+
+With a free Apple ID, the installed app may expire after about 7 days. To re-sign it, plug the iPhone into the Mac and run the same Release command again:
+
+```bash
+npx expo run:ios --device --configuration Release
+```
+
+Do not run clean prebuild for normal JS/UI changes. Use this only after native config changes such as `app.json`, plugins, bundle id, icons, permissions, or native modules:
+
+```bash
+npx expo prebuild --clean
+```
+
+After `prebuild --clean`, Xcode signing may need to be checked again:
+
+- Enable **Automatically manage signing**
+- Select your Apple ID team
+- Use bundle id `com.tirtharajbarma.subscription`
+- Remove **Push Notifications** capability for free Apple ID signing
+
 ---
 
 ## Project Structure
@@ -191,6 +225,8 @@ subscription/
 npm start              # Start Expo dev server
 npm run ios            # Run on iOS simulator
 npm run android        # Run on Android emulator
+npx expo run:ios --device                         # Debug iPhone build, needs npm start / Metro
+npx expo run:ios --device --configuration Release # Standalone iPhone build, works without Metro
 npm run typecheck      # TypeScript type checking
 npm run lint           # ESLint
 ```
@@ -265,8 +301,11 @@ eas build --platform android --profile production
 ### Local Builds (without EAS)
 
 ```bash
-# iOS
+# iOS simulator/device Release build
 npx expo run:ios --configuration Release
+
+# iPhone Release build that embeds JS and works without npm start
+npx expo run:ios --device --configuration Release
 
 # Android
 npx expo run:android --variant release
@@ -280,6 +319,8 @@ npx expo run:android --variant release
 |-------|-----|
 | `npm install` fails | Delete `node_modules` and `package-lock.json`, then `npm install` again |
 | iOS build fails | Run `cd ios && pod install` or delete `ios/` and run `npx expo prebuild` |
+| iPhone shows `No script URL provided` | You installed a Debug build without Metro. Run `npx expo run:ios --device --configuration Release` for standalone use |
+| Free Apple ID signing fails with Push Notifications | Remove the Push Notifications capability and do not include the `expo-notifications` config plugin for the free-signed build |
 | Android build fails | Ensure Android Studio SDK 36 is installed, run `npx expo prebuild` |
 | Notifications not working | Use a development build, not Expo Go |
 | TypeScript errors | Run `npm run typecheck` to see all errors |
