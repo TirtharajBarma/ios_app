@@ -1,0 +1,116 @@
+import React, { memo } from "react";
+import { View, StyleSheet } from "react-native";
+import { AppText, LogoCircle } from "@/components/ui";
+import { colors, spacing, radius, hexToRGBA } from "@/constants";
+
+export interface DetailsHeroProps {
+  name: string;
+  price: number;
+  currency: string;
+  billingCycle: string;
+  brandColor: string;
+  category: string;
+  isTrial: boolean;
+}
+
+function DetailsHero({
+  name,
+  price,
+  currency,
+  billingCycle,
+  brandColor,
+  category,
+  isTrial,
+}: DetailsHeroProps) {
+  const formattedPrice = `${currency}${price.toFixed(2)}`;
+  const cycleSuffix = billingCycle === "custom" ? "cycle" : billingCycle.toLowerCase() === "weekly" ? "wk" : billingCycle.toLowerCase() === "yearly" ? "yr" : "mo";
+
+  return (
+    <View style={[styles.container, { backgroundColor: brandColor }]}>
+      {/* Subtle overlay gradient to keep text readable */}
+      <View style={[StyleSheet.absoluteFill, styles.overlay]} />
+
+      <View style={styles.content}>
+        {/* Large Logo */}
+        <LogoCircle
+          name={name}
+          color={colors.white}
+          size={80}
+          bordered
+          shadowed
+          style={styles.logo}
+        />
+
+        {/* Subscription Name */}
+        <AppText variant="title1" weight="800" align="center" color={colors.white}>
+          {name}
+        </AppText>
+
+        {/* Category Tag */}
+        <View style={styles.tagWrapper}>
+          <View style={styles.tag}>
+            <AppText variant="caption2" weight="700" color={colors.white} style={{ opacity: 0.9 }}>
+              {isTrial ? "FREE TRIAL" : category.toUpperCase()}
+            </AppText>
+          </View>
+        </View>
+
+        {/* Price display */}
+        <View style={styles.priceRow}>
+          <AppText variant="largeTitle" weight="800" color={colors.white}>
+            {isTrial ? "Free" : formattedPrice}
+          </AppText>
+          {!isTrial && (
+            <AppText variant="body" weight="600" color={colors.white} style={styles.cycleText}>
+              / {cycleSuffix}
+            </AppText>
+          )}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    paddingVertical: spacing[32],
+    paddingHorizontal: spacing[24],
+    borderRadius: radius[24],
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  overlay: {
+    backgroundColor: "rgba(0, 0, 0, 0.15)", // subtle shade
+  },
+  content: {
+    alignItems: "center",
+    zIndex: 1,
+  },
+  logo: {
+    marginBottom: spacing[16],
+  },
+  tagWrapper: {
+    marginTop: spacing[8],
+    marginBottom: spacing[16],
+  },
+  tag: {
+    paddingHorizontal: spacing[12],
+    paddingVertical: spacing[4],
+    borderRadius: 999,
+    backgroundColor: "rgba(255, 255, 255, 0.16)",
+    borderWidth: 0.5,
+    borderColor: "rgba(255, 255, 255, 0.25)",
+  },
+  priceRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+  },
+  cycleText: {
+    opacity: 0.8,
+    marginLeft: spacing[4],
+    marginBottom: 4,
+  },
+});
+
+export default memo(DetailsHero);
