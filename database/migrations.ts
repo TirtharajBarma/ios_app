@@ -12,6 +12,22 @@ export async function runMigrations(db: SQLiteDatabase): Promise<void> {
     console.log(`Database: Current schema version is ${currentVersion}. Target version is ${SCHEMA_VERSION}.`);
 
     if (currentVersion >= SCHEMA_VERSION) {
+      // Even if schema version matches, double check columns in case database existed pre-migrations
+      try {
+        const tableInfo = await db.getAllAsync<{ name: string }>("PRAGMA table_info(subscriptions);");
+        if (tableInfo.length > 0) {
+          const hasIsTrial = tableInfo.some((col) => col.name === "isTrial");
+          if (!hasIsTrial) {
+            console.log("Database: Found old schema version on current version. Recreating table...");
+            await db.execAsync("DROP TABLE IF EXISTS subscriptions;");
+            await db.execAsync(CREATE_TABLES_SQL);
+            await db.execAsync(CREATE_INDEXES_SQL);
+          }
+        }
+      } catch (err) {
+        console.warn("Database: Schema validation check failed", err);
+      }
+      
       console.log("Database: Schema is up-to-date. No migrations needed.");
       return;
     }
@@ -19,6 +35,20 @@ export async function runMigrations(db: SQLiteDatabase): Promise<void> {
     // Run migrations sequentially
     if (currentVersion < 1) {
       console.log("Database: Running migration to version 1...");
+
+      // Safety check: if old subscriptions table exists but lacks new 'isTrial' column, recreate it.
+      try {
+        const tableInfo = await db.getAllAsync<{ name: string }>("PRAGMA table_info(subscriptions);");
+        if (tableInfo.length > 0) {
+          const hasIsTrial = tableInfo.some((col) => col.name === "isTrial");
+          if (!hasIsTrial) {
+            console.log("Database: Detected old table schema (missing isTrial column). Recreating table...");
+            await db.execAsync("DROP TABLE IF EXISTS subscriptions;");
+          }
+        }
+      } catch (e) {
+        console.warn("Database: Failed to check table schema status, proceeding...", e);
+      }
       
       // Execute schema creation scripts
       await db.execAsync(CREATE_TABLES_SQL);
@@ -28,9 +58,6 @@ export async function runMigrations(db: SQLiteDatabase): Promise<void> {
       await db.execAsync("PRAGMA user_version = 1;");
       console.log("Database: Successfully migrated to version 1.");
     }
-
-    // Future version migrations can be added here:
-    // if (currentVersion < 2) { ... await db.execAsync("PRAGMA user_version = 2;"); }
 
   } catch (error) {
     console.error("Database migration error:", error);

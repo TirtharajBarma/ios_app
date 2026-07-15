@@ -6,7 +6,7 @@ const SEED_DATA: Omit<DbSubscription, "createdAt" | "updatedAt">[] = [
   {
     id: "netflix-seed",
     name: "Netflix",
-    logo: "Netflix",
+    logo: "https://logo.clearbit.com/netflix.com",
     website: "netflix.com",
     category: "Entertainment",
     price: 15.99,
@@ -26,7 +26,7 @@ const SEED_DATA: Omit<DbSubscription, "createdAt" | "updatedAt">[] = [
   {
     id: "spotify-seed",
     name: "Spotify",
-    logo: "Spotify",
+    logo: "https://logo.clearbit.com/spotify.com",
     website: "spotify.com",
     category: "Music",
     price: 10.99,
@@ -46,7 +46,7 @@ const SEED_DATA: Omit<DbSubscription, "createdAt" | "updatedAt">[] = [
   {
     id: "chatgpt-seed",
     name: "ChatGPT Plus",
-    logo: "ChatGPT Plus",
+    logo: "https://logo.clearbit.com/chatgpt.com",
     website: "chatgpt.com",
     category: "AI",
     price: 20.00,
@@ -66,7 +66,7 @@ const SEED_DATA: Omit<DbSubscription, "createdAt" | "updatedAt">[] = [
   {
     id: "apple-music-seed",
     name: "Apple Music",
-    logo: "Apple Music",
+    logo: "https://logo.clearbit.com/apple.com",
     website: "music.apple.com",
     category: "Music",
     price: 10.99,
@@ -86,7 +86,7 @@ const SEED_DATA: Omit<DbSubscription, "createdAt" | "updatedAt">[] = [
   {
     id: "disney-seed",
     name: "Disney+",
-    logo: "Disney+",
+    logo: "https://logo.clearbit.com/disneyplus.com",
     website: "disneyplus.com",
     category: "Entertainment",
     price: 139.99,
@@ -106,7 +106,7 @@ const SEED_DATA: Omit<DbSubscription, "createdAt" | "updatedAt">[] = [
   {
     id: "google-one-seed",
     name: "Google One",
-    logo: "Google One",
+    logo: "https://logo.clearbit.com/google.com",
     website: "one.google.com",
     category: "Storage",
     price: 1.99,

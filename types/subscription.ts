@@ -48,6 +48,7 @@ export interface Subscription {
   billingCycle: BillingCycle;
   /** Custom interval in months, only used when billingCycle === "custom". */
   customIntervalMonths?: number;
+  rawBillingCycle?: string;
   /** ISO-8601 date string of the next charge. */
   nextBillingDate: string;
   category: Category;

@@ -6,6 +6,7 @@ import type {
 } from "@/types/subscription";
 import * as db from "@/database/database";
 import { toMonthly, toYearly, daysUntil } from "@/utils/date";
+import { scheduleReminder, cancelReminder } from "@/utils/notifications";
 
 interface SubscriptionState {
   /** In-memory list, sorted by next billing date (ascending). */
@@ -87,6 +88,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
   isLoaded: false,
 
   loadSubscriptions: async () => {
+    await db.initializeDatabase();
     const subscriptions = await db.getAllSubscriptions();
     // Sort nearest renewal first
     subscriptions.sort(
@@ -96,6 +98,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
   },
 
   addSubscription: async (input) => {
+    await db.initializeDatabase();
     const id = generateId();
     const sub = await db.insertSubscription(id, input);
     set((state) => {
@@ -104,10 +107,12 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
       );
       return { subscriptions, stats: computeStats(subscriptions) };
     });
+    scheduleReminder(sub).catch(() => {});
     return sub;
   },
 
   updateSubscription: async (id, input) => {
+    await db.initializeDatabase();
     await db.updateSubscription(id, input);
     set((state) => {
       const idx = state.subscriptions.findIndex((s) => s.id === id);
@@ -123,10 +128,14 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
       );
       return { subscriptions: updated, stats: computeStats(updated) };
     });
+    const updatedSub = get().subscriptions.find((s) => s.id === id);
+    if (updatedSub) scheduleReminder(updatedSub).catch(() => {});
   },
 
   removeSubscription: async (id) => {
+    await db.initializeDatabase();
     await db.deleteSubscription(id);
+    cancelReminder(id).catch(() => {});
     set((state) => {
       const subscriptions = state.subscriptions.filter((s) => s.id !== id);
       return { subscriptions, stats: computeStats(subscriptions) };

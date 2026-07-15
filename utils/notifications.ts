@@ -1,0 +1,121 @@
+import { Platform } from "react-native";
+import { parseISO, differenceInSeconds } from "date-fns";
+import type { Subscription } from "@/types/subscription";
+
+let Notifications: any = null;
+let isNotificationsAvailable = false;
+
+try {
+  Notifications = require("expo-notifications");
+  if (Notifications && Notifications.setNotificationHandler) {
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
+      }),
+    });
+    isNotificationsAvailable = true;
+    console.log("Notifications: Native module initialized successfully.");
+  }
+} catch (e) {
+  console.warn("Notifications: Native module is not available on this client. Reminders will be mocked.");
+}
+
+const REMINDER_CHANNEL = "subscription-reminders";
+
+export async function requestNotificationPermissions(): Promise<boolean> {
+  if (!isNotificationsAvailable) return false;
+
+  try {
+    if (Platform.OS === "android") {
+      await Notifications.setNotificationChannelAsync(REMINDER_CHANNEL, {
+        name: "Subscription Reminders",
+        importance: Notifications.AndroidImportance.HIGH,
+        vibrationPattern: [0, 250, 250, 250],
+      });
+    }
+
+    const { status: existing } = await Notifications.getPermissionsAsync();
+    if (existing === "granted") return true;
+
+    const { status } = await Notifications.requestPermissionsAsync({
+      ios: { allowAlert: true, allowBadge: true, allowSound: true },
+    });
+    return status === "granted";
+  } catch (error) {
+    console.warn("Notifications: Failed to request permissions", error);
+    return false;
+  }
+}
+
+export async function scheduleReminder(sub: Subscription): Promise<void> {
+  if (!isNotificationsAvailable) return;
+  if (!sub.reminderEnabled) return;
+  if (!sub.nextBillingDate) return;
+
+  try {
+    const triggerDate = new Date(sub.nextBillingDate);
+    triggerDate.setDate(triggerDate.getDate() - sub.reminderDays);
+    triggerDate.setHours(9, 0, 0, 0);
+
+    const now = new Date();
+    const secondsUntil = differenceInSeconds(triggerDate, now);
+    if (secondsUntil <= 0) return;
+
+    const identifier = `reminder-${sub.id}`;
+    await Notifications.cancelScheduledNotificationAsync(identifier).catch(() => {});
+
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: `${sub.name} renewal${sub.reminderDays === 0 ? " today" : " upcoming"}`,
+        body: sub.isTrial
+          ? `Your free trial ends in ${sub.reminderDays} day${sub.reminderDays !== 1 ? "s" : ""}.`
+          : `Your $${sub.price.toFixed(2)} ${sub.billingCycle} subscription renews${sub.reminderDays === 0 ? " today" : ` in ${sub.reminderDays} day${sub.reminderDays !== 1 ? "s" : ""}`}.`,
+        data: { subscriptionId: sub.id },
+        sound: true,
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+        seconds: secondsUntil,
+      },
+      identifier,
+    });
+  } catch (error) {
+    console.warn(`Notifications: Failed to schedule reminder for ${sub.name}`, error);
+  }
+}
+
+export async function cancelReminder(subscriptionId: string): Promise<void> {
+  if (!isNotificationsAvailable) return;
+  const identifier = `reminder-${subscriptionId}`;
+  await Notifications.cancelScheduledNotificationAsync(identifier).catch(() => {});
+}
+
+export async function cancelAllReminders(): Promise<void> {
+  if (!isNotificationsAvailable) return;
+  try {
+    await Notifications.cancelAllScheduledNotificationsAsync();
+  } catch (error) {
+    console.warn("Notifications: Failed to cancel all reminders", error);
+  }
+}
+
+export async function scheduleAllReminders(subscriptions: Subscription[]): Promise<void> {
+  if (!isNotificationsAvailable) return;
+  await cancelAllReminders();
+  for (const sub of subscriptions) {
+    await scheduleReminder(sub);
+  }
+}
+
+export async function getScheduledReminders(): Promise<any[]> {
+  if (!isNotificationsAvailable) return [];
+  try {
+    return await Notifications.getAllScheduledNotificationsAsync();
+  } catch (error) {
+    console.warn("Notifications: Failed to fetch scheduled reminders", error);
+    return [];
+  }
+}

@@ -1,15 +1,3 @@
-/**
- * LogoCircle
- *
- * Circular container purpose-built for subscription brand logos.
- * Supports an image (expo-image), a gradient fallback, an optional
- * border, and an optional shadow. When no image is provided, renders
- * the brand initial.
- *
- * Usage:
- *   <LogoCircle source={{ uri: logoUrl }} size={48} color="#E50914" />
- *   <LogoCircle name="Netflix" size={48} color="#E50914" />
- */
 import React, { memo, useState, useCallback, forwardRef } from "react";
 import { View, type ViewStyle } from "react-native";
 import { Image, type ImageSource } from "expo-image";
@@ -19,7 +7,6 @@ import { colors, shadows, hexToRGBA, typography } from "@/constants";
 import type { GradientStops } from "@/constants/gradients";
 
 type LogoSize = "sm" | "md" | "lg" | "xl";
-
 type FontVariant = keyof typeof typography;
 
 const sizeMap: Record<LogoSize, { size: number; fontSize: FontVariant }> = {
@@ -30,21 +17,13 @@ const sizeMap: Record<LogoSize, { size: number; fontSize: FontVariant }> = {
 };
 
 export interface LogoCircleProps {
-  /** Remote or local image source for the logo. */
   source?: ImageSource | string;
-  /** Brand name — used for the initial fallback. */
   name?: string;
-  /** Brand color — drives the gradient fallback + border tint. */
   color?: string;
-  /** Size preset or explicit px. */
   size?: LogoSize | number;
-  /** Show a ring around the circle. */
   bordered?: boolean;
-  /** Show a drop shadow. */
   shadowed?: boolean;
-  /** Custom gradient stops (overrides the color-derived gradient). */
   gradient?: GradientStops;
-  /** Style override. */
   style?: ViewStyle;
 }
 
@@ -61,16 +40,31 @@ const LogoCircle = forwardRef<View, LogoCircleProps>(function LogoCircle(
   },
   ref
 ) {
-  const [errored, setErrored] = useState(false);
+  const [errorCount, setErrorCount] = useState(0);
 
   const numericSize =
     typeof size === "number" ? size : sizeMap[size].size;
   const fontKey =
     typeof size === "string" ? sizeMap[size].fontSize : "subheadline";
 
-  const handleError = useCallback(() => setErrored(true), []);
+  const handleError = useCallback(() => {
+    setErrorCount((prev) => prev + 1);
+  }, []);
 
-  const showImage = source && !errored;
+  // Determine current image source based on load error count
+  let currentSource: any = null;
+  
+  if (source && errorCount === 0) {
+    currentSource = typeof source === "string" ? { uri: source } : source;
+  } else if (name && errorCount === 1) {
+    // Stage 2 Fallback: Google Favicon API
+    const cleanName = name.toLowerCase().replace(/[^a-z0-9]/g, "");
+    currentSource = {
+      uri: `https://www.google.com/s2/favicons?sz=128&domain=${cleanName}.com`,
+    };
+  }
+
+  const showImage = currentSource !== null;
   const fallbackGradient = gradient ?? [
     color,
     hexToRGBA(color, 0.6),
@@ -85,6 +79,7 @@ const LogoCircle = forwardRef<View, LogoCircleProps>(function LogoCircle(
     overflow: "hidden",
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: color,
     ...(shadowed ? shadows.card.native : {}),
   };
 
@@ -92,7 +87,7 @@ const LogoCircle = forwardRef<View, LogoCircleProps>(function LogoCircle(
     return (
       <View ref={ref} style={[wrapperStyle, style]}>
         <Image
-          source={typeof source === "string" ? { uri: source } : source}
+          source={currentSource}
           style={{ width: numericSize, height: numericSize }}
           onError={handleError}
           contentFit="cover"

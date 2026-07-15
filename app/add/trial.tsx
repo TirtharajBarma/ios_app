@@ -77,14 +77,43 @@ export default function TrialFormScreen() {
   const insets = useSafeAreaInsets();
   const [isPending, startTransition] = useTransition();
   const addSubscription = useSubscriptionStore((state) => state.addSubscription);
+  const updateSubscription = useSubscriptionStore((state) => state.updateSubscription);
+  const subscriptions = useSubscriptionStore((state) => state.subscriptions);
 
-  // Read service params passed from select screen
-  const { name, category, brandColor, website } = useLocalSearchParams<{
+  // Read service params passed from select screen (or edit params from detail screen)
+  const { name, category, brandColor, website, logo, editId } = useLocalSearchParams<{
     name: string;
     category: string;
     brandColor: string;
     website: string;
+    logo: string;
+    editId?: string;
   }>();
+
+  const isEditMode = Boolean(editId);
+  const existingSub = isEditMode ? subscriptions.find((s) => s.id === editId) : null;
+
+  // Map reminder days back to display string
+  function reminderDaysToTime(days: number): string {
+    if (days === 0) return "Same Day";
+    if (days === 1) return "1 Day Before";
+    if (days === 3) return "3 Days Before";
+    if (days === 7) return "7 Days Before";
+    if (days === 30) return "30 Days Before";
+    return "1 Day Before";
+  }
+
+  function capitalizeCycle(cycle: string): string {
+    return cycle.charAt(0).toUpperCase() + cycle.slice(1);
+  }
+
+  function formatCurrencyDisplay(code: string): string {
+    const map: Record<string, string> = {
+      USD: "USD ($)", EUR: "EUR (€)", GBP: "GBP (£)", INR: "INR (₹)",
+      JPY: "JPY (¥)", CAD: "CAD ($)", AUD: "AUD ($)",
+    };
+    return map[code] || "USD ($)";
+  }
 
   // Initialize React Hook Form
   const {
@@ -96,17 +125,17 @@ export default function TrialFormScreen() {
     resolver: zodResolver(trialSubscriptionSchema),
     mode: "onChange",
     defaultValues: {
-      name: name || "",
-      trialStartDate: new Date(),
-      trialEndDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000), // Default to 14-day trial
-      autoRenew: true,
-      price: "",
-      currency: "USD ($)",
-      billingCycle: "Monthly",
-      category: category || "Entertainment",
-      reminder: true,
-      reminderTime: "1 Day Before",
-      notes: "",
+      name: existingSub?.name || name || "",
+      trialStartDate: existingSub?.trialStartDate ? new Date(existingSub.trialStartDate) : new Date(),
+      trialEndDate: existingSub?.trialEndDate ? new Date(existingSub.trialEndDate) : new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+      autoRenew: existingSub ? existingSub.price > 0 : true,
+      price: existingSub ? String(existingSub.price) : "",
+      currency: existingSub ? formatCurrencyDisplay(existingSub.currency) : "USD ($)",
+      billingCycle: existingSub ? capitalizeCycle(existingSub.billingCycle) : "Monthly",
+      category: existingSub?.category ? capitalizeCycle(existingSub.category) : (category || "Entertainment"),
+      reminder: existingSub?.reminderEnabled ?? true,
+      reminderTime: existingSub ? reminderDaysToTime(existingSub.reminderDays) : "1 Day Before",
+      notes: existingSub?.note || "",
     },
   });
 
@@ -118,10 +147,10 @@ export default function TrialFormScreen() {
 
     startTransition(async () => {
       try {
-        await addSubscription({
+        const input = {
           name: data.name,
-          color: brandColor || colors.accent,
-          logoUrl: name || undefined,
+          color: brandColor || existingSub?.color || colors.accent,
+          logoUrl: logo || existingSub?.logoUrl || undefined,
           price: data.autoRenew ? Number(data.price) : 0,
           currency: data.autoRenew ? (data.currency || "USD ($)") : "USD ($)",
           billingCycle: data.autoRenew ? (data.billingCycle?.toLowerCase() as any || "monthly") : "monthly",
@@ -134,12 +163,18 @@ export default function TrialFormScreen() {
           trialStartDate: data.trialStartDate.toISOString(),
           trialEndDate: data.trialEndDate.toISOString(),
           startDate: data.trialStartDate.toISOString(),
-          website: website || undefined,
-        });
+          website: website || existingSub?.website || undefined,
+        };
+
+        if (isEditMode && editId) {
+          await updateSubscription(editId, input);
+        } else {
+          await addSubscription(input);
+        }
         
         router.dismissAll();
       } catch (error) {
-        console.error("Failed to add trial subscription:", error);
+        console.error("Failed to save trial subscription:", error);
       }
     });
   };
@@ -350,7 +385,7 @@ export default function TrialFormScreen() {
             onPress={handleSubmit(onSubmit)}
             style={styles.submitBtn}
           >
-            Start Trial
+            {isEditMode ? "Update Trial" : "Start Trial"}
           </AppButton>
         </Animated.View>
       </ScrollView>

@@ -1,5 +1,6 @@
 import * as SQLite from "expo-sqlite";
 import { runMigrations } from "./migrations";
+import { setDatabaseInstance, getDatabase as getConnectionDb } from "./connection";
 import {
   createSubscription as dbCreateSubscription,
   getAllSubscriptions as dbGetAllSubscriptions,
@@ -10,15 +11,18 @@ import {
 import type { DbSubscription } from "./schema";
 import type { Subscription, NewSubscriptionInput } from "@/types/subscription";
 
-let dbInstance: SQLite.SQLiteDatabase | null = null;
 let initPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
 /**
  * Opens the SQLite database connection, runs migrations, and prepares it for queries.
  */
 export async function initializeDatabase(): Promise<SQLite.SQLiteDatabase> {
-  if (dbInstance) {
-    return dbInstance;
+  // If already initialized, getConnectionDb will return without throwing
+  try {
+    const db = getConnectionDb();
+    if (db) return db;
+  } catch (e) {
+    // Expected if not initialized yet
   }
 
   if (initPromise) {
@@ -30,13 +34,15 @@ export async function initializeDatabase(): Promise<SQLite.SQLiteDatabase> {
       console.log("Database: Opening connection to 'subscriptions.db'...");
       const db = await SQLite.openDatabaseAsync("subscriptions.db");
       
+      // Cache the db handle first so migrations and queries can access it
+      setDatabaseInstance(db);
+
       // Run schema migrations
       await runMigrations(db);
       
       // Enable foreign keys
       await db.execAsync("PRAGMA foreign_keys = ON;");
       
-      dbInstance = db;
       console.log("Database: Successfully initialized.");
       return db;
     } catch (error) {
@@ -52,13 +58,9 @@ export async function initializeDatabase(): Promise<SQLite.SQLiteDatabase> {
 
 /**
  * Gets the current active database connection.
- * Throws an error if the database has not been initialized yet.
  */
 export function getDatabase(): SQLite.SQLiteDatabase {
-  if (!dbInstance) {
-    throw new Error("Database has not been initialized. Call initializeDatabase() first.");
-  }
-  return dbInstance;
+  return getConnectionDb();
 }
 
 // ─── Zustand Compatibility Layer ─────────────────────────────────────
@@ -74,6 +76,28 @@ export async function initDatabase(): Promise<void> {
  * Mapper: Database Row -> Domain Subscription model (Zustand store format)
  */
 function mapDbToSubscription(dbSub: DbSubscription): Subscription {
+  const rawCycle = dbSub.billingCycle?.toLowerCase() || "monthly";
+  let parsedCycle: any = rawCycle;
+  let customMonths: number | undefined = undefined;
+
+  if (rawCycle.startsWith("custom:")) {
+    parsedCycle = "custom";
+    const parts = rawCycle.split(":");
+    const val = Number(parts[1]) || 1;
+    const unit = parts[2] || "months";
+    if (unit === "days") {
+      customMonths = val / 30;
+    } else if (unit === "weeks") {
+      customMonths = (val * 7) / 30;
+    } else if (unit === "months") {
+      customMonths = val;
+    } else if (unit === "years") {
+      customMonths = val * 12;
+    }
+  } else if (rawCycle === "custom") {
+    customMonths = 1;
+  }
+
   return {
     id: dbSub.id,
     name: dbSub.name,
@@ -81,8 +105,9 @@ function mapDbToSubscription(dbSub: DbSubscription): Subscription {
     logoUrl: dbSub.logo || undefined,
     price: dbSub.price || 0,
     currency: dbSub.currency || "USD",
-    billingCycle: (dbSub.billingCycle?.toLowerCase() || "monthly") as any,
-    customIntervalMonths: dbSub.billingCycle?.toLowerCase() === "custom" ? 1 : undefined,
+    billingCycle: parsedCycle,
+    customIntervalMonths: customMonths,
+    rawBillingCycle: dbSub.billingCycle || undefined,
     nextBillingDate: dbSub.isTrial === 1 ? (dbSub.trialEndDate || "") : (dbSub.renewDate || dbSub.trialEndDate || ""),
     category: (dbSub.category?.toLowerCase() || "other") as any,
     reminderEnabled: dbSub.reminderEnabled === 1,

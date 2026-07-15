@@ -14,25 +14,26 @@ export default function SelectScreen() {
   const insets = useSafeAreaInsets();
   
   // Read service params passed from search screen
-  const { id, name, category, brandColor, website } = useLocalSearchParams<{
+  const { id, name, category, brandColor, website, logo } = useLocalSearchParams<{
     id: string;
     name: string;
     category: string;
     brandColor: string;
     website: string;
+    logo: string;
   }>();
 
   const handleSelectPaid = () => {
     router.push({
       pathname: "/add/paid",
-      params: { id, name, category, brandColor, website },
+      params: { id, name, category, brandColor, website, logo },
     });
   };
 
   const handleSelectTrial = () => {
     router.push({
       pathname: "/add/trial",
-      params: { id, name, category, brandColor, website },
+      params: { id, name, category, brandColor, website, logo },
     });
   };
 

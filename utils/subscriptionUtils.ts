@@ -1,5 +1,5 @@
 import { parseISO, isSameMonth } from "date-fns";
-import type { Subscription } from "@/assets/data/mockSubscriptions";
+import type { Subscription } from "@/types/subscription";
 
 /**
  * Calculates the monthly average across all subscriptions.
@@ -24,7 +24,7 @@ export function calculateDueThisMonth(
 ): number {
   return subscriptions.reduce((acc, sub) => {
     const cost = sub.isTrial ? 0 : sub.price;
-    const renewalDate = parseISO(sub.nextRenewal);
+    const renewalDate = parseISO(sub.nextBillingDate);
     if (isSameMonth(renewalDate, referenceDate)) {
       return acc + cost;
     }

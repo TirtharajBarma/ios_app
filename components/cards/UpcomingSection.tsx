@@ -3,7 +3,7 @@ import { View, ScrollView, type StyleProp, type ViewStyle } from "react-native";
 import { parseISO, differenceInDays, isSameDay } from "date-fns";
 import { Card, AppText, LogoCircle, SectionHeader } from "@/components/ui";
 import { colors, spacing, radius, hexToRGBA } from "@/constants";
-import type { Subscription } from "@/assets/data/mockSubscriptions";
+import type { Subscription } from "@/types/subscription";
 
 export interface UpcomingSectionProps {
   subscriptions: Subscription[];
@@ -35,12 +35,12 @@ const UpcomingCard = memo(function UpcomingCard({
   subscription: Subscription;
   onPress?: () => void;
 }) {
-  const { name, price, currency, nextRenewal, themeColor } = subscription;
-  const daysText = getRelativeDays(nextRenewal);
+  const { name, price, nextBillingDate, color } = subscription;
+  const daysText = getRelativeDays(nextBillingDate);
   
   // Custom transparent-accent border + background look
-  const customBg = hexToRGBA(themeColor, 0.06);
-  const customBorder = hexToRGBA(themeColor, 0.2);
+  const customBg = hexToRGBA(color, 0.06);
+  const customBorder = hexToRGBA(color, 0.2);
 
   return (
     <Card
@@ -68,12 +68,12 @@ const UpcomingCard = memo(function UpcomingCard({
         >
           <LogoCircle
             name={name}
-            color={themeColor}
+            color={color}
             size="sm"
             bordered
           />
           <AppText variant="footnote" weight="700" color={colors.white}>
-            {currency}{price.toFixed(0)}
+            ${price.toFixed(0)}
           </AppText>
         </View>
 
@@ -106,7 +106,7 @@ function UpcomingSection({
 }: UpcomingSectionProps) {
   // Sort by nearest renewal date first and take top 5
   const upcomingSubscriptions = [...subscriptions]
-    .sort((a, b) => parseISO(a.nextRenewal).getTime() - parseISO(b.nextRenewal).getTime())
+    .sort((a, b) => parseISO(a.nextBillingDate).getTime() - parseISO(b.nextBillingDate).getTime())
     .slice(0, 5);
 
   if (upcomingSubscriptions.length === 0) return null;
