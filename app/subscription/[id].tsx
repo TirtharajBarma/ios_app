@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   Switch,
   Alert,
-  Platform,
 } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -265,13 +264,16 @@ export default function SubscriptionDetailScreen() {
                 Payment reminder
               </AppText>
             </View>
-             <Switch
-              value={reminderEnabled}
-              onValueChange={handleToggleReminder}
-              trackColor={{ false: "rgba(255, 255, 255, 0.1)", true: colors.accent }}
-              thumbColor={colors.white}
-              style={Platform.OS === "ios" ? { marginRight: -2 } : undefined}
-            />
+            <View style={styles.switchSlot}>
+              <Switch
+                value={reminderEnabled}
+                onValueChange={handleToggleReminder}
+                trackColor={{ false: colors.border, true: colors.accent }}
+                thumbColor={colors.white}
+                ios_backgroundColor={colors.border}
+                style={styles.switchAlign}
+              />
+            </View>
           </View>
 
           {/* Row 4: Notes */}
@@ -402,10 +404,20 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing[16],
     height: 56,
   },
+  switchAlign: {
+    alignSelf: "center",
+  },
+  switchSlot: {
+    width: 52,
+    height: 32,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   rowLeft: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing[12],
+    flexShrink: 0,
   },
   iconWrapper: {
     width: 32,
@@ -420,6 +432,9 @@ const styles = StyleSheet.create({
   },
   rowValue: {
     fontSize: 14,
+    flex: 1,
+    marginLeft: spacing[12],
+    textAlign: "right",
   },
   cancelBtn: {
     borderWidth: 1.5,

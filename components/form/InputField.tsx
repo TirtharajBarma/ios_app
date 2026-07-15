@@ -84,8 +84,9 @@ const styles = StyleSheet.create({
   inputMultiline: {
     width: "100%",
     textAlign: "left",
-    minHeight: 64,
-    paddingTop: 0,
+    textAlignVertical: "top",
+    minHeight: 120,
+    paddingTop: spacing[8],
   },
   errorText: {
     marginTop: spacing[4],

@@ -1,4 +1,4 @@
-import React, { useState, memo } from "react";
+import React, { useState, useCallback, memo } from "react";
 import {
   View,
   StyleSheet,
@@ -6,13 +6,23 @@ import {
   Modal,
   FlatList,
   SafeAreaView,
-  TouchableWithoutFeedback,
+  Dimensions,
 } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  runOnJS,
+} from "react-native-reanimated";
 import { BlurView } from "expo-blur";
 import { ChevronRight, Check } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { AppText } from "@/components/ui";
 import { colors, spacing, radius } from "@/constants";
+
+const { height: SCREEN_HEIGHT } = Dimensions.get("window");
+const DISMISS_THRESHOLD = 120;
 
 export interface SelectorFieldProps {
   label: string;
@@ -23,17 +33,51 @@ export interface SelectorFieldProps {
 
 function SelectorField({ label, value, options, onSelect }: SelectorFieldProps) {
   const [modalVisible, setModalVisible] = useState(false);
+  const translateY = useSharedValue(0);
 
   const handleOpen = () => {
     Haptics.selectionAsync();
+    translateY.value = 0;
     setModalVisible(true);
   };
+
+  const handleDismiss = useCallback(() => {
+    setModalVisible(false);
+    translateY.value = 0;
+  }, [translateY]);
 
   const handleSelect = (option: string) => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     onSelect(option);
     setModalVisible(false);
+    translateY.value = 0;
   };
+
+  const panGesture = Gesture.Pan()
+    .activeOffsetY(10)
+    .onUpdate((e) => {
+      // Only allow downward swipe
+      if (e.translationY > 0) {
+        translateY.value = e.translationY;
+      }
+    })
+    .onEnd((e) => {
+      if (e.translationY > DISMISS_THRESHOLD || e.velocityY > 800) {
+        translateY.value = withSpring(SCREEN_HEIGHT, { damping: 30, stiffness: 300 }, () => {
+          runOnJS(handleDismiss)();
+        });
+      } else {
+        translateY.value = withSpring(0, { damping: 25, stiffness: 300 });
+      }
+    });
+
+  const sheetAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+  }));
+
+  const backdropOpacity = useAnimatedStyle(() => ({
+    opacity: 1 - translateY.value / (SCREEN_HEIGHT * 0.6),
+  }));
 
   return (
     <>
@@ -54,61 +98,66 @@ function SelectorField({ label, value, options, onSelect }: SelectorFieldProps) 
       <Modal
         visible={modalVisible}
         transparent
-        animationType="slide"
-        onRequestClose={() => setModalVisible(false)}
+        statusBarTranslucent
+        onRequestClose={handleDismiss}
       >
-        {/* Transparent tap-to-dismiss backing */}
-        <TouchableWithoutFeedback onPress={() => setModalVisible(false)}>
-          <View style={styles.modalBackdrop}>
-            <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
-            <View style={styles.modalBackdropTap} />
-          </View>
-        </TouchableWithoutFeedback>
+        <View style={styles.modalRoot}>
+          {/* Animated backdrop */}
+          <Animated.View style={[styles.modalBackdrop, backdropOpacity]}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={handleDismiss}>
+              <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
+            </Pressable>
+          </Animated.View>
 
-        {/* Modal content bottom sheet container */}
-        <View style={styles.sheetContainer}>
-          <SafeAreaView style={styles.sheetContent}>
-            {/* Header indicator */}
-            <View style={styles.headerIndicator} />
-            
-            {/* Title */}
-            <View style={styles.headerWrapper}>
-              <AppText variant="headline" weight="700" color={colors.white}>
-                Select {label}
-              </AppText>
-            </View>
+          {/* Draggable sheet */}
+          <GestureDetector gesture={panGesture}>
+            <Animated.View style={[styles.sheetContainer, sheetAnimatedStyle]}>
+              <SafeAreaView style={styles.sheetContent}>
+                {/* Drag handle indicator */}
+                <View style={styles.dragHandleWrap}>
+                  <View style={styles.headerIndicator} />
+                </View>
 
-            {/* List of options */}
-            <FlatList
-              data={options}
-              keyExtractor={(item) => item}
-              showsVerticalScrollIndicator={false}
-              contentContainerStyle={styles.listContent}
-              renderItem={({ item }) => {
-                const isSelected = item === value;
-                return (
-                  <Pressable
-                    onPress={() => handleSelect(item)}
-                    style={({ pressed }) => [
-                      styles.optionRow,
-                      pressed && { backgroundColor: "rgba(255,255,255,0.05)" },
-                    ]}
-                  >
-                    <AppText
-                      variant="body"
-                      weight={isSelected ? "700" : "500"}
-                      color={isSelected ? colors.accent : colors.white}
-                    >
-                      {item}
-                    </AppText>
-                    {isSelected && (
-                      <Check size={18} color={colors.accent} strokeWidth={2.5} />
-                    )}
-                  </Pressable>
-                );
-              }}
-            />
-          </SafeAreaView>
+                {/* Title */}
+                <View style={styles.headerWrapper}>
+                  <AppText variant="headline" weight="700" color={colors.white}>
+                    Select {label}
+                  </AppText>
+                </View>
+
+                {/* Options list */}
+                <FlatList
+                  data={options}
+                  keyExtractor={(item) => item}
+                  showsVerticalScrollIndicator={false}
+                  contentContainerStyle={styles.listContent}
+                  renderItem={({ item }) => {
+                    const isSelected = item === value;
+                    return (
+                      <Pressable
+                        onPress={() => handleSelect(item)}
+                        style={({ pressed }) => [
+                          styles.optionRow,
+                          pressed && { backgroundColor: "rgba(255,255,255,0.05)" },
+                        ]}
+                      >
+                        <AppText
+                          variant="body"
+                          weight={isSelected ? "700" : "500"}
+                          color={isSelected ? colors.accent : colors.white}
+                        >
+                          {item}
+                        </AppText>
+                        {isSelected && (
+                          <Check size={18} color={colors.accent} strokeWidth={2.5} />
+                        )}
+                      </Pressable>
+                    );
+                  }}
+                />
+              </SafeAreaView>
+            </Animated.View>
+          </GestureDetector>
         </View>
       </Modal>
     </>
@@ -126,15 +175,16 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
   },
-  modalBackdrop: {
+  modalRoot: {
     flex: 1,
+    justifyContent: "flex-end",
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(0, 0, 0, 0.4)",
   },
-  modalBackdropTap: {
-    flex: 1,
-  },
   sheetContainer: {
-    backgroundColor: "#1C1C1E", // iOS dark sheet background
+    backgroundColor: "#1C1C1E",
     borderTopLeftRadius: radius[24],
     borderTopRightRadius: radius[24],
     maxHeight: "50%",
@@ -145,13 +195,16 @@ const styles = StyleSheet.create({
   sheetContent: {
     flex: 1,
   },
+  dragHandleWrap: {
+    alignItems: "center",
+    paddingTop: spacing[8],
+    paddingBottom: spacing[4],
+  },
   headerIndicator: {
     width: 36,
     height: 5,
     borderRadius: 2.5,
     backgroundColor: "rgba(255,255,255,0.2)",
-    alignSelf: "center",
-    marginTop: spacing[8],
   },
   headerWrapper: {
     paddingVertical: spacing[16],
