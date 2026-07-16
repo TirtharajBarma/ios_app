@@ -4,7 +4,6 @@ import {
   View,
   ScrollView,
   TouchableOpacity,
-  Switch,
   Alert,
 } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -22,7 +21,7 @@ import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 
 import { colors, spacing } from "@/constants";
-import { AppText, LogoCircle } from "@/components/ui";
+import { AppText, LogoCircle, Toggle, PressableScale } from "@/components/ui";
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
 
 export default function SubscriptionDetailScreen() {
@@ -31,14 +30,14 @@ export default function SubscriptionDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
 
   // Fetch subscription from Zustand store
-  const { subscriptions, removeSubscription, updateSubscription } = useSubscriptionStore();
+  const { subscriptions, isLoaded, removeSubscription, updateSubscription } = useSubscriptionStore();
   const subscription = subscriptions.find((s) => s.id === id);
 
-  if (!subscription) {
+  if (!isLoaded || !subscription) {
     return (
       <View style={styles.errorContainer}>
         <AppText variant="headline" color={colors.textSecondary}>
-          Subscription not found
+          {!isLoaded ? "Loading..." : "Subscription not found"}
         </AppText>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <AppText color={colors.white} weight="700">Go Back</AppText>
@@ -63,6 +62,7 @@ export default function SubscriptionDetailScreen() {
 
   const formatBillingCycleLabel = (cycle: string) => {
     if (!cycle) return "Monthly";
+    if (cycle === "custom") return "Custom";
     if (cycle.startsWith("custom:")) {
       const parts = cycle.split(":");
       const val = parts[1] || "1";
@@ -128,18 +128,29 @@ export default function SubscriptionDetailScreen() {
     }
   };
 
-  const parseDate = (d: any) => {
+  const parseDate = (d: string | Date | undefined | null): Date => {
     if (!d) return new Date();
     if (d instanceof Date) return d;
     try {
-      return parseISO(d);
+      const parsed = parseISO(d);
+      if (isNaN(parsed.getTime())) return new Date();
+      return parsed;
     } catch {
-      return new Date(d);
+      const fallback = new Date(d);
+      return isNaN(fallback.getTime()) ? new Date() : fallback;
     }
   };
 
-  const formattedStartDate = format(parseDate(subscription.startDate || subscription.createdAt), "MMM d, yyyy");
-  const formattedNextDate = format(parseDate(nextBillingDate), "MMM d, yyyy");
+  const safeFormat = (d: Date, fmt: string): string => {
+    try {
+      return format(d, fmt);
+    } catch {
+      return "Unknown";
+    }
+  };
+
+  const formattedStartDate = safeFormat(parseDate(subscription.startDate || subscription.createdAt), "MMM d, yyyy");
+  const formattedNextDate = safeFormat(parseDate(nextBillingDate), "MMM d, yyyy");
 
   const getCurrencySymbol = (code: string) => {
     if (code === "INR") return "₹";
@@ -159,23 +170,25 @@ export default function SubscriptionDetailScreen() {
 
       {/* Navbar row */}
       <View style={[styles.navbar, { paddingTop: insets.top + spacing[12] }]}>
-        <TouchableOpacity onPress={handleBack} style={styles.navCircleBtn}>
+        <PressableScale onPress={handleBack} scale={0.88} style={styles.navCircleBtn}>
           <ChevronLeft size={22} color={colors.white} strokeWidth={2.5} />
-        </TouchableOpacity>
+        </PressableScale>
         <View style={styles.navbarRight}>
-          <TouchableOpacity onPress={handleEdit} style={styles.navEditBtn}>
+          <PressableScale onPress={handleEdit} scale={0.92} style={styles.navEditBtn}>
             <AppText weight="700" color={colors.white} style={styles.navEditBtnText}>
               Edit
             </AppText>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleDelete} style={styles.navCircleBtn}>
+          </PressableScale>
+          <PressableScale onPress={handleDelete} scale={0.88} style={styles.navCircleBtn}>
             <Trash2 size={18} color={colors.white} />
-          </TouchableOpacity>
+          </PressableScale>
         </View>
       </View>
 
       <ScrollView
         showsVerticalScrollIndicator={false}
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={[
           styles.scrollContent,
           { paddingBottom: insets.bottom + spacing[40] },
@@ -189,12 +202,16 @@ export default function SubscriptionDetailScreen() {
             color="#FFFFFF"
             size={120}
             bordered
+            website={subscription.website}
           />
           <AppText weight="800" color={colors.white} style={styles.brandName}>
             {name}
           </AppText>
           <AppText style={styles.brandStatus}>
-            {isTrial ? `Trial starts on ${formattedStartDate}` : `Starts on ${formattedStartDate}`}
+            {isTrial
+              ? `Trial ${formattedStartDate} → ${subscription.trialEndDate ? safeFormat(parseDate(subscription.trialEndDate), "MMM d, yyyy") : "Ongoing"}`
+              : `Starts on ${formattedStartDate}`
+            }
           </AppText>
         </View>
 
@@ -250,7 +267,7 @@ export default function SubscriptionDetailScreen() {
               </AppText>
             </View>
             <AppText weight="600" color={colors.white} style={styles.rowValue}>
-              {category.charAt(0).toUpperCase() + category.slice(1)}
+              {(category || "Other").charAt(0).toUpperCase() + (category || "Other").slice(1)}
             </AppText>
           </View>
 
@@ -265,13 +282,9 @@ export default function SubscriptionDetailScreen() {
               </AppText>
             </View>
             <View style={styles.switchSlot}>
-              <Switch
+              <Toggle
                 value={reminderEnabled}
                 onValueChange={handleToggleReminder}
-                trackColor={{ false: colors.border, true: colors.accent }}
-                thumbColor={colors.white}
-                ios_backgroundColor={colors.border}
-                style={styles.switchAlign}
               />
             </View>
           </View>
@@ -293,11 +306,18 @@ export default function SubscriptionDetailScreen() {
         </View>
 
         {/* Floating Cancel Scheduled Start / Delete Button */}
-        <TouchableOpacity onPress={handleDelete} style={styles.cancelBtn}>
+        <PressableScale
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+            handleDelete();
+          }}
+          scale={0.96}
+          style={styles.cancelBtn}
+        >
           <AppText weight="700" color="#FF3B30" style={styles.cancelBtnText}>
             {isTrial ? "Cancel scheduled start" : "Delete Subscription"}
           </AppText>
-        </TouchableOpacity>
+        </PressableScale>
       </ScrollView>
     </View>
   );
@@ -370,6 +390,11 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing[16],
     marginTop: spacing[24],
     alignItems: "center",
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 14,
+    elevation: 8,
   },
   statColumn: {
     flex: 1,
@@ -403,6 +428,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     marginHorizontal: spacing[16],
     height: 56,
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
   },
   switchAlign: {
     alignSelf: "center",

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import {
   View,
   StyleSheet,
@@ -6,11 +6,11 @@ import {
   TouchableOpacity,
   TextInput,
   Alert,
-  Switch,
   Modal,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
+  Animated,
   type ScrollView as RNScrollView,
 } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -20,9 +20,10 @@ import * as Haptics from "expo-haptics";
 import { format, addMonths, addYears } from "date-fns";
 import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
+import * as ImagePicker from "expo-image-picker";
 
 import { colors, spacing, hexToRGBA } from "@/constants";
-import { AppText, LogoCircle, SwipeDownSheet } from "@/components/ui";
+import { AppText, LogoCircle, SwipeDownSheet, Toggle, PressableScale } from "@/components/ui";
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
 
 const PRESET_COLORS = [
@@ -39,6 +40,7 @@ const PRESET_COLORS = [
 ];
 
 const WEEKDAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 const startOfCalendarMonth = (date: Date) => new Date(date.getFullYear(), date.getMonth(), 1);
 
@@ -88,8 +90,46 @@ export default function UnifiedFormScreen() {
   });
 
   const [showCustomCycleModal, setShowCustomCycleModal] = useState(false);
+  const [showNameEditModal, setShowNameEditModal] = useState(false);
+  const [nameEditValue, setNameEditValue] = useState("");
+  const [showColorEditModal, setShowColorEditModal] = useState(false);
+  const [colorEditValue, setColorEditValue] = useState("");
   const [activeDatePicker, setActiveDatePicker] = useState<"startDate" | "trialEnd" | null>(null);
+  const [calendarMode, setCalendarMode] = useState<"days" | "months" | "years">("days");
+
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const animBottom = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
+      (e) => {
+        setKeyboardVisible(true);
+        Animated.timing(animBottom, {
+          toValue: e.endCoordinates.height + 10,
+          duration: e.duration || 250,
+          useNativeDriver: false,
+        }).start();
+      }
+    );
+    const hideSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
+      () => {
+        setKeyboardVisible(false);
+        animBottom.setValue(0);
+      }
+    );
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  const getYearRangeStart = (date: Date) => {
+    return date.getFullYear() - 5;
+  };
   const [calendarMonth, setCalendarMonth] = useState(() => startOfCalendarMonth(startDate));
+  const [calendarSnapshot, setCalendarSnapshot] = useState<{ startDate: Date; trialEndDate: Date } | null>(null);
   const [customCycleVal, setCustomCycleVal] = useState(() => {
     if (existingSub?.rawBillingCycle?.startsWith("custom:")) {
       return existingSub.rawBillingCycle.split(":")[1] || "1";
@@ -105,6 +145,7 @@ export default function UnifiedFormScreen() {
 
   const formatBillingCycleLabel = (cycle: string) => {
     if (!cycle) return "Monthly";
+    if (cycle === "custom") return "Custom";
     if (cycle.startsWith("custom:")) {
       const parts = cycle.split(":");
       const val = parts[1] || "1";
@@ -125,18 +166,8 @@ export default function UnifiedFormScreen() {
   const notesInputRef = useRef<TextInput>(null);
 
   // When the notes field is focused, lift it above the on-screen keyboard.
-  // `KeyboardAvoidingView` alone can't guarantee the last item scrolls into
-  // view, so we nudge the scroll offset on keyboard show.
-  React.useEffect(() => {
-    if (Platform.OS !== "ios") return;
-    const showListener = Keyboard.addListener("keyboardWillShow", () => {
-      // Defer until the avoiding view has measured the new insets.
-      requestAnimationFrame(() => {
-        scrollRef.current?.scrollToEnd({ animated: true });
-      });
-    });
-    return () => showListener.remove();
-  }, []);
+  // Only scroll when the notes field specifically is focused, not on every keyboard show.
+  // (The Notes field's own onFocus handler handles the scroll.)
 
   const calendarDays = useMemo(() => {
     const year = calendarMonth.getFullYear();
@@ -153,6 +184,8 @@ export default function UnifiedFormScreen() {
   const openDatePicker = (picker: "startDate" | "trialEnd") => {
     const date = picker === "trialEnd" ? trialEndDate : startDate;
     setCalendarMonth(startOfCalendarMonth(date));
+    setCalendarSnapshot({ startDate: new Date(startDate), trialEndDate: new Date(trialEndDate) });
+    setCalendarMode("days");
     setActiveDatePicker(picker);
   };
 
@@ -173,16 +206,8 @@ export default function UnifiedFormScreen() {
 
   const handleEditName = () => {
     Haptics.selectionAsync();
-    Alert.prompt(
-      "Customize Name",
-      "Enter custom name for this subscription:",
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Save", onPress: (val?: string) => val && setCustomName(val.trim()) },
-      ],
-      "plain-text",
-      customName
-    );
+    setNameEditValue(customName);
+    setShowNameEditModal(true);
   };
 
   const handleCurrencyPress = () => {
@@ -215,28 +240,40 @@ export default function UnifiedFormScreen() {
     setActivePicker("reminder");
   };
 
+  const [isSaving, setIsSaving] = useState(false);
+
   const handleSave = async () => {
     Keyboard.dismiss();
+    if (isSaving) return;
     if (!customName.trim()) {
       Alert.alert("Error", "Please enter subscription name");
       return;
     }
 
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setIsSaving(true);
 
     // Compute nextBillingDate
-    let nextDate = startDate;
+    let nextDate: Date | null = startDate;
     if (isTrial) {
       nextDate = trialEndDate;
+    } else if (!renewing) {
+      nextDate = null;
     } else {
-      if (billingCycle === "monthly") {
+      const cycle = billingCycle;
+      if (cycle === "monthly") {
         nextDate = addMonths(startDate, 1);
-      } else if (billingCycle === "yearly") {
+      } else if (cycle === "yearly") {
         nextDate = addYears(startDate, 1);
-      } else if (billingCycle === "weekly") {
+      } else if (cycle === "quarterly") {
+        nextDate = addMonths(startDate, 3);
+      } else if (cycle === "semi-yearly") {
+        nextDate = addMonths(startDate, 6);
+      } else if (cycle === "weekly") {
         nextDate = new Date(startDate.getTime() + 7 * 24 * 60 * 60 * 1000);
-      } else if (billingCycle.startsWith("custom:")) {
-        const parts = billingCycle.split(":");
+      } else if (cycle === "bi-weekly") {
+        nextDate = new Date(startDate.getTime() + 14 * 24 * 60 * 60 * 1000);
+      } else if (cycle.startsWith("custom:")) {
+        const parts = cycle.split(":");
         const val = Number(parts[1]) || 1;
         const unit = parts[2] || "months";
         if (unit === "days") {
@@ -249,18 +286,24 @@ export default function UnifiedFormScreen() {
           nextDate = addYears(startDate, val);
         }
       } else {
-        nextDate = new Date(startDate.getTime() + 7 * 24 * 60 * 60 * 1000);
+        nextDate = addMonths(startDate, 1);
       }
     }
+
+    const normalizedBillingCycle = billingCycle.startsWith("custom:")
+      ? "custom"
+      : billingCycle.toLowerCase();
 
     const input = {
       name: customName,
       color: selectedColor,
       logoUrl: logoStyle === "initial" ? undefined : (customLogoUrl || undefined),
       price: isTrial ? (autoRenew ? Number(amount || 0) : 0) : Number(amount || 0),
-      currency: currency,
-      billingCycle: billingCycle.toLowerCase() as any,
-      nextBillingDate: nextDate.toISOString(),
+      currency: currency.slice(0, 3).toUpperCase(),
+      billingCycle: normalizedBillingCycle as any,
+      rawBillingCycle: billingCycle,
+      customIntervalMonths: billingCycle.startsWith("custom:") ? (Number(customCycleVal) || 1) : undefined,
+      nextBillingDate: nextDate ? nextDate.toISOString() : startDate.toISOString(),
       category: category.toLowerCase() as any,
       reminderEnabled: reminderEnabled,
       reminderDays: reminderDays,
@@ -279,9 +322,13 @@ export default function UnifiedFormScreen() {
       } else {
         await addSubscription(input);
       }
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.dismissAll();
     } catch (e) {
       console.error("Save subscription failed:", e);
+      Alert.alert("Save Failed", "Could not save subscription. Please try again.");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -291,6 +338,8 @@ export default function UnifiedFormScreen() {
     if (code === "USD") return "$";
     if (code === "EUR") return "€";
     if (code === "GBP") return "£";
+    if (code === "JPY") return "¥";
+    if (code === "CAD" || code === "AUD") return "$";
     return "$";
   };
 
@@ -302,16 +351,26 @@ export default function UnifiedFormScreen() {
 
   // Compute renew preview message
   const nextRenewalLabelText = useMemo(() => {
+    if (isTrial) {
+      return `Trial starts on ${format(startDate, "MMM d")}. Ends on ${format(trialEndDate, "MMM d, yyyy")}.`;
+    }
     const startStr = format(startDate, "MMM d");
     let nextDate = startDate;
-    if (billingCycle === "monthly") {
+    const cycle = billingCycle;
+    if (cycle === "monthly") {
       nextDate = addMonths(startDate, 1);
-    } else if (billingCycle === "yearly") {
+    } else if (cycle === "yearly") {
       nextDate = addYears(startDate, 1);
-    } else if (billingCycle === "weekly") {
+    } else if (cycle === "quarterly") {
+      nextDate = addMonths(startDate, 3);
+    } else if (cycle === "semi-yearly") {
+      nextDate = addMonths(startDate, 6);
+    } else if (cycle === "weekly") {
       nextDate = new Date(startDate.getTime() + 7 * 24 * 60 * 60 * 1000);
-    } else if (billingCycle.startsWith("custom:")) {
-      const parts = billingCycle.split(":");
+    } else if (cycle === "bi-weekly") {
+      nextDate = new Date(startDate.getTime() + 14 * 24 * 60 * 60 * 1000);
+    } else if (cycle.startsWith("custom:")) {
+      const parts = cycle.split(":");
       const val = Number(parts[1]) || 1;
       const unit = parts[2] || "months";
       if (unit === "days") {
@@ -324,19 +383,18 @@ export default function UnifiedFormScreen() {
         nextDate = addYears(startDate, val);
       }
     } else {
-      nextDate = new Date(startDate.getTime() + 7 * 24 * 60 * 60 * 1000);
+      nextDate = addMonths(startDate, 1);
     }
     const endStr = format(nextDate, "MMM d, yyyy");
+    if (!renewing) {
+      return `Starts on ${startStr}. One-time payment of ${getCurrencySymbol(currency)}${Number(amount || 0).toFixed(2)}.`;
+    }
     return `Starts on ${startStr}. Renews on ${endStr} at ${getCurrencySymbol(currency)}${Number(amount || 0).toFixed(2)}.`;
-  }, [startDate, billingCycle, currency, amount]);
+  }, [startDate, billingCycle, currency, amount, isTrial, trialEndDate, renewing]);
 
   return (
     <View
       style={styles.container}
-      onStartShouldSetResponder={() => {
-        Keyboard.dismiss();
-        return false;
-      }}
     >
       {/* Large soft brand-color wash behind the hero — bleeds into the screen */}
       <LinearGradient
@@ -348,22 +406,23 @@ export default function UnifiedFormScreen() {
 
       {/* Navbar Title row */}
       <View style={[styles.navbar, { paddingTop: insets.top + spacing[8] }]}>
-        <TouchableOpacity onPress={handleBack} style={styles.navCircleBtn}>
+        <PressableScale onPress={handleBack} scale={0.9} style={styles.navCircleBtn}>
           <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
-        </TouchableOpacity>
+        </PressableScale>
         <AppText variant="title3" weight="700" color={colors.white}>
           {isEditMode ? "Edit" : "New"}
         </AppText>
-        <TouchableOpacity onPress={handleSave} style={styles.addBtnContainer}>
+        <PressableScale onPress={handleSave} scale={0.92} style={styles.addBtnContainer}>
           <AppText variant="subheadline" weight="700" color={colors.black}>
             {isEditMode ? "Save" : "Add"}
           </AppText>
-        </TouchableOpacity>
+        </PressableScale>
       </View>
 
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={{ flex: 1 }}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 44 : 0}
       >
         <ScrollView
           ref={scrollRef}
@@ -375,16 +434,17 @@ export default function UnifiedFormScreen() {
         {/* Service Hero Card — tall poster */}
         <View style={styles.heroWrap}>
           <View style={[styles.heroCard, { backgroundColor: selectedColor }]}>
-            <TouchableOpacity
+            <PressableScale
               onPress={() => {
                 Keyboard.dismiss();
                 Haptics.selectionAsync();
                 setCustomizeVisible(true);
               }}
+              scale={0.85}
               style={styles.pencilCircle}
             >
               <Pencil size={16} color={colors.white} />
-            </TouchableOpacity>
+            </PressableScale>
 
             <LogoCircle
               source={logoStyle === "initial" ? undefined : (customLogoUrl || undefined)}
@@ -392,26 +452,28 @@ export default function UnifiedFormScreen() {
               color={logoStyle === "badge" ? "#FFFFFF" : selectedColor}
               size={96}
               bordered={logoStyle === "default"}
+              website={website}
             />
-            <TouchableOpacity onPress={handleEditName} style={styles.heroNamePill}>
+            <PressableScale onPress={handleEditName} scale={0.96} style={styles.heroNamePill}>
               <AppText variant="title3" weight="700" color={colors.white}>
                 {customName}
               </AppText>
-            </TouchableOpacity>
+            </PressableScale>
             <AppText variant="footnote" style={styles.heroStatus}>
-              {isTrial ? "Free trial subscription" : "Starts today"}
+              {isTrial ? "Free trial subscription" : `Starts ${format(startDate, "MMM d")}`}
             </AppText>
           </View>
         </View>
 
         {/* Paid / Free Trial Switch Segment */}
         <View style={styles.segmentContainer}>
-          <TouchableOpacity
-            style={[styles.segmentTab, !isTrial && styles.segmentTabActive]}
+          <PressableScale
             onPress={() => {
               Haptics.selectionAsync();
               setIsTrial(false);
             }}
+            scale={0.96}
+            style={[styles.segmentTab, !isTrial && styles.segmentTabActive]}
           >
             <AppText
               variant="subheadline"
@@ -420,13 +482,14 @@ export default function UnifiedFormScreen() {
             >
               Paid
             </AppText>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.segmentTab, isTrial && styles.segmentTabActive]}
+          </PressableScale>
+          <PressableScale
             onPress={() => {
               Haptics.selectionAsync();
               setIsTrial(true);
             }}
+            scale={0.96}
+            style={[styles.segmentTab, isTrial && styles.segmentTabActive]}
           >
             <AppText
               variant="subheadline"
@@ -435,7 +498,7 @@ export default function UnifiedFormScreen() {
             >
               Free trial
             </AppText>
-          </TouchableOpacity>
+          </PressableScale>
         </View>
 
         {/* Dynamic fields */}
@@ -453,13 +516,18 @@ export default function UnifiedFormScreen() {
                 keyboardType="numeric"
                 value={amount}
                 onChangeText={setAmount}
+                onFocus={() => {
+                  setTimeout(() => {
+                    scrollRef.current?.scrollTo({ y: 130, animated: true });
+                  }, 100);
+                }}
               />
-              <TouchableOpacity onPress={handleCurrencyPress} style={styles.selectorPill}>
+              <PressableScale onPress={handleCurrencyPress} scale={0.92} style={styles.selectorPill}>
                 <AppText variant="caption1" weight="700" color={colors.white}>
                   {currency} ({getCurrencySymbol(currency)})
                 </AppText>
                 <ArrowUpDown size={12} color={colors.textSecondary} style={{ marginLeft: 4 }} />
-              </TouchableOpacity>
+              </PressableScale>
             </View>
           </View>
         )}
@@ -500,13 +568,9 @@ export default function UnifiedFormScreen() {
               <View style={styles.cardRow}>
                 <AppText variant="subheadline" weight="600" color={colors.white}>Auto renew</AppText>
                 <View style={styles.switchSlot}>
-                  <Switch
+                  <Toggle
                     value={autoRenew}
                     onValueChange={setAutoRenew}
-                    trackColor={{ false: colors.border, true: colors.accent }}
-                    thumbColor={colors.white}
-                    ios_backgroundColor={colors.border}
-                    style={styles.switchAlign}
                   />
                 </View>
               </View>
@@ -531,13 +595,9 @@ export default function UnifiedFormScreen() {
               <View style={styles.cardRow}>
                 <AppText variant="subheadline" weight="600" color={colors.white}>Renewing</AppText>
                 <View style={styles.switchSlot}>
-                  <Switch
+                  <Toggle
                     value={renewing}
                     onValueChange={setRenewing}
-                    trackColor={{ false: colors.border, true: colors.accent }}
-                    thumbColor={colors.white}
-                    ios_backgroundColor={colors.border}
-                    style={styles.switchAlign}
                   />
                 </View>
               </View>
@@ -546,12 +606,12 @@ export default function UnifiedFormScreen() {
                   <View style={styles.rowDivider} />
                   <View style={styles.cardRow}>
                     <AppText variant="subheadline" weight="600" color={colors.white}>Billing cycle</AppText>
-                    <TouchableOpacity onPress={handleCyclePress} style={styles.selectorPill}>
+                    <PressableScale onPress={handleCyclePress} scale={0.92} style={styles.selectorPill}>
                       <AppText variant="caption1" weight="700" color={colors.white}>
                         {formatBillingCycleLabel(billingCycle)}
                       </AppText>
                       <ArrowUpDown size={12} color={colors.textSecondary} style={{ marginLeft: 4 }} />
-                    </TouchableOpacity>
+                    </PressableScale>
                   </View>
                 </>
               )}
@@ -559,9 +619,7 @@ export default function UnifiedFormScreen() {
           )}
         </View>
 
-        {!isTrial && (
-          <AppText variant="caption1" style={styles.helperText}>{nextRenewalLabelText}</AppText>
-        )}
+        <AppText variant="caption1" style={styles.helperText}>{nextRenewalLabelText}</AppText>
 
         {/* Payment info Card */}
         <View style={styles.sectionCard}>
@@ -591,13 +649,9 @@ export default function UnifiedFormScreen() {
           <View style={styles.cardRow}>
             <AppText variant="subheadline" weight="600" color={colors.white}>Payment reminder</AppText>
             <View style={styles.switchSlot}>
-              <Switch
+              <Toggle
                 value={reminderEnabled}
                 onValueChange={setReminderEnabled}
-                trackColor={{ false: colors.border, true: colors.accent }}
-                thumbColor={colors.white}
-                ios_backgroundColor={colors.border}
-                style={styles.switchAlign}
               />
             </View>
           </View>
@@ -628,8 +682,9 @@ export default function UnifiedFormScreen() {
               value={notes}
               onChangeText={setNotes}
               onFocus={() => {
-                // Give the keyboard a tick to rise, then bring the notes field up.
-                setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 120);
+                setTimeout(() => {
+                  scrollRef.current?.scrollToEnd({ animated: true });
+                }, 100);
               }}
               multiline
               numberOfLines={5}
@@ -660,6 +715,7 @@ export default function UnifiedFormScreen() {
               color={logoStyle === "badge" ? "#FFFFFF" : selectedColor}
               size={112}
               bordered={logoStyle === "default"}
+              website={website}
             />
             <TouchableOpacity onPress={handleEditName} style={styles.previewNamePill}>
               <AppText variant="subheadline" weight="700" color={colors.white}>
@@ -690,25 +746,8 @@ export default function UnifiedFormScreen() {
               <TouchableOpacity
                 onPress={() => {
                   Haptics.selectionAsync();
-                  Alert.prompt(
-                    "Custom Color",
-                    "Enter hex code (e.g. #FF5733):",
-                    [
-                      { text: "Cancel", style: "cancel" },
-                      {
-                        text: "OK",
-                        onPress: (val?: string) => {
-                          if (val && val.startsWith("#") && val.length === 7) {
-                            setSelectedColor(val);
-                          } else {
-                            Alert.alert("Invalid Color", "Please enter a valid hex starting with #");
-                          }
-                        },
-                      },
-                    ],
-                    "plain-text",
-                    selectedColor
-                  );
+                  setColorEditValue(selectedColor);
+                  setShowColorEditModal(true);
                 }}
                 style={[styles.colorBubble, styles.colorBubbleCustom]}
               >
@@ -728,7 +767,7 @@ export default function UnifiedFormScreen() {
                 }}
                 style={[styles.logoVarItem, logoStyle === "default" && styles.logoVarItemActive]}
               >
-                <LogoCircle source={customLogoUrl || undefined} name={customName} color={selectedColor} size={48} bordered />
+                <LogoCircle source={customLogoUrl || undefined} name={customName} color={selectedColor} size={48} bordered website={website} />
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => {
@@ -738,7 +777,7 @@ export default function UnifiedFormScreen() {
                 style={[styles.logoVarItem, logoStyle === "badge" && styles.logoVarItemActive]}
               >
                 <View style={styles.badgeLogoWrapper}>
-                  <LogoCircle source={customLogoUrl || undefined} name={customName} color="#FFFFFF" size={48} />
+                  <LogoCircle source={customLogoUrl || undefined} name={customName} color="#FFFFFF" size={48} website={website} />
                 </View>
               </TouchableOpacity>
               <TouchableOpacity
@@ -748,7 +787,7 @@ export default function UnifiedFormScreen() {
                 }}
                 style={[styles.logoVarItem, logoStyle === "initial" && styles.logoVarItemActive]}
               >
-                <LogoCircle name={customName} color={selectedColor} size={48} />
+                <LogoCircle name={customName} color={selectedColor} size={48} website={website} />
               </TouchableOpacity>
             </View>
           </View>
@@ -762,21 +801,11 @@ export default function UnifiedFormScreen() {
                   "Pick Icon",
                   "Choose an emoji to represent this service:",
                   [
-                    { text: "🍿 Popcorn", onPress: () => { setCustomName("🍿 " + customName.replace(/[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF]/g, "").trim()); setCustomLogoUrl(""); } },
-                    { text: "🎵 Music", onPress: () => { setCustomName("🎵 " + customName.replace(/[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF]/g, "").trim()); setCustomLogoUrl(""); } },
-                    { text: "🎮 Gaming", onPress: () => { setCustomName("🎮 " + customName.replace(/[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF]/g, "").trim()); setCustomLogoUrl(""); } },
-                    { text: "🤖 Tech/AI", onPress: () => { setCustomName("🤖 " + customName.replace(/[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF]/g, "").trim()); setCustomLogoUrl(""); } },
-                    { text: "📚 Study", onPress: () => { setCustomName("📚 " + customName.replace(/[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF]/g, "").trim()); setCustomLogoUrl(""); } },
-                    { text: "Other Emoji", onPress: () => {
-                      Alert.prompt(
-                        "Emoji",
-                        "Enter a custom emoji character:",
-                        [
-                          { text: "Cancel", style: "cancel" },
-                          { text: "OK", onPress: (val?: string) => val && setCustomName(val.trim().charAt(0) + " " + customName.replace(/[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF]/g, "").trim()) }
-                        ]
-                      );
-                    }},
+                    { text: "🍿 Popcorn", onPress: () => { setCustomLogoUrl("🍿"); setLogoStyle("default"); } },
+                    { text: "🎵 Music", onPress: () => { setCustomLogoUrl("🎵"); setLogoStyle("default"); } },
+                    { text: "🎮 Gaming", onPress: () => { setCustomLogoUrl("🎮"); setLogoStyle("default"); } },
+                    { text: "🤖 Tech/AI", onPress: () => { setCustomLogoUrl("🤖"); setLogoStyle("default"); } },
+                    { text: "📚 Study", onPress: () => { setCustomLogoUrl("📚"); setLogoStyle("default"); } },
                     { text: "Cancel", style: "cancel" }
                   ]
                 );
@@ -788,28 +817,23 @@ export default function UnifiedFormScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity
-              onPress={() => {
+              onPress={async () => {
                 Haptics.selectionAsync();
-                Alert.prompt(
-                  "Logo Image",
-                  "Enter image URL (HTTPS):",
-                  [
-                    { text: "Cancel", style: "cancel" },
-                    {
-                      text: "Save",
-                      onPress: (val?: string) => {
-                        if (val && val.trim().startsWith("http")) {
-                          setCustomLogoUrl(val.trim());
-                          setLogoStyle("default");
-                        } else {
-                          Alert.alert("Error", "Please enter a valid https link");
-                        }
-                      }
-                    }
-                  ],
-                  "plain-text",
-                  customLogoUrl || ""
-                );
+                const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                if (status !== "granted") {
+                  Alert.alert("Permission Required", "Please grant photo library access to choose an image.");
+                  return;
+                }
+                const result = await ImagePicker.launchImageLibraryAsync({
+                  mediaTypes: ["images"],
+                  allowsEditing: true,
+                  aspect: [1, 1],
+                  quality: 0.8,
+                });
+                if (!result.canceled && result.assets[0]) {
+                  setCustomLogoUrl(result.assets[0].uri);
+                  setLogoStyle("default");
+                }
               }}
               style={styles.sheetActionButton}
             >
@@ -819,21 +843,22 @@ export default function UnifiedFormScreen() {
           </View>
         </ScrollView>
 
-        <TouchableOpacity
-          onPress={() => setCustomizeVisible(false)}
-          style={styles.sheetDoneBtn}
-        >
-          <AppText variant="callout" weight="700" style={styles.sheetDoneBtnText}>
-            Done
-          </AppText>
-        </TouchableOpacity>
+          <PressableScale
+            onPress={() => setCustomizeVisible(false)}
+            scale={0.97}
+            style={styles.sheetDoneBtn}
+          >
+            <AppText variant="callout" weight="700" style={styles.sheetDoneBtnText}>
+              Done
+            </AppText>
+          </PressableScale>
       </SwipeDownSheet>
 
       {/* Beautiful iOS Translucent Dropdown Modal */}
       <Modal
         visible={activePicker !== null}
         transparent
-        animationType="fade"
+        animationType="slide"
         onRequestClose={() => setActivePicker(null)}
       >
         <View style={styles.dropdownOverlay}>
@@ -905,10 +930,15 @@ export default function UnifiedFormScreen() {
                         { label: "Entertainment", value: "Entertainment" },
                         { label: "Music", value: "Music" },
                         { label: "Productivity", value: "Productivity" },
-                        { label: "Storage", value: "Storage" },
+                        { label: "Health", value: "Health" },
+                        { label: "Education", value: "Education" },
                         { label: "Gaming", value: "Gaming" },
                         { label: "AI", value: "AI" },
+                        { label: "News", value: "News" },
+                        { label: "Cloud", value: "Cloud" },
+                        { label: "Shopping", value: "Shopping" },
                         { label: "Finance", value: "Finance" },
+                        { label: "Other", value: "Other" },
                       ],
                     };
                   case "reminder":
@@ -1061,78 +1091,347 @@ export default function UnifiedFormScreen() {
         <BlurView intensity={80} tint="dark" style={styles.datePickerModal}>
           <View style={styles.datePickerHeader}>
             <TouchableOpacity
-              onPress={() => setActiveDatePicker(null)}
+              onPress={() => {
+                Haptics.selectionAsync();
+                if (calendarSnapshot) {
+                  setStartDate(calendarSnapshot.startDate);
+                  setTrialEndDate(calendarSnapshot.trialEndDate);
+                }
+                setActiveDatePicker(null);
+              }}
               style={styles.datePickerCancelBtn}
             >
-              <AppText variant="callout" weight="600" color={colors.accent}>Cancel</AppText>
+              <AppText variant="callout" weight="600" color={colors.textSecondary}>Cancel</AppText>
             </TouchableOpacity>
             <TouchableOpacity
-              onPress={() => setActiveDatePicker(null)}
+              onPress={() => {
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                setCalendarSnapshot(null);
+                setActiveDatePicker(null);
+              }}
               style={styles.datePickerDoneBtn}
             >
-              <AppText variant="callout" weight="600" color={colors.accent}>Done</AppText>
+              <AppText variant="callout" weight="700" color={colors.black}>Done</AppText>
             </TouchableOpacity>
           </View>
           <View style={styles.datePickerBody}>
             <View style={styles.calendarTitleRow}>
-              <View style={styles.calendarMonthGroup}>
+              <TouchableOpacity
+                activeOpacity={0.7}
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  if (calendarMode === "days") {
+                    setCalendarMode("months");
+                  } else if (calendarMode === "months") {
+                    setCalendarMode("years");
+                  } else {
+                    setCalendarMode("days");
+                  }
+                }}
+                style={styles.calendarMonthGroup}
+              >
                 <AppText variant="title2" weight="700" color={colors.white}>
-                  {format(calendarMonth, "MMMM yyyy")}
+                  {calendarMode === "days"
+                    ? format(calendarMonth, "MMMM yyyy")
+                    : calendarMode === "months"
+                    ? format(calendarMonth, "yyyy")
+                    : `${getYearRangeStart(calendarMonth)} - ${getYearRangeStart(calendarMonth) + 11}`}
                 </AppText>
-                <ChevronRight size={24} color={colors.white} strokeWidth={3} />
-              </View>
+                <ChevronRight
+                  size={16}
+                  color={colors.textSecondary}
+                  style={{
+                    marginLeft: 6,
+                    transform: [{ rotate: calendarMode === "days" ? "0deg" : calendarMode === "months" ? "90deg" : "180deg" }],
+                  }}
+                />
+              </TouchableOpacity>
               <View style={styles.calendarNavGroup}>
                 <TouchableOpacity
                   activeOpacity={0.7}
-                  onPress={() => setCalendarMonth((date) => addMonths(date, -1))}
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    if (calendarMode === "days") {
+                      setCalendarMonth((date) => addMonths(date, -1));
+                    } else if (calendarMode === "months") {
+                      setCalendarMonth((date) => addYears(date, -1));
+                    } else {
+                      setCalendarMonth((date) => addYears(date, -12));
+                    }
+                  }}
                   style={styles.calendarArrowBtn}
                 >
                   <ChevronLeft size={30} color={colors.white} strokeWidth={3} />
                 </TouchableOpacity>
                 <TouchableOpacity
                   activeOpacity={0.7}
-                  onPress={() => setCalendarMonth((date) => addMonths(date, 1))}
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    if (calendarMode === "days") {
+                      setCalendarMonth((date) => addMonths(date, 1));
+                    } else if (calendarMode === "months") {
+                      setCalendarMonth((date) => addYears(date, 1));
+                    } else {
+                      setCalendarMonth((date) => addYears(date, 12));
+                    }
+                  }}
                   style={styles.calendarArrowBtn}
                 >
                   <ChevronRight size={30} color={colors.white} strokeWidth={3} />
                 </TouchableOpacity>
               </View>
             </View>
-            <View style={styles.weekdayRow}>
-              {WEEKDAYS.map((day) => (
-                <AppText key={day} variant="caption1" weight="700" color={colors.textSecondary} style={styles.weekdayText}>
-                  {day}
-                </AppText>
-              ))}
-            </View>
-            <View style={styles.calendarGrid}>
-              {calendarDays.map((date, index) => {
-                const selected = date ? isSameCalendarDay(date, selectedCalendarDate) : false;
-                return (
-                  <View key={date ? date.toISOString() : `blank-${index}`} style={styles.calendarDayCell}>
-                    {date && (
-                      <TouchableOpacity
-                        activeOpacity={0.75}
-                        onPress={() => handleCalendarDateSelect(date)}
-                        style={[styles.calendarDayButton, selected && styles.calendarDayButtonSelected]}
+
+            {calendarMode === "days" && (
+              <>
+                <View style={styles.weekdayRow}>
+                  {WEEKDAYS.map((day) => (
+                    <AppText key={day} variant="caption1" weight="700" color={colors.textSecondary} style={styles.weekdayText}>
+                      {day}
+                    </AppText>
+                  ))}
+                </View>
+                <View style={styles.calendarGrid}>
+                  {calendarDays.map((date, index) => {
+                    const selected = date ? isSameCalendarDay(date, selectedCalendarDate) : false;
+                    return (
+                      <View key={date ? date.toISOString() : `blank-${index}`} style={styles.calendarDayCell}>
+                        {date && (
+                          <PressableScale
+                            onPress={() => handleCalendarDateSelect(date)}
+                            scale={0.88}
+                            style={[styles.calendarDayButton, selected && styles.calendarDayButtonSelected]}
+                          >
+                            <AppText
+                              variant="title2"
+                              weight={selected ? "700" : "400"}
+                              color={colors.white}
+                              style={styles.calendarDayText}
+                            >
+                              {date.getDate()}
+                            </AppText>
+                          </PressableScale>
+                        )}
+                      </View>
+                    );
+                  })}
+                </View>
+              </>
+            )}
+
+            {calendarMode === "months" && (
+              <View style={styles.monthYearGrid}>
+                {MONTHS_SHORT.map((mName, idx) => {
+                  const currentMonthIdx = calendarMonth.getMonth();
+                  const isCurrent = idx === currentMonthIdx;
+                  return (
+                    <PressableScale
+                      key={mName}
+                      onPress={() => {
+                        Haptics.selectionAsync();
+                        setCalendarMonth((prev) => {
+                          const next = new Date(prev);
+                          next.setMonth(idx);
+                          return next;
+                        });
+                        setCalendarMode("days");
+                      }}
+                      style={[
+                        styles.monthYearGridItem,
+                        isCurrent && styles.monthYearGridItemActive,
+                      ]}
+                    >
+                      <AppText
+                        variant="body"
+                        weight={isCurrent ? "700" : "500"}
+                        color={isCurrent ? colors.white : colors.textSecondary}
                       >
-                        <AppText
-                          variant="title2"
-                          weight={selected ? "700" : "400"}
-                          color={colors.white}
-                          style={styles.calendarDayText}
-                        >
-                          {date.getDate()}
-                        </AppText>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                );
-              })}
-            </View>
+                        {mName}
+                      </AppText>
+                    </PressableScale>
+                  );
+                })}
+              </View>
+            )}
+
+            {calendarMode === "years" && (
+              <View style={styles.monthYearGrid}>
+                {Array.from({ length: 12 }, (_, idx) => {
+                  const startYear = getYearRangeStart(calendarMonth);
+                  const targetYear = startYear + idx;
+                  const isCurrent = targetYear === calendarMonth.getFullYear();
+                  return (
+                    <PressableScale
+                      key={targetYear}
+                      onPress={() => {
+                        Haptics.selectionAsync();
+                        setCalendarMonth((prev) => {
+                          const next = new Date(prev);
+                          next.setFullYear(targetYear);
+                          return next;
+                        });
+                        setCalendarMode("months");
+                      }}
+                      style={[
+                        styles.monthYearGridItem,
+                        isCurrent && styles.monthYearGridItemActive,
+                      ]}
+                    >
+                      <AppText
+                        variant="body"
+                        weight={isCurrent ? "700" : "500"}
+                        color={isCurrent ? colors.white : colors.textSecondary}
+                      >
+                        {targetYear}
+                      </AppText>
+                    </PressableScale>
+                  );
+                })}
+              </View>
+            )}
           </View>
         </BlurView>
       </Modal>
+
+      {/* Name Edit Modal (cross-platform) */}
+      <Modal
+        visible={showNameEditModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowNameEditModal(false)}
+      >
+        <TouchableOpacity
+          activeOpacity={1}
+          style={styles.datePickerBackdrop}
+          onPress={() => setShowNameEditModal(false)}
+        />
+        <BlurView intensity={80} tint="dark" style={styles.datePickerModal}>
+          <View style={styles.datePickerHeader}>
+            <TouchableOpacity onPress={() => setShowNameEditModal(false)} style={styles.datePickerCancelBtn}>
+              <AppText variant="callout" weight="600" color={colors.textSecondary}>Cancel</AppText>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => {
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                if (nameEditValue.trim()) setCustomName(nameEditValue.trim());
+                setShowNameEditModal(false);
+              }}
+              style={styles.datePickerDoneBtn}
+            >
+              <AppText variant="callout" weight="700" color={colors.black}>Done</AppText>
+            </TouchableOpacity>
+          </View>
+          <View style={{ paddingHorizontal: spacing[24], paddingBottom: spacing[24] }}>
+            <TextInput
+              style={{
+                backgroundColor: "#2C2C2E",
+                borderRadius: 12,
+                padding: spacing[16],
+                fontSize: 17,
+                color: colors.white,
+                borderWidth: 0.5,
+                borderColor: "rgba(255, 255, 255, 0.12)",
+              }}
+              placeholder="Subscription name"
+              placeholderTextColor={colors.textMuted}
+              value={nameEditValue}
+              onChangeText={setNameEditValue}
+              autoFocus
+              selectTextOnFocus
+            />
+          </View>
+        </BlurView>
+      </Modal>
+
+      {/* Color Edit Modal (cross-platform) */}
+      <Modal
+        visible={showColorEditModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowColorEditModal(false)}
+      >
+        <TouchableOpacity
+          activeOpacity={1}
+          style={styles.datePickerBackdrop}
+          onPress={() => setShowColorEditModal(false)}
+        />
+        <BlurView intensity={80} tint="dark" style={styles.datePickerModal}>
+          <View style={styles.datePickerHeader}>
+            <TouchableOpacity onPress={() => setShowColorEditModal(false)} style={styles.datePickerCancelBtn}>
+              <AppText variant="callout" weight="600" color={colors.textSecondary}>Cancel</AppText>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => {
+                const hexPattern = /^#[0-9A-Fa-f]{6}$/;
+                if (hexPattern.test(colorEditValue)) {
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                  setSelectedColor(colorEditValue);
+                  setShowColorEditModal(false);
+                } else {
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+                  Alert.alert("Invalid Color", "Please enter a valid hex color (e.g. #FF5733)");
+                }
+              }}
+              style={styles.datePickerDoneBtn}
+            >
+              <AppText variant="callout" weight="700" color={colors.black}>Done</AppText>
+            </TouchableOpacity>
+          </View>
+          <View style={{ paddingHorizontal: spacing[24], paddingBottom: spacing[24] }}>
+            <TextInput
+              style={{
+                backgroundColor: "#2C2C2E",
+                borderRadius: 12,
+                padding: spacing[16],
+                fontSize: 17,
+                color: colors.white,
+                borderWidth: 0.5,
+                borderColor: "rgba(255, 255, 255, 0.12)",
+              }}
+              placeholder="#FF5733"
+              placeholderTextColor={colors.textMuted}
+              value={colorEditValue}
+              onChangeText={setColorEditValue}
+              autoFocus
+              selectTextOnFocus
+              autoCapitalize="characters"
+            />
+          </View>
+        </BlurView>
+      </Modal>
+
+      {keyboardVisible && (
+        <Animated.View
+          style={{
+            position: "absolute",
+            bottom: animBottom,
+            right: spacing[20],
+            zIndex: 9999,
+          }}
+        >
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => Keyboard.dismiss()}
+            style={{
+              backgroundColor: "rgba(30, 30, 30, 0.88)",
+              borderRadius: 24,
+              paddingHorizontal: spacing[20],
+              paddingVertical: 10,
+              borderWidth: 0.5,
+              borderColor: "rgba(255, 255, 255, 0.15)",
+              shadowColor: "#000000",
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.3,
+              shadowRadius: 8,
+              elevation: 6,
+            }}
+          >
+            <AppText variant="callout" weight="700" color={colors.white}>
+              Done
+            </AppText>
+          </TouchableOpacity>
+        </Animated.View>
+      )}
     </View>
   );
 }
@@ -1531,7 +1830,7 @@ const styles = StyleSheet.create({
   // ── Date Picker Modal ───────────────────────────────────────────────
   datePickerBackdrop: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: "rgba(0, 0, 0, 0.12)",
+    backgroundColor: "rgba(0, 0, 0, 0.4)",
   },
   datePickerModal: {
     position: "absolute",
@@ -1559,9 +1858,13 @@ const styles = StyleSheet.create({
   },
   datePickerCancelBtn: {
     paddingVertical: spacing[8],
+    paddingHorizontal: spacing[12],
   },
   datePickerDoneBtn: {
     paddingVertical: spacing[8],
+    paddingHorizontal: spacing[16],
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
   },
   datePickerBody: {
     paddingHorizontal: spacing[24],
@@ -1585,10 +1888,11 @@ const styles = StyleSheet.create({
     gap: spacing[20],
   },
   calendarArrowBtn: {
-    width: 34,
-    height: 34,
+    width: 44,
+    height: 44,
     alignItems: "center",
     justifyContent: "center",
+    borderRadius: 22,
   },
   weekdayRow: {
     flexDirection: "row",
@@ -1621,5 +1925,26 @@ const styles = StyleSheet.create({
   },
   calendarDayText: {
     textAlign: "center",
+  },
+  monthYearGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    paddingTop: spacing[8],
+  },
+  monthYearGridItem: {
+    width: "30%",
+    height: 54,
+    borderRadius: 14,
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: spacing[12],
+    borderWidth: 0.5,
+    borderColor: "rgba(255, 255, 255, 0.05)",
+  },
+  monthYearGridItemActive: {
+    backgroundColor: "#3A3A3C",
+    borderColor: "rgba(255, 255, 255, 0.2)",
   },
 });

@@ -1,6 +1,6 @@
 import React, { memo } from "react";
-import { View, StyleSheet, Switch } from "react-native";
-import { AppText } from "@/components/ui";
+import { View, StyleSheet } from "react-native";
+import { AppText, Toggle } from "@/components/ui";
 import { colors } from "@/constants";
 
 export interface SwitchFieldProps {
@@ -15,12 +15,9 @@ function SwitchField({ label, value, onValueChange }: SwitchFieldProps) {
       <AppText variant="body" weight="600" color={colors.white}>
         {label}
       </AppText>
-      <Switch
+      <Toggle
         value={value}
         onValueChange={onValueChange}
-        trackColor={{ false: colors.border, true: colors.accent }}
-        thumbColor={colors.white}
-        ios_backgroundColor={colors.border}
       />
     </View>
   );

@@ -5,8 +5,9 @@ import type {
   SubscriptionStats,
 } from "@/types/subscription";
 import * as db from "@/database/database";
-import { toMonthly, toYearly, daysUntil } from "@/utils/date";
+import { toMonthly, toYearly, daysUntil, advanceCycle } from "@/utils/date";
 import { scheduleReminder, cancelReminder } from "@/utils/notifications";
+import AsyncStorage from "@/utils/storage";
 
 interface SubscriptionState {
   /** In-memory list, sorted by next billing date (ascending). */
@@ -89,7 +90,41 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
 
   loadSubscriptions: async () => {
     await db.initializeDatabase();
-    const subscriptions = await db.getAllSubscriptions();
+    
+    // Wipe database of old seed/mock data once on startup
+    const CLEANUP_KEY = "@db_cleanup_done_v3";
+    const isCleaned = await AsyncStorage.getItem(CLEANUP_KEY);
+    if (!isCleaned) {
+      await db.deleteAllSubscriptions();
+      await AsyncStorage.setItem(CLEANUP_KEY, "true");
+    }
+
+    let subscriptions = await db.getAllSubscriptions();
+
+    // Auto-advance any paid subscriptions whose nextBillingDate has passed today
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    let changed = false;
+
+    for (const sub of subscriptions) {
+      if (!sub.isTrial && sub.nextBillingDate) {
+        const billDate = new Date(sub.nextBillingDate);
+        if (billDate < today) {
+          let nextDate = sub.nextBillingDate;
+          while (new Date(nextDate) < today) {
+            nextDate = advanceCycle(nextDate, sub.billingCycle, sub.customIntervalMonths);
+          }
+          await db.updateSubscription(sub.id, { nextBillingDate: nextDate });
+          sub.nextBillingDate = nextDate;
+          changed = true;
+        }
+      }
+    }
+
+    if (changed) {
+      subscriptions = await db.getAllSubscriptions();
+    }
+
     // Sort nearest renewal first
     subscriptions.sort(
       (a, b) => new Date(a.nextBillingDate).getTime() - new Date(b.nextBillingDate).getTime()

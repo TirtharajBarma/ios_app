@@ -140,9 +140,6 @@ function SearchBar(
           </View>
         </Pressable>
       )}
-
-      {/* Keeps AppText imported & used for optional accessibility copy */}
-      {focused && <AppText variant="caption2" style={{ display: "none" }}>searching</AppText>}
     </AnimatedView>
   );
 }

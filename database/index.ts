@@ -10,4 +10,3 @@ export {
   searchSubscriptions,
   getUpcomingRenewals,
 } from "./queries";
-export { seedDatabase } from "./seed";

@@ -44,10 +44,13 @@ function SearchResults({
               key={service.id}
               leading={
                 <LogoCircle
+                  source={service.iconUrl}
                   name={service.name}
                   color={service.brandColor}
+                  whiteBackground={service.whiteBackground}
                   size="sm"
                   bordered
+                  website={service.website}
                 />
               }
               title={service.name}

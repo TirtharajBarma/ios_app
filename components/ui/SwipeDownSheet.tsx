@@ -17,11 +17,10 @@
  *   </SwipeDownSheet>
  */
 import React, { useEffect, useState, useCallback } from "react";
-import { StyleSheet, ViewStyle, StyleProp } from "react-native";
+import { StyleSheet, View, ViewStyle, StyleProp } from "react-native";
 import {
   GestureDetector,
   Gesture,
-  GestureHandlerRootView,
 } from "react-native-gesture-handler";
 import Animated, {
   useSharedValue,
@@ -44,11 +43,11 @@ export interface SwipeDownSheetProps {
   heightRatio?: number;
 }
 
-const SPRING_OPEN = { damping: 40, stiffness: 280, mass: 0.9 };
-const SPRING_CLOSE = { damping: 34, stiffness: 340, mass: 0.7 };
-const CLOSE_THRESHOLD = 100; // px dragged before dismiss
-const CLOSE_VELOCITY = 500; // px/s flick dismisses regardless of distance
-const ANIM_CLOSE_MS = 260; // time to animate off-screen before unmount
+const SPRING_OPEN = { damping: 45, stiffness: 320, mass: 0.8 };
+const SPRING_CLOSE = { damping: 38, stiffness: 380, mass: 0.6 };
+const CLOSE_THRESHOLD = 80; // px dragged before dismiss
+const CLOSE_VELOCITY = 600; // px/s flick dismisses regardless of distance
+const ANIM_CLOSE_MS = 240; // time to animate off-screen before unmount
 
 export default function SwipeDownSheet({
   visible,
@@ -66,16 +65,21 @@ export default function SwipeDownSheet({
   const backdropOpacity = useSharedValue(0);
 
   // ── Open / Close lifecycle ──────────────────────────────────────────
+  const prevVisible = React.useRef(visible);
   useEffect(() => {
-    if (visible) {
-      // Show the sheet immediately, then spring into position.
+    if (visible && !prevVisible.current) {
+      // Opening: show the sheet immediately, then spring into position.
       setShowing(true);
       translateY.value = 0;
       backdropOpacity.value = withTiming(1, { duration: 240 });
+    } else if (!visible && prevVisible.current) {
+      // Programmatic close (Done button, etc.) — animate off-screen.
+      backdropOpacity.value = withTiming(0, { duration: 200 });
+      translateY.value = withSpring(999, SPRING_CLOSE, () => {
+        runOnJS(handleAnimationEnd)();
+      });
     }
-    // When `visible` flips to false we do NOT hide yet — the close gesture
-    // (or backdrop tap) already kicked the animation and will call
-    // `handleAnimationEnd` which sets `showing = false` after it finishes.
+    prevVisible.current = visible;
   }, [visible]);
 
   const handleAnimationEnd = useCallback(() => {
@@ -133,7 +137,7 @@ export default function SwipeDownSheet({
   if (!showing) return null;
 
   return (
-    <GestureHandlerRootView style={styles.overlay}>
+    <View style={styles.overlay}>
       {/* Backdrop */}
       <GestureDetector gesture={backdropTap}>
         <Animated.View style={[styles.backdrop, backdropStyle]} />
@@ -154,7 +158,7 @@ export default function SwipeDownSheet({
           {children}
         </Animated.View>
       </GestureDetector>
-    </GestureHandlerRootView>
+    </View>
   );
 }
 

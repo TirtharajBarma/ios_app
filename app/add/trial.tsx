@@ -1,5 +1,5 @@
-import React, { useTransition } from "react";
-import { StyleSheet, ScrollView, KeyboardAvoidingView, Platform, View } from "react-native";
+import React, { useState, useEffect, useRef } from "react";
+import { StyleSheet, ScrollView, KeyboardAvoidingView, Platform, View, Keyboard, Animated as RNAnimated, TouchableOpacity } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useForm, Controller } from "react-hook-form";
@@ -10,7 +10,7 @@ import Animated, { FadeIn, FadeOut, SlideInUp } from "react-native-reanimated";
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
 
 import { colors, spacing } from "@/constants";
-import { AppButton, Card } from "@/components/ui";
+import { AppButton, Card, AppText } from "@/components/ui";
 import ServiceHero from "@/components/common/ServiceHero";
 import FormSection from "@/components/form/FormSection";
 import InputField from "@/components/form/InputField";
@@ -75,7 +75,34 @@ function parseReminderDays(reminderTime?: string): number {
 export default function TrialFormScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const [isPending, startTransition] = useTransition();
+  const [isSaving, setIsSaving] = useState(false);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const animBottom = useRef(new RNAnimated.Value(0)).current;
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
+      (e) => {
+        setKeyboardVisible(true);
+        RNAnimated.timing(animBottom, {
+          toValue: e.endCoordinates.height + 10,
+          duration: e.duration || 250,
+          useNativeDriver: false,
+        }).start();
+      }
+    );
+    const hideSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
+      () => {
+        setKeyboardVisible(false);
+        animBottom.setValue(0);
+      }
+    );
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
   const addSubscription = useSubscriptionStore((state) => state.addSubscription);
   const updateSubscription = useSubscriptionStore((state) => state.updateSubscription);
   const subscriptions = useSubscriptionStore((state) => state.subscriptions);
@@ -142,50 +169,56 @@ export default function TrialFormScreen() {
   const isAutoRenewEnabled = watch("autoRenew");
   const isReminderEnabled = watch("reminder");
 
-  const onSubmit = (data: TrialFormValues) => {
+  const onSubmit = async (data: TrialFormValues) => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setIsSaving(true);
 
-    startTransition(async () => {
-      try {
-        const input = {
-          name: data.name,
-          color: brandColor || existingSub?.color || colors.accent,
-          logoUrl: logo || existingSub?.logoUrl || undefined,
-          price: data.autoRenew ? Number(data.price) : 0,
-          currency: data.autoRenew ? (data.currency || "USD ($)") : "USD ($)",
-          billingCycle: data.autoRenew ? (data.billingCycle?.toLowerCase() as any || "monthly") : "monthly",
-          nextBillingDate: data.trialEndDate.toISOString(),
-          category: data.category.toLowerCase() as any,
-          reminderEnabled: data.reminder,
-          reminderDays: parseReminderDays(data.reminderTime),
-          note: data.notes || undefined,
-          isTrial: true,
-          trialStartDate: data.trialStartDate.toISOString(),
-          trialEndDate: data.trialEndDate.toISOString(),
-          startDate: data.trialStartDate.toISOString(),
-          website: website || existingSub?.website || undefined,
-        };
+    try {
+      // Convert "USD ($)" display string back to "USD" code
+      const currencyCode = (data.currency || "USD ($)").split(" ")[0].toUpperCase();
+      const input = {
+        name: data.name,
+        color: brandColor || existingSub?.color || colors.accent,
+        logoUrl: logo || existingSub?.logoUrl || undefined,
+        price: data.autoRenew ? Number(data.price) : 0,
+        currency: currencyCode,
+        billingCycle: data.autoRenew ? (data.billingCycle?.toLowerCase() as any || "monthly") : "monthly",
+        nextBillingDate: data.trialEndDate.toISOString(),
+        category: (data.category || "entertainment").toLowerCase() as any,
+        reminderEnabled: data.reminder,
+        reminderDays: parseReminderDays(data.reminderTime),
+        note: data.notes || undefined,
+        isTrial: true,
+        trialStartDate: data.trialStartDate.toISOString(),
+        trialEndDate: data.trialEndDate.toISOString(),
+        startDate: data.trialStartDate.toISOString(),
+        website: website || existingSub?.website || undefined,
+      };
 
-        if (isEditMode && editId) {
-          await updateSubscription(editId, input);
-        } else {
-          await addSubscription(input);
-        }
-        
-        router.dismissAll();
-      } catch (error) {
-        console.error("Failed to save trial subscription:", error);
+      if (isEditMode && editId) {
+        await updateSubscription(editId, input);
+      } else {
+        await addSubscription(input);
       }
-    });
+      
+      router.dismissAll();
+    } catch (error) {
+      console.error("Failed to save trial subscription:", error);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       style={styles.container}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 44 : 0}
     >
       <ScrollView
         showsVerticalScrollIndicator={false}
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={[
           styles.scrollContent,
           {
@@ -380,8 +413,8 @@ export default function TrialFormScreen() {
         <Animated.View entering={FadeIn.delay(200).duration(300)} style={styles.buttonWrapper}>
           <AppButton
             variant="primary"
-            disabled={!isValid || isPending}
-            loading={isPending}
+            disabled={!isValid || isSaving}
+            loading={isSaving}
             onPress={handleSubmit(onSubmit)}
             style={styles.submitBtn}
           >
@@ -389,6 +422,39 @@ export default function TrialFormScreen() {
           </AppButton>
         </Animated.View>
       </ScrollView>
+
+      {keyboardVisible && (
+        <RNAnimated.View
+          style={{
+            position: "absolute",
+            bottom: animBottom,
+            right: spacing[20],
+            zIndex: 9999,
+          }}
+        >
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => Keyboard.dismiss()}
+            style={{
+              backgroundColor: "rgba(30, 30, 30, 0.88)",
+              borderRadius: 24,
+              paddingHorizontal: spacing[20],
+              paddingVertical: 10,
+              borderWidth: 0.5,
+              borderColor: "rgba(255, 255, 255, 0.15)",
+              shadowColor: "#000000",
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.3,
+              shadowRadius: 8,
+              elevation: 6,
+            }}
+          >
+            <AppText variant="callout" weight="700" color={colors.white}>
+              Done
+            </AppText>
+          </TouchableOpacity>
+        </RNAnimated.View>
+      )}
     </KeyboardAvoidingView>
   );
 }

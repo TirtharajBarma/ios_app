@@ -7,6 +7,7 @@ import {
   getSubscriptionById as dbGetSubscriptionById,
   updateSubscription as dbUpdateSubscription,
   deleteSubscription as dbDeleteSubscription,
+  deleteAllSubscriptions as dbDeleteAllSubscriptions,
 } from "./queries";
 import type { DbSubscription } from "./schema";
 import type { Subscription, NewSubscriptionInput } from "@/types/subscription";
@@ -34,12 +35,12 @@ export async function initializeDatabase(): Promise<SQLite.SQLiteDatabase> {
       console.log("Database: Opening connection to 'subscriptions.db'...");
       const db = await SQLite.openDatabaseAsync("subscriptions.db");
       
-      // Cache the db handle first so migrations and queries can access it
-      setDatabaseInstance(db);
-
-      // Run schema migrations
+      // Run schema migrations first (may need the db handle internally)
       await runMigrations(db);
       
+      // Only now expose the db to the rest of the app
+      setDatabaseInstance(db);
+
       // Enable foreign keys
       await db.execAsync("PRAGMA foreign_keys = ON;");
       
@@ -131,6 +132,9 @@ function mapDbToSubscription(dbSub: DbSubscription): Subscription {
  * Mapper: Domain Input model -> Database Row inputs
  */
 function mapDomainToDb(id: string, input: NewSubscriptionInput): Omit<DbSubscription, "createdAt" | "updatedAt"> {
+  // Store the full raw billing cycle string so custom/bi-weekly/semi-yearly survive round-trips
+  const rawBillingCycle = input.rawBillingCycle || input.billingCycle;
+  
   return {
     id,
     name: input.name,
@@ -139,7 +143,7 @@ function mapDomainToDb(id: string, input: NewSubscriptionInput): Omit<DbSubscrip
     category: input.category,
     price: input.price,
     currency: input.currency,
-    billingCycle: input.billingCycle,
+    billingCycle: rawBillingCycle,
     isTrial: input.isTrial ? 1 : 0,
     trialStartDate: input.trialStartDate || null,
     trialEndDate: input.trialEndDate || null,
@@ -186,13 +190,21 @@ export async function updateSubscription(
   if (input.logoUrl !== undefined) dbUpdates.logo = input.logoUrl;
   if (input.price !== undefined) dbUpdates.price = input.price;
   if (input.currency !== undefined) dbUpdates.currency = input.currency;
-  if (input.billingCycle !== undefined) dbUpdates.billingCycle = input.billingCycle;
+  if (input.billingCycle !== undefined) dbUpdates.billingCycle = input.rawBillingCycle || input.billingCycle;
+  if (input.isTrial !== undefined) dbUpdates.isTrial = input.isTrial ? 1 : 0;
   
   if (input.nextBillingDate !== undefined) {
-    if (input.isTrial) {
+    if (input.isTrial === true) {
       dbUpdates.trialEndDate = input.nextBillingDate;
-    } else {
+    } else if (input.isTrial === false) {
       dbUpdates.renewDate = input.nextBillingDate;
+    } else {
+      // isTrial not in update payload — check what we already have
+      if (dbUpdates.isTrial === 1) {
+        dbUpdates.trialEndDate = input.nextBillingDate;
+      } else {
+        dbUpdates.renewDate = input.nextBillingDate;
+      }
     }
   }
   
@@ -201,7 +213,6 @@ export async function updateSubscription(
   if (input.note !== undefined) dbUpdates.notes = input.note;
   if (input.reminderEnabled !== undefined) dbUpdates.reminderEnabled = input.reminderEnabled ? 1 : 0;
   if (input.reminderDays !== undefined) dbUpdates.reminderDays = input.reminderDays;
-  if (input.isTrial !== undefined) dbUpdates.isTrial = input.isTrial ? 1 : 0;
   if (input.trialStartDate !== undefined) dbUpdates.trialStartDate = input.trialStartDate;
   if (input.trialEndDate !== undefined) dbUpdates.trialEndDate = input.trialEndDate;
   if (input.startDate !== undefined) dbUpdates.startDate = input.startDate;
@@ -216,4 +227,11 @@ export async function updateSubscription(
  */
 export async function deleteSubscription(id: string): Promise<void> {
   await dbDeleteSubscription(id);
+}
+
+/**
+ * Wipes the entire subscriptions table.
+ */
+export async function deleteAllSubscriptions(): Promise<void> {
+  await dbDeleteAllSubscriptions();
 }

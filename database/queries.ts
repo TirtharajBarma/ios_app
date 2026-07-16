@@ -182,6 +182,10 @@ export async function getUpcomingRenewals(limit: number = 10): Promise<DbSubscri
         CASE 
           WHEN isTrial = 1 THEN trialEndDate 
           ELSE renewDate 
+        END IS NULL,
+        CASE 
+          WHEN isTrial = 1 THEN trialEndDate 
+          ELSE renewDate 
         END ASC
       LIMIT ?;
     `;

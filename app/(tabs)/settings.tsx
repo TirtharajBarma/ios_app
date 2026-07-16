@@ -3,6 +3,9 @@ import {
   View,
   StyleSheet,
   Alert,
+  Modal,
+  TextInput,
+  TouchableOpacity,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
@@ -33,7 +36,6 @@ import {
   OverviewLargeHeader,
 } from "@/components/common/OverviewHeader";
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
-import { seedDatabase } from "@/database";
 import { cancelAllReminders, getScheduledReminders } from "@/utils/notifications";
 
 export default function SettingsScreen() {
@@ -86,70 +88,59 @@ export default function SettingsScreen() {
     }
   };
 
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importText, setImportText] = useState("");
+
   const handleImportData = async () => {
     Haptics.selectionAsync();
-    Alert.prompt(
-      "Import JSON Data",
-      "Paste your exported JSON backup data here to import:",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Import",
-          onPress: async (text?: string) => {
-            if (!text) return;
-            try {
-              const data = JSON.parse(text);
-              if (data && Array.isArray(data.subscriptions)) {
-                // Clear existing
-                for (const sub of subscriptions) {
-                  await removeSubscription(sub.id);
-                }
-                // Import new
-                const { addSubscription } = useSubscriptionStore.getState();
-                for (const sub of data.subscriptions) {
-                  await addSubscription({
-                    name: sub.name,
-                    color: sub.color || sub.brandColor || "#007AFF",
-                    logoUrl: sub.logoUrl || sub.logo || undefined,
-                    price: sub.price,
-                    currency: sub.currency,
-                    billingCycle: sub.billingCycle,
-                    nextBillingDate: sub.nextBillingDate,
-                    category: sub.category,
-                    reminderEnabled: sub.reminderEnabled,
-                    reminderDays: sub.reminderDays,
-                    note: sub.note || sub.notes || undefined,
-                    isTrial: sub.isTrial || false,
-                    trialStartDate: sub.trialStartDate,
-                    trialEndDate: sub.trialEndDate,
-                    startDate: sub.startDate,
-                    paymentMethod: sub.paymentMethod,
-                    website: sub.website,
-                  });
-                }
-                Alert.alert("Success", `Successfully imported ${data.subscriptions.length} subscriptions!`);
-                await loadSubscriptions();
-                loadReminderCount();
-              } else {
-                Alert.alert("Invalid Data", "The pasted JSON does not match the backup format.");
-              }
-            } catch (error) {
-              Alert.alert("Import Failed", "Invalid JSON format.");
-            }
-          }
-        }
-      ],
-      "plain-text"
-    );
+    setImportText("");
+    setShowImportModal(true);
   };
 
-  const handleSeedData = async () => {
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    const seeded = await seedDatabase();
-    if (seeded) {
-      await loadSubscriptions();
-      loadReminderCount();
+  const processImport = async () => {
+    if (!importText.trim()) return;
+    try {
+      const data = JSON.parse(importText);
+      if (data && Array.isArray(data.subscriptions)) {
+        // Clear existing
+        for (const sub of subscriptions) {
+          await removeSubscription(sub.id);
+        }
+        // Import new
+        const { addSubscription } = useSubscriptionStore.getState();
+        for (const sub of data.subscriptions) {
+          await addSubscription({
+            name: sub.name,
+            color: sub.color || sub.brandColor || "#007AFF",
+            logoUrl: sub.logoUrl || sub.logo || undefined,
+            price: sub.price,
+            currency: sub.currency,
+            billingCycle: sub.billingCycle,
+            rawBillingCycle: sub.rawBillingCycle,
+            customIntervalMonths: sub.customIntervalMonths,
+            nextBillingDate: sub.nextBillingDate,
+            category: sub.category,
+            reminderEnabled: sub.reminderEnabled,
+            reminderDays: sub.reminderDays,
+            note: sub.note || sub.notes || undefined,
+            isTrial: sub.isTrial || false,
+            trialStartDate: sub.trialStartDate,
+            trialEndDate: sub.trialEndDate,
+            startDate: sub.startDate,
+            paymentMethod: sub.paymentMethod,
+            website: sub.website,
+          });
+        }
+        Alert.alert("Success", `Successfully imported ${data.subscriptions.length} subscriptions!`);
+        await loadSubscriptions();
+        loadReminderCount();
+      } else {
+        Alert.alert("Invalid Data", "The pasted JSON does not match the backup format.");
+      }
+    } catch (error) {
+      Alert.alert("Import Failed", "Invalid JSON format.");
     }
+    setShowImportModal(false);
   };
 
   const handleClearAllData = () => {
@@ -169,8 +160,10 @@ export default function SettingsScreen() {
               }
               await cancelAllReminders();
               setReminderCount(0);
+              Alert.alert("Cleared", "All subscriptions have been deleted.");
             } catch (error) {
               console.error("Failed to clear data:", error);
+              Alert.alert("Error", "Failed to clear all data.");
             }
           },
         },
@@ -182,6 +175,7 @@ export default function SettingsScreen() {
     <View style={styles.container}>
       <OverviewTopBar
         scrollY={scrollY}
+        title="Settings"
         profileName="Settings"
         onProfilePress={() => {}}
       />
@@ -196,6 +190,7 @@ export default function SettingsScreen() {
         ]}
       >
         <OverviewLargeHeader
+          title="Settings"
           profileName="Settings"
           onProfilePress={() => {}}
         />
@@ -239,13 +234,6 @@ export default function SettingsScreen() {
             <SectionTitle icon={<Info size={16} color={colors.textMuted} />} title="App" />
             <Card padding="none" shadow="small" style={styles.sectionCard}>
               <SettingsRow
-                icon={<Database size={18} color={colors.success} />}
-                label="Load Sample Data"
-                subtitle={`${subscriptions.length} subscription${subscriptions.length !== 1 ? "s" : ""} in database`}
-                onPress={handleSeedData}
-              />
-              <RowDivider />
-              <SettingsRow
                 icon={<Shield size={18} color={colors.textMuted} />}
                 label="Version"
                 subtitle="1.0.0"
@@ -269,6 +257,76 @@ export default function SettingsScreen() {
           </Animated.View>
         </View>
       </Animated.ScrollView>
+
+      {/* Import Modal (cross-platform) */}
+      <Modal
+        visible={showImportModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowImportModal(false)}
+      >
+        <TouchableOpacity
+          activeOpacity={1}
+          style={{ ...StyleSheet.absoluteFill, backgroundColor: "rgba(0, 0, 0, 0.5)" }}
+          onPress={() => setShowImportModal(false)}
+        />
+        <View style={{
+          position: "absolute",
+          left: spacing[40],
+          right: spacing[40],
+          top: "30%",
+          backgroundColor: "#1C1C1E",
+          borderRadius: 20,
+          borderWidth: 0.5,
+          borderColor: "rgba(255, 255, 255, 0.12)",
+          padding: spacing[20],
+        }}>
+          <AppText variant="headline" weight="700" color={colors.white} style={{ marginBottom: spacing[8] }}>
+            Import JSON Data
+          </AppText>
+          <AppText variant="caption1" color={colors.textSecondary} style={{ marginBottom: spacing[16] }}>
+            Paste your exported JSON backup data here.
+          </AppText>
+          <TextInput
+            style={{
+              backgroundColor: "#2C2C2E",
+              borderRadius: 12,
+              padding: spacing[12],
+              fontSize: 14,
+              color: colors.white,
+              borderWidth: 0.5,
+              borderColor: "rgba(255, 255, 255, 0.12)",
+              minHeight: 120,
+              textAlignVertical: "top",
+              fontFamily: "monospace",
+            }}
+            placeholder="Paste JSON here..."
+            placeholderTextColor={colors.textMuted}
+            value={importText}
+            onChangeText={setImportText}
+            multiline
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <View style={{ flexDirection: "row", gap: spacing[12], marginTop: spacing[16] }}>
+            <TouchableOpacity
+              onPress={() => setShowImportModal(false)}
+              style={{ flex: 1, height: 44, borderRadius: 22, backgroundColor: "#2C2C2E", alignItems: "center", justifyContent: "center" }}
+            >
+              <AppText weight="600" color={colors.textSecondary}>Cancel</AppText>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => {
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                processImport();
+              }}
+              style={{ flex: 1, height: 44, borderRadius: 22, backgroundColor: colors.white, alignItems: "center", justifyContent: "center" }}
+            >
+              <AppText weight="700" color={colors.black}>Import</AppText>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }

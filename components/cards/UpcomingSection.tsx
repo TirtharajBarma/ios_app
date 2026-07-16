@@ -35,9 +35,17 @@ const UpcomingCard = memo(function UpcomingCard({
   subscription: Subscription;
   onPress?: () => void;
 }) {
-  const { name, price, nextBillingDate, color } = subscription;
+  const { name, price, nextBillingDate, color, currency, logoUrl, website } = subscription;
   const daysText = getRelativeDays(nextBillingDate);
   
+  const getSymbol = (code: string) => {
+    if (code === "INR") return "₹";
+    if (code === "EUR") return "€";
+    if (code === "GBP") return "£";
+    if (code === "JPY") return "¥";
+    return "$";
+  };
+
   // Custom transparent-accent border + background look
   const customBg = hexToRGBA(color, 0.06);
   const customBorder = hexToRGBA(color, 0.2);
@@ -67,13 +75,15 @@ const UpcomingCard = memo(function UpcomingCard({
           }}
         >
           <LogoCircle
+            source={logoUrl}
             name={name}
             color={color}
             size="sm"
             bordered
+            website={website}
           />
           <AppText variant="footnote" weight="700" color={colors.white}>
-            ${price.toFixed(0)}
+            {getSymbol(currency || "USD")}{price.toFixed(0)}
           </AppText>
         </View>
 

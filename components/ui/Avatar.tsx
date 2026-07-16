@@ -8,7 +8,7 @@
  *   <Avatar source={{ uri: user.photo }} size="medium" />
  *   <Avatar name="John Doe" size="small" />  // shows "JD" initials
  */
-import React, { memo, useState, useCallback, forwardRef } from "react";
+import React, { memo, useState, useCallback, useEffect, forwardRef } from "react";
 import { View } from "react-native";
 import { Image, type ImageSource } from "expo-image";
 import AppText from "./AppText";
@@ -57,6 +57,11 @@ const Avatar = forwardRef<View, AvatarProps>(function Avatar(
 ) {
   const [errored, setErrored] = useState(false);
   const s = sizeMap[size];
+
+  // Reset error state when source changes
+  useEffect(() => {
+    setErrored(false);
+  }, [source]);
 
   const showImage = source && !errored;
 

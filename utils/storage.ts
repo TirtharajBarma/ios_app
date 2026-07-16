@@ -11,7 +11,7 @@ if (!AsyncStorageInstance) {
   const cache: Record<string, string> = {};
   AsyncStorageInstance = {
     getItem: async (key: string): Promise<string | null> => {
-      return cache[key] || null;
+      return cache[key] ?? null;
     },
     setItem: async (key: string, value: string): Promise<void> => {
       cache[key] = value;

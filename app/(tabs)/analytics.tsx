@@ -14,7 +14,7 @@ import Animated, {
   useSharedValue,
   useAnimatedScrollHandler,
 } from "react-native-reanimated";
-import { colors, spacing, radius, hexToRGBA } from "@/constants";
+import { colors, spacing, hexToRGBA } from "@/constants";
 import { AppText, Card, SectionHeader } from "@/components/ui";
 import {
   OverviewTopBar,
@@ -45,43 +45,68 @@ function AnalyticsScreen() {
     },
   });
 
-  // Category breakdown
-  const categoryMap = new Map<string, number>();
-  for (const sub of subscriptions) {
-    if (sub.isTrial) continue;
-    const cat = sub.category.charAt(0).toUpperCase() + sub.category.slice(1);
-    const monthly = sub.billingCycle === "yearly"
-      ? sub.price / 12
-      : sub.billingCycle === "weekly"
-      ? sub.price * 4.33
-      : sub.price;
-    categoryMap.set(cat, (categoryMap.get(cat) || 0) + monthly);
-  }
-  const categories = Array.from(categoryMap.entries())
-    .sort((a, b) => b[1] - a[1]);
-  const maxCategorySpend = categories.length > 0 ? categories[0][1] : 1;
-
-  // Billing cycle breakdown
-  const cycleBreakdown = {
+  // Billing cycle breakdown (memoized)
+  const cycleBreakdown = React.useMemo(() => ({
     monthly: subscriptions.filter((s) => s.billingCycle === "monthly" && !s.isTrial).length,
     yearly: subscriptions.filter((s) => s.billingCycle === "yearly" && !s.isTrial).length,
     other: subscriptions.filter((s) => !["monthly", "yearly"].includes(s.billingCycle) && !s.isTrial).length,
-  };
+  }), [subscriptions]);
 
   // Trial status
   const trialEndingSoon = React.useMemo(() => {
     if (nowTime === 0) return [];
     return subscriptions.filter(
-      (s) => s.isTrial && s.trialEndDate && new Date(s.trialEndDate).getTime() - nowTime < 7 * 24 * 60 * 60 * 1000
+      (s) =>
+        s.isTrial &&
+        s.trialEndDate &&
+        new Date(s.trialEndDate).getTime() > nowTime &&
+        new Date(s.trialEndDate).getTime() - nowTime < 7 * 24 * 60 * 60 * 1000
     );
   }, [subscriptions, nowTime]);
 
   const hasSubscriptions = subscriptions.length > 0;
 
+  // Determine currency symbol from subscriptions
+  const getSymbol = (code?: string) => {
+    if (code === "INR") return "₹";
+    if (code === "EUR") return "€";
+    if (code === "GBP") return "£";
+    if (code === "JPY") return "¥";
+    return "$";
+  };
+  const firstCurrency = subscriptions.find((s) => s.currency)?.currency;
+  const currencySymbol = getSymbol(firstCurrency);
+
+  // Memoize category breakdown
+  const { categories, maxCategorySpend } = React.useMemo(() => {
+    const categoryMap = new Map<string, number>();
+    for (const sub of subscriptions) {
+      if (sub.isTrial) continue;
+      const cat = sub.category.charAt(0).toUpperCase() + sub.category.slice(1);
+      const monthly = sub.billingCycle === "yearly"
+        ? sub.price / 12
+        : sub.billingCycle === "quarterly"
+        ? sub.price / 3
+        : sub.billingCycle === "semi-yearly"
+        ? sub.price / 6
+        : sub.billingCycle === "weekly"
+        ? sub.price * 52 / 12
+        : sub.billingCycle === "bi-weekly"
+        ? sub.price * 26 / 12
+        : sub.billingCycle === "custom" && sub.customIntervalMonths
+        ? sub.price / sub.customIntervalMonths
+        : sub.price;
+      categoryMap.set(cat, (categoryMap.get(cat) || 0) + monthly);
+    }
+    const sorted = Array.from(categoryMap.entries()).sort((a, b) => b[1] - a[1]);
+    return { categories: sorted, maxCategorySpend: sorted.length > 0 ? sorted[0][1] : 1 };
+  }, [subscriptions]);
+
   return (
     <View style={styles.container}>
       <OverviewTopBar
         scrollY={scrollY}
+        title="Analytics"
         profileName="Analytics"
         onProfilePress={() => {}}
       />
@@ -96,6 +121,7 @@ function AnalyticsScreen() {
         ]}
       >
         <OverviewLargeHeader
+          title="Analytics"
           profileName="Analytics"
           onProfilePress={() => {}}
         />
@@ -117,13 +143,13 @@ function AnalyticsScreen() {
               <View style={styles.statsRow}>
                 <SummaryCard
                   title="MONTHLY SPEND"
-                  amount={`$${stats.monthlyTotal.toFixed(2)}`}
+                  amount={`${currencySymbol}${stats.monthlyTotal.toFixed(2)}`}
                   icon={<TrendingUp size={14} color={colors.white} />}
                   gradient="hero"
                 />
                 <SummaryCard
                   title="YEARLY SPEND"
-                  amount={`$${stats.yearlyTotal.toFixed(2)}`}
+                  amount={`${currencySymbol}${stats.yearlyTotal.toFixed(2)}`}
                   icon={<CreditCard size={14} color={colors.white} />}
                   gradient="blue"
                 />
@@ -164,7 +190,7 @@ function AnalyticsScreen() {
                               {name}
                             </AppText>
                             <AppText variant="footnote" weight="600" color={colors.white}>
-                              ${amount.toFixed(2)}
+                              {currencySymbol}{amount.toFixed(2)}
                             </AppText>
                           </View>
                           <View style={styles.barBackground}>
@@ -218,7 +244,7 @@ function AnalyticsScreen() {
                       AVG PER SUB
                     </AppText>
                     <AppText variant="title2" weight="800" color={colors.white}>
-                      ${stats.activeCount > 0 ? (stats.monthlyTotal / stats.activeCount).toFixed(2) : "0.00"}
+                      {currencySymbol}{stats.activeCount > 0 ? (stats.monthlyTotal / stats.activeCount).toFixed(2) : "0.00"}
                     </AppText>
                   </View>
                   <View style={styles.costDivider} />
@@ -227,7 +253,7 @@ function AnalyticsScreen() {
                       MOST EXPENSIVE
                     </AppText>
                     <AppText variant="title2" weight="800" color={colors.white}>
-                      ${getMostExpensive(subscriptions)}
+                      {currencySymbol}{getMostExpensive(subscriptions)}
                     </AppText>
                   </View>
                 </View>
@@ -296,7 +322,7 @@ function getMostExpensive(subs: Subscription[]): string {
     if (sub.isTrial) continue;
     if (sub.price > max) max = sub.price;
   }
-  return max.toFixed(2);
+  return max > 0 ? max.toFixed(2) : "0.00";
 }
 
 const styles = StyleSheet.create({

@@ -1,4 +1,4 @@
-import React, { memo, useState, useCallback, forwardRef } from "react";
+import React, { memo, useState, useCallback, useEffect, forwardRef } from "react";
 import { View, type ViewStyle } from "react-native";
 import { Image, type ImageSource } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
@@ -23,8 +23,10 @@ export interface LogoCircleProps {
   size?: LogoSize | number;
   bordered?: boolean;
   shadowed?: boolean;
+  whiteBackground?: boolean;
   gradient?: GradientStops;
   style?: ViewStyle;
+  website?: string;
 }
 
 const LogoCircle = forwardRef<View, LogoCircleProps>(function LogoCircle(
@@ -35,12 +37,18 @@ const LogoCircle = forwardRef<View, LogoCircleProps>(function LogoCircle(
     size = "md",
     bordered = false,
     shadowed = false,
+    whiteBackground = false,
     gradient,
     style,
+    website,
   },
   ref
 ) {
   const [errorCount, setErrorCount] = useState(0);
+
+  useEffect(() => {
+    setErrorCount(0);
+  }, [source]);
 
   const numericSize =
     typeof size === "number" ? size : sizeMap[size].size;
@@ -51,17 +59,50 @@ const LogoCircle = forwardRef<View, LogoCircleProps>(function LogoCircle(
     setErrorCount((prev) => prev + 1);
   }, []);
 
-  // Determine current image source based on load error count
   let currentSource: any = null;
-  
+
+  // Helper to extract clean domain
+  const getDomain = () => {
+    if (website) {
+      const clean = website.toLowerCase().trim().replace(/^(https?:\/\/)?(www\.)?/, "").split("/")[0].split("?")[0];
+      if (clean) return clean;
+    }
+    if (typeof source === "string" && source.trim()) {
+      if (source.includes("logo.clearbit.com/")) {
+        return source.split("logo.clearbit.com/")[1].split("/")[0];
+      }
+      if (source.includes("icon.horse/icon/")) {
+        return source.split("icon.horse/icon/")[1].split("/")[0];
+      }
+      if (source.includes("domain=")) {
+        return source.split("domain=")[1].split("&")[0];
+      }
+      const clean = source.toLowerCase().trim().replace(/^(https?:\/\/)?(www\.)?/, "").split("/")[0].split("?")[0];
+      if (clean) return clean;
+    }
+    if (name) {
+      const cleanName = name.toLowerCase().replace(/[^a-z0-9]/g, "");
+      return `${cleanName}.com`;
+    }
+    return null;
+  };
+
+  const domain = getDomain();
+
   if (source && errorCount === 0) {
     currentSource = typeof source === "string" ? { uri: source } : source;
-  } else if (name && errorCount === 1) {
-    // Stage 2 Fallback: Google Favicon API
-    const cleanName = name.toLowerCase().replace(/[^a-z0-9]/g, "");
+  } else if (!source && domain && errorCount === 0) {
     currentSource = {
-      uri: `https://www.google.com/s2/favicons?sz=128&domain=${cleanName}.com`,
+      uri: `https://www.google.com/s2/favicons?sz=128&domain=${domain}`,
     };
+  } else if (domain && errorCount === 1) {
+    // Only try Google Favicon as fallback if the failed source was NOT already a google favicon
+    const isGoogleFavicon = typeof source === "string" && source.includes("google.com/s2/favicons");
+    if (!isGoogleFavicon) {
+      currentSource = {
+        uri: `https://www.google.com/s2/favicons?sz=128&domain=${domain}`,
+      };
+    }
   }
 
   const showImage = currentSource !== null;
@@ -70,16 +111,20 @@ const LogoCircle = forwardRef<View, LogoCircleProps>(function LogoCircle(
     hexToRGBA(color, 0.6),
   ] as GradientStops;
 
+  const bgColor = showImage ? "#FFFFFF" : (whiteBackground ? "#FFFFFF" : color);
+
   const wrapperStyle: ViewStyle = {
     width: numericSize,
     height: numericSize,
     borderRadius: numericSize / 2,
     borderWidth: bordered ? 1.5 : 0,
-    borderColor: hexToRGBA(color, 0.4),
+    borderColor: showImage
+      ? "rgba(255, 255, 255, 0.12)"
+      : (whiteBackground ? "rgba(0, 0, 0, 0.08)" : hexToRGBA(color, 0.4)),
     overflow: "hidden",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: color,
+    backgroundColor: bgColor,
     ...(shadowed ? shadows.card.native : {}),
   };
 
@@ -88,9 +133,12 @@ const LogoCircle = forwardRef<View, LogoCircleProps>(function LogoCircle(
       <View ref={ref} style={[wrapperStyle, style]}>
         <Image
           source={currentSource}
-          style={{ width: numericSize, height: numericSize }}
+          style={{
+            width: numericSize * 0.68,
+            height: numericSize * 0.68,
+          }}
           onError={handleError}
-          contentFit="cover"
+          contentFit="contain"
         />
       </View>
     );

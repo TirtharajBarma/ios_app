@@ -35,7 +35,7 @@ const PopularItem = memo(function PopularItem({
   scrollX: SharedValue<number>;
   onPress?: () => void;
 }) {
-  const { name, brandColor } = service;
+  const { name, brandColor, iconUrl, whiteBackground, website } = service;
 
   const animatedStyle = useAnimatedStyle(() => {
     "worklet";
@@ -74,12 +74,15 @@ const PopularItem = memo(function PopularItem({
         ]}
       >
         <LogoCircle
+          source={iconUrl}
           name={name}
           color={brandColor}
+          whiteBackground={whiteBackground}
           size={60}
           bordered
           shadowed
           style={{ marginBottom: spacing[8] }}
+          website={website}
         />
         <AppText
           variant="caption2"

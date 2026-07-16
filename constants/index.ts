@@ -38,3 +38,34 @@ export {
 // ─── Helper functions ──────────────────────────────────────────────
 
 export { hexToRGBA, opacity, dynamicColor } from "./theme";
+
+// ─── Shared data ──────────────────────────────────────────────────
+
+export const CATEGORIES = [
+  "Entertainment",
+  "Music",
+  "Productivity",
+  "Health",
+  "Education",
+  "Gaming",
+  "AI",
+  "News",
+  "Cloud",
+  "Shopping",
+  "Finance",
+  "Other",
+] as const;
+
+export const CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: "$",
+  INR: "₹",
+  EUR: "€",
+  GBP: "£",
+  JPY: "¥",
+  CAD: "$",
+  AUD: "$",
+};
+
+export function getCurrencySymbol(code: string): string {
+  return CURRENCY_SYMBOLS[code] || "$";
+}

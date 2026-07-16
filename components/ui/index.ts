@@ -64,5 +64,8 @@ export type { HeroHeaderProps } from "./HeroHeader";
 export { default as SegmentedControl } from "./SegmentedControl";
 export type { SegmentedControlProps } from "./SegmentedControl";
 
+export { default as PressableScale } from "./PressableScale";
+export type { PressableScaleProps } from "./PressableScale";
+
 export { default as SwipeDownSheet } from "./SwipeDownSheet";
 export type { SwipeDownSheetProps } from "./SwipeDownSheet";

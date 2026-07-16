@@ -15,7 +15,7 @@ import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 
 import { colors, spacing } from "@/constants";
-import { AppText, LogoCircle } from "@/components/ui";
+import { AppText, LogoCircle, PressableScale } from "@/components/ui";
 import { services, type Service } from "@/assets/data/services";
 
 const TABS = [
@@ -30,6 +30,7 @@ const TABS = [
   "Health",
   "Education",
   "Finance",
+  "Indian",
 ] as const;
 
 export default function AddSearchScreen() {
@@ -72,7 +73,7 @@ export default function AddSearchScreen() {
         category: service.category,
         brandColor: service.brandColor,
         website: service.website || "",
-        logo: service.website ? `https://logo.clearbit.com/${service.website}` : "",
+        logo: service.iconUrl || "",
       },
     });
   }, [router]);
@@ -97,12 +98,21 @@ export default function AddSearchScreen() {
   const filteredSearchList = useMemo(() => {
     if (!query.trim()) return [];
     return services.filter((s) =>
-      s.name.toLowerCase().includes(query.toLowerCase())
+      s.name.toLowerCase().includes(query.toLowerCase()) ||
+      s.category.toLowerCase().includes(query.toLowerCase())
     );
   }, [query]);
 
   const categoryServices = useMemo(() => {
     if (activeTab === "For You") return [];
+    if (activeTab === "Indian") {
+      const indianIds = [
+        "jiohotstar", "zee5", "sonyliv", "jiocinema", "hoichoi", "lionsgate-play", "aha",
+        "jiosaavn", "gaana",
+        "cult-fit", "healthifyme", "practo", "pharmeasy",
+      ];
+      return services.filter((s) => indianIds.includes(s.id));
+    }
     return services.filter((s) => s.category === activeTab);
   }, [activeTab]);
 
@@ -112,13 +122,13 @@ export default function AddSearchScreen() {
   const essentialServices = useMemo(() => {
     return services.filter((s) =>
       ["Storage", "Productivity", "Finance"].includes(s.category)
-    ).slice(0, 9);
+    );
   }, []);
 
   const appSubscriptions = useMemo(() => {
     return services.filter((s) =>
       ["Health", "Education", "Gaming", "AI"].includes(s.category)
-    ).slice(0, 9);
+    );
   }, []);
 
   // Helper helper to chunk array into columns of 3
@@ -174,7 +184,7 @@ export default function AddSearchScreen() {
                   </AppText>
                 </View>
                 
-                <TouchableOpacity onPress={handleAddCustom} style={styles.customSearchResultItem}>
+                <PressableScale onPress={handleAddCustom} scale={0.96} style={styles.customSearchResultItem}>
                   <View style={styles.searchResultLeft}>
                     <View style={styles.customPlusCircle}>
                       <Plus size={20} color={colors.accent} />
@@ -185,21 +195,24 @@ export default function AddSearchScreen() {
                     </View>
                   </View>
                   <Plus size={16} color={colors.textMuted} />
-                </TouchableOpacity>
+                </PressableScale>
               </View>
             ) : (
               filteredSearchList.map((service) => (
-                <TouchableOpacity
+                <PressableScale
                   key={service.id}
                   onPress={() => handleServicePress(service)}
+                  scale={0.96}
                   style={styles.searchResultItem}
                 >
                   <View style={styles.searchResultLeft}>
                     <LogoCircle
-                      source={service.website ? `https://logo.clearbit.com/${service.website}` : undefined}
+                      source={service.iconUrl}
                       name={service.name}
                       color={service.brandColor}
+                      whiteBackground={service.whiteBackground}
                       size={40}
+                      website={service.website}
                     />
                     <View style={styles.searchResultInfo}>
                       <AppText style={styles.searchResultName}>{service.name}</AppText>
@@ -207,7 +220,7 @@ export default function AddSearchScreen() {
                     </View>
                   </View>
                   <Plus size={18} color={colors.textMuted} />
-                </TouchableOpacity>
+                </PressableScale>
               ))
             )}
           </ScrollView>
@@ -230,12 +243,13 @@ export default function AddSearchScreen() {
               {TABS.map((tab) => {
                 const isActive = tab === activeTab;
                 return (
-                  <TouchableOpacity
+                  <PressableScale
                     key={tab}
                     onPress={() => {
                       Haptics.selectionAsync();
                       setActiveTab(tab);
                     }}
+                    scale={0.94}
                     style={isActive ? [styles.tabPill, styles.tabPillActive] : styles.tabPill}
                   >
                     <AppText
@@ -243,7 +257,7 @@ export default function AddSearchScreen() {
                     >
                       {tab}
                     </AppText>
-                  </TouchableOpacity>
+                  </PressableScale>
                 );
               })}
             </ScrollView>
@@ -259,18 +273,21 @@ export default function AddSearchScreen() {
                     contentContainerStyle={styles.popularRow}
                   >
                     {popularServices.map((service) => (
-                      <TouchableOpacity
+                      <PressableScale
                         key={service.id}
                         onPress={() => handleServicePress(service)}
+                        scale={0.92}
                         style={styles.popularCircleWrapper}
                       >
                         <LogoCircle
-                          source={service.website ? `https://logo.clearbit.com/${service.website}` : undefined}
+                          source={service.iconUrl}
                           name={service.name}
                           color={service.brandColor}
+                          whiteBackground={service.whiteBackground}
                           size={64}
+                          website={service.website}
                         />
-                      </TouchableOpacity>
+                      </PressableScale>
                     ))}
                   </ScrollView>
                 </View>
@@ -286,24 +303,27 @@ export default function AddSearchScreen() {
                     {essentialColumns.map((col, colIdx) => (
                       <View key={colIdx} style={styles.gridColumn}>
                         {col.map((service) => (
-                          <TouchableOpacity
+                          <PressableScale
                             key={service.id}
                             onPress={() => handleServicePress(service)}
+                            scale={0.96}
                             style={styles.gridItem}
                           >
                             <View style={styles.gridItemLeft}>
                               <LogoCircle
-                                source={service.website ? `https://logo.clearbit.com/${service.website}` : undefined}
+                                source={service.iconUrl}
                                 name={service.name}
                                 color={service.brandColor}
+                                whiteBackground={service.whiteBackground}
                                 size={32}
+                                website={service.website}
                               />
                               <AppText style={styles.gridItemName} numberOfLines={1}>
                                 {service.name}
                               </AppText>
                             </View>
                             <Plus size={16} color={colors.textMuted} />
-                          </TouchableOpacity>
+                          </PressableScale>
                         ))}
                       </View>
                     ))}
@@ -321,24 +341,27 @@ export default function AddSearchScreen() {
                     {appSubColumns.map((col, colIdx) => (
                       <View key={colIdx} style={styles.gridColumn}>
                         {col.map((service) => (
-                          <TouchableOpacity
+                          <PressableScale
                             key={service.id}
                             onPress={() => handleServicePress(service)}
+                            scale={0.96}
                             style={styles.gridItem}
                           >
                             <View style={styles.gridItemLeft}>
                               <LogoCircle
-                                source={service.website ? `https://logo.clearbit.com/${service.website}` : undefined}
+                                source={service.iconUrl}
                                 name={service.name}
                                 color={service.brandColor}
+                                whiteBackground={service.whiteBackground}
                                 size={32}
+                                website={service.website}
                               />
                               <AppText style={styles.gridItemName} numberOfLines={1}>
                                 {service.name}
                               </AppText>
                             </View>
                             <Plus size={16} color={colors.textMuted} />
-                          </TouchableOpacity>
+                          </PressableScale>
                         ))}
                       </View>
                     ))}
@@ -350,24 +373,27 @@ export default function AddSearchScreen() {
               <View style={styles.categoryListContainer}>
                 <AppText style={styles.sectionHeader}>{activeTab}</AppText>
                 {categoryServices.map((service) => (
-                  <TouchableOpacity
+                  <PressableScale
                     key={service.id}
                     onPress={() => handleServicePress(service)}
+                    scale={0.96}
                     style={styles.gridItemFullWidth}
                   >
                     <View style={styles.gridItemLeft}>
-                      <LogoCircle
-                        source={service.website ? `https://logo.clearbit.com/${service.website}` : undefined}
-                        name={service.name}
-                        color={service.brandColor}
-                        size={36}
-                      />
+                              <LogoCircle
+                                source={service.iconUrl}
+                                name={service.name}
+                                color={service.brandColor}
+                                whiteBackground={service.whiteBackground}
+                                size={32}
+                                website={service.website}
+                              />
                       <AppText style={styles.gridItemName} numberOfLines={1}>
                         {service.name}
                       </AppText>
                     </View>
                     <Plus size={16} color={colors.textMuted} />
-                  </TouchableOpacity>
+                  </PressableScale>
                 ))}
               </View>
             )}
@@ -496,6 +522,11 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: spacing[12],
     height: 56,
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 5,
+    elevation: 3,
   },
   gridItemLeft: {
     flexDirection: "row",
@@ -523,6 +554,11 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: spacing[12],
     height: 58,
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 5,
+    elevation: 3,
   },
   floatingSearchWrapper: {
     position: "absolute",
@@ -566,6 +602,11 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: spacing[12],
     height: 60,
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 5,
+    elevation: 3,
   },
   searchResultLeft: {
     flexDirection: "row",
@@ -614,6 +655,11 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: spacing[12],
     height: 64,
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
   },
   customPlusCircle: {
     width: 40,

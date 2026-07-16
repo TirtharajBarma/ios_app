@@ -1,19 +1,26 @@
 import { parseISO, isSameMonth } from "date-fns";
 import type { Subscription } from "@/types/subscription";
+import { toMonthly as dateToMonthly } from "./date";
+
+/** Normalize any billing cycle to a monthly cost. Delegates to date.ts for accuracy. */
+export function toMonthly(price: number, cycle: string, customIntervalMonths?: number): number {
+  return dateToMonthly(price, cycle as any, customIntervalMonths);
+}
 
 /**
- * Calculates the monthly average across all subscriptions.
- * Yearly subscriptions are divided by 12.
+ * Calculates the total monthly spend across all paid subscriptions.
  */
-export function calculateMonthlyAverage(subscriptions: Subscription[]): number {
+export function calculateMonthlySpend(subscriptions: Subscription[]): number {
   return subscriptions.reduce((acc, sub) => {
-    const cost = sub.isTrial ? 0 : sub.price;
-    if (sub.billingCycle === "yearly") {
-      return acc + cost / 12;
-    }
-    return acc + cost;
+    if (sub.isTrial) return acc;
+    return acc + toMonthly(sub.price, sub.billingCycle, sub.customIntervalMonths);
   }, 0);
 }
+
+/**
+ * @deprecated Use calculateMonthlySpend instead. This function returns a sum, not an average.
+ */
+export const calculateMonthlyAverage = calculateMonthlySpend;
 
 /**
  * Calculates the total cost of subscriptions due in the current month.
@@ -24,9 +31,13 @@ export function calculateDueThisMonth(
 ): number {
   return subscriptions.reduce((acc, sub) => {
     const cost = sub.isTrial ? 0 : sub.price;
-    const renewalDate = parseISO(sub.nextBillingDate);
-    if (isSameMonth(renewalDate, referenceDate)) {
-      return acc + cost;
+    try {
+      const renewalDate = parseISO(sub.nextBillingDate);
+      if (isSameMonth(renewalDate, referenceDate)) {
+        return acc + cost;
+      }
+    } catch {
+      // Invalid date — skip
     }
     return acc;
   }, 0);

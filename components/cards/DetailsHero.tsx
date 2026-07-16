@@ -11,6 +11,9 @@ export interface DetailsHeroProps {
   brandColor: string;
   category: string;
   isTrial: boolean;
+  logoUrl?: string;
+  whiteBackground?: boolean;
+  website?: string;
 }
 
 function DetailsHero({
@@ -21,9 +24,32 @@ function DetailsHero({
   brandColor,
   category,
   isTrial,
+  logoUrl,
+  whiteBackground,
+  website,
 }: DetailsHeroProps) {
-  const formattedPrice = `${currency}${price.toFixed(2)}`;
-  const cycleSuffix = billingCycle === "custom" ? "cycle" : billingCycle.toLowerCase() === "weekly" ? "wk" : billingCycle.toLowerCase() === "yearly" ? "yr" : "mo";
+  const getSymbol = (code: string) => {
+    if (code === "INR") return "₹";
+    if (code === "EUR") return "€";
+    if (code === "GBP") return "£";
+    if (code === "JPY") return "¥";
+    if (code === "CAD" || code === "AUD") return "$";
+    return "$";
+  };
+  const formattedPrice = `${getSymbol(currency)}${price.toFixed(2)}`;
+
+  const getCycleSuffix = (cycle: string) => {
+    const c = cycle.toLowerCase();
+    if (c === "weekly") return "wk";
+    if (c === "bi-weekly") return "2wk";
+    if (c === "monthly") return "mo";
+    if (c === "quarterly") return "qtr";
+    if (c === "semi-yearly") return "6mo";
+    if (c === "yearly") return "yr";
+    if (c.startsWith("custom:")) return "cycle";
+    return "mo";
+  };
+  const cycleSuffix = getCycleSuffix(billingCycle);
 
   return (
     <View style={[styles.container, { backgroundColor: brandColor }]}>
@@ -33,12 +59,15 @@ function DetailsHero({
       <View style={styles.content}>
         {/* Large Logo */}
         <LogoCircle
+          source={logoUrl}
           name={name}
           color={colors.white}
           size={80}
           bordered
           shadowed
+          whiteBackground={whiteBackground}
           style={styles.logo}
+          website={website}
         />
 
         {/* Subscription Name */}

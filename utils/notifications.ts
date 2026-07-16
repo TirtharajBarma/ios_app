@@ -1,6 +1,7 @@
 import { Platform } from "react-native";
 import { parseISO, differenceInSeconds } from "date-fns";
 import type { Subscription } from "@/types/subscription";
+import { toMonthly } from "@/utils/subscriptionUtils";
 
 let Notifications: any = null;
 let isNotificationsAvailable = false;
@@ -71,8 +72,10 @@ export async function scheduleReminder(sub: Subscription): Promise<void> {
       content: {
         title: `${sub.name} renewal${sub.reminderDays === 0 ? " today" : " upcoming"}`,
         body: sub.isTrial
-          ? `Your free trial ends in ${sub.reminderDays} day${sub.reminderDays !== 1 ? "s" : ""}.`
-          : `Your $${sub.price.toFixed(2)} ${sub.billingCycle} subscription renews${sub.reminderDays === 0 ? " today" : ` in ${sub.reminderDays} day${sub.reminderDays !== 1 ? "s" : ""}`}.`,
+          ? sub.reminderDays === 0
+            ? `Your free trial for ${sub.name} ends today.`
+            : `Your free trial for ${sub.name} ends in ${sub.reminderDays} day${sub.reminderDays !== 1 ? "s" : ""}.`
+          : `Your ${sub.billingCycle} subscription for ${sub.name} renews${sub.reminderDays === 0 ? " today" : ` in ${sub.reminderDays} day${sub.reminderDays !== 1 ? "s" : ""}`}.`,
         data: { subscriptionId: sub.id },
         sound: true,
       },

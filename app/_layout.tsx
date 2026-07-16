@@ -12,15 +12,15 @@ export default function RootLayout() {
   const router = useRouter();
 
   useEffect(() => {
-    initDatabase();
-    requestNotificationPermissions();
+    initDatabase().catch((e) => console.error("DB init failed:", e));
+    requestNotificationPermissions().catch((e) => console.warn("Notification permissions failed:", e));
 
     AsyncStorage.getItem(ONBOARDING_KEY).then((value: string | null) => {
       if (!value) {
         router.replace("/onboarding");
       }
     });
-  }, []);
+  }, [router]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

@@ -2,8 +2,9 @@ import React, { memo, useCallback } from "react";
 import { View, StyleSheet, Alert, type StyleProp, type ViewStyle } from "react-native";
 import Animated, { FadeInUp } from "react-native-reanimated";
 import { Swipeable } from "react-native-gesture-handler";
-import { ChevronRight, Trash2 } from "lucide-react-native";
+import { ChevronRight, Trash2, Repeat } from "lucide-react-native";
 import { format, parseISO, differenceInDays, isSameDay } from "date-fns";
+import * as Haptics from "expo-haptics";
 import { Card, AppText, LogoCircle } from "@/components/ui";
 import { colors, spacing, radius, hexToRGBA } from "@/constants";
 import type { Subscription } from "@/types/subscription";
@@ -22,7 +23,9 @@ function getRenewalStatus(dateStr: string) {
   const renewalDate = parseISO(dateStr);
   const diffDays = differenceInDays(renewalDate, today);
 
-  if (isSameDay(renewalDate, today)) {
+  if (diffDays < 0) {
+    return { text: "Overdue", color: colors.danger };
+  } else if (isSameDay(renewalDate, today)) {
     return { text: "Today", color: colors.danger };
   } else if (diffDays === 1) {
     return { text: "Tomorrow", color: colors.warning };
@@ -33,6 +36,16 @@ function getRenewalStatus(dateStr: string) {
   }
 }
 
+const CYCLE_LABELS: Record<string, string> = {
+  weekly: "weekly",
+  "bi-weekly": "bi-weekly",
+  monthly: "monthly",
+  quarterly: "quarterly",
+  "semi-yearly": "semi-yearly",
+  yearly: "yearly",
+  custom: "custom",
+};
+
 function SubscriptionCard({
   subscription,
   index,
@@ -41,12 +54,20 @@ function SubscriptionCard({
   onEdit,
   style,
 }: SubscriptionCardProps) {
-  const { name, price, billingCycle, nextBillingDate, color, isTrial } = subscription;
+  const { name, price, billingCycle, nextBillingDate, color, isTrial, currency, logoUrl, website } = subscription;
   const status = getRenewalStatus(nextBillingDate);
 
-  const formattedPrice = `$${price.toFixed(2)}`;
+  const getSymbol = (code: string) => {
+    if (code === "INR") return "₹";
+    if (code === "EUR") return "€";
+    if (code === "GBP") return "£";
+    if (code === "JPY") return "¥";
+    return "$";
+  };
+  const formattedPrice = `${getSymbol(currency || "USD")}${price.toFixed(2)}`;
 
   const handleLongPress = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     Alert.alert(name, "Choose an action", [
       { text: "View Details", onPress: () => onPress?.() },
       { text: "Edit", onPress: () => onEdit?.() },
@@ -97,11 +118,13 @@ function SubscriptionCard({
           }}
         >
           <LogoCircle
+            source={logoUrl}
             name={name}
             color={color}
             size="md"
             bordered
             style={{ marginRight: spacing[16] }}
+            website={website}
           />
           <View style={{ flex: 1 }}>
             <View
@@ -154,14 +177,19 @@ function SubscriptionCard({
             <AppText variant="headline" weight="700" color={colors.white}>
               {formattedPrice}
             </AppText>
-            <AppText
-              variant="caption2"
-              weight="600"
-              color={status.color === colors.textMuted ? colors.textMuted : status.color}
-              style={{ opacity: 0.8, marginTop: 2 }}
-            >
-              {billingCycle === "monthly" ? "monthly" : "yearly"}
-            </AppText>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 3, marginTop: 2 }}>
+              <AppText
+                variant="caption2"
+                weight="600"
+                color={status.color === colors.textMuted ? colors.textMuted : status.color}
+                style={{ opacity: 0.8 }}
+              >
+                {CYCLE_LABELS[billingCycle] || billingCycle}
+              </AppText>
+              {!isTrial && (
+                <Repeat size={10} color={status.color === colors.textMuted ? colors.textMuted : status.color} style={{ opacity: 0.8 }} />
+              )}
+            </View>
           </View>
           <ChevronRight size={14} color={colors.textMuted} strokeWidth={2.5} />
         </View>
@@ -172,7 +200,10 @@ function SubscriptionCard({
   const wrapped = onDelete ? (
     <Swipeable
       renderRightActions={renderRightActions}
-      onSwipeableRightOpen={onDelete}
+      onSwipeableRightOpen={() => {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        onDelete();
+      }}
       overshootRight={false}
       friction={2}
       rightThreshold={40}

@@ -13,7 +13,7 @@ export interface ServiceCardProps {
 }
 
 function ServiceCard({ service, index, onPress, style }: ServiceCardProps) {
-  const { name, category, brandColor } = service;
+  const { name, category, brandColor, iconUrl, whiteBackground, website } = service;
 
   // Custom transparent-accent border + background look
   const customBg = hexToRGBA(brandColor, 0.05);
@@ -42,10 +42,13 @@ function ServiceCard({ service, index, onPress, style }: ServiceCardProps) {
           {/* Top row: Logo Circle */}
           <View style={{ flexDirection: "row", alignItems: "center" }}>
             <LogoCircle
+              source={iconUrl}
               name={name}
               color={brandColor}
+              whiteBackground={whiteBackground}
               size="sm"
               bordered
+              website={website}
             />
           </View>
 

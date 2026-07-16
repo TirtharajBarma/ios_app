@@ -13,10 +13,12 @@ export interface ServiceHeroProps {
   name: string;
   category: string;
   brandColor: string;
+  iconUrl?: string;
+  whiteBackground?: boolean;
   website?: string;
 }
 
-function ServiceHero({ name, category, brandColor, website }: ServiceHeroProps) {
+function ServiceHero({ name, category, brandColor, iconUrl, whiteBackground, website }: ServiceHeroProps) {
   const logoScale = useSharedValue(0);
 
   useEffect(() => {
@@ -32,11 +34,14 @@ function ServiceHero({ name, category, brandColor, website }: ServiceHeroProps) 
       {/* Large logo circle with spring scaling entry */}
       <Animated.View style={[styles.logoWrapper, logoAnim]}>
         <LogoCircle
+          source={iconUrl}
           name={name}
           color={brandColor}
+          whiteBackground={whiteBackground}
           size={96}
           bordered
           shadowed
+          website={website}
         />
       </Animated.View>
 

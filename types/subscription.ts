@@ -8,8 +8,10 @@
 /** How often a subscription is billed. */
 export type BillingCycle =
   | "weekly"
+  | "bi-weekly"
   | "monthly"
   | "quarterly"
+  | "semi-yearly"
   | "yearly"
   | "custom";
 
@@ -24,6 +26,8 @@ export type Category =
   | "ai"
   | "education"
   | "gaming"
+  | "finance"
+  | "shopping"
   | "other";
 
 /** ISO-4217 currency code, e.g. "USD", "EUR", "INR". */

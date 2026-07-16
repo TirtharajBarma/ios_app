@@ -60,11 +60,17 @@ export function advanceCycle(
     case "weekly":
       next = addWeeks(base, 1);
       break;
+    case "bi-weekly":
+      next = addWeeks(base, 2);
+      break;
     case "monthly":
       next = addMonths(base, 1);
       break;
     case "quarterly":
       next = addMonths(base, 3);
+      break;
+    case "semi-yearly":
+      next = addMonths(base, 6);
       break;
     case "yearly":
       next = addYears(base, 1);
@@ -82,10 +88,14 @@ export function periodsPerYear(cycle: BillingCycle, customMonths = 1): number {
   switch (cycle) {
     case "weekly":
       return 52;
+    case "bi-weekly":
+      return 26;
     case "monthly":
       return 12;
     case "quarterly":
       return 4;
+    case "semi-yearly":
+      return 2;
     case "yearly":
       return 1;
     case "custom":
