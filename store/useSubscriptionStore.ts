@@ -8,6 +8,7 @@ import * as db from "@/database/database";
 import { toMonthly, toYearly, daysUntil, advanceCycle, getSubscriptionActivePrice } from "@/utils/date";
 import { scheduleReminder, cancelReminder } from "@/utils/notifications";
 import AsyncStorage from "@/utils/storage";
+import { getExchangeRates } from "@/utils/currency";
 
 interface SubscriptionState {
   /** In-memory list, sorted by next billing date (ascending). */
@@ -23,6 +24,7 @@ interface SubscriptionState {
   updateSubscription: (id: string, input: Partial<NewSubscriptionInput>) => Promise<void>;
   removeSubscription: (id: string) => Promise<void>;
   refresh: () => Promise<void>;
+  convertAllCurrencies: (oldCurrency: string, newCurrency: string) => Promise<void>;
 
   // Compatibility aliases
   load: () => Promise<void>;
@@ -177,6 +179,36 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
       const subscriptions = state.subscriptions.filter((s) => s.id !== id);
       return { subscriptions, stats: computeStats(subscriptions) };
     });
+  },
+
+  convertAllCurrencies: async (oldCurrency, newCurrency) => {
+    await db.initializeDatabase();
+    const EXCHANGE_RATES = await getExchangeRates();
+    
+    const subs = get().subscriptions;
+    const rateFrom = EXCHANGE_RATES[oldCurrency?.toUpperCase()] || 1.0;
+    const rateTo = EXCHANGE_RATES[newCurrency?.toUpperCase()] || 1.0;
+    
+    const updatedSubs: Subscription[] = [];
+    
+    for (const sub of subs) {
+      const subRateFrom = EXCHANGE_RATES[sub.currency?.toUpperCase()] || rateFrom;
+      const priceInUSD = sub.price / subRateFrom;
+      const newPrice = Math.round((priceInUSD * rateTo) * 100) / 100;
+      
+      await db.updateSubscription(sub.id, {
+        price: newPrice,
+        currency: newCurrency,
+      });
+      
+      updatedSubs.push({
+        ...sub,
+        price: newPrice,
+        currency: newCurrency,
+      });
+    }
+    
+    set({ subscriptions: updatedSubs, stats: computeStats(updatedSubs) });
   },
 
   refresh: async () => {

@@ -3,6 +3,7 @@ import { parseISO, differenceInSeconds } from "date-fns";
 import type { Subscription } from "@/types/subscription";
 import { toMonthly } from "@/utils/subscriptionUtils";
 
+// Safely require expo-notifications inside a try/catch block to prevent crash when module is not compiled/linked yet
 let Notifications: any = null;
 let isNotificationsAvailable = false;
 
@@ -18,16 +19,16 @@ try {
       }),
     });
     isNotificationsAvailable = true;
-    console.log("Notifications: Native module initialized successfully.");
   }
 } catch (e) {
-  console.warn("Notifications: Native module is not available on this client. Reminders will be mocked.");
+  isNotificationsAvailable = false;
+  console.warn("Notifications native module is not available in the current binary. Reminders will be mocked.");
 }
 
 const REMINDER_CHANNEL = "subscription-reminders";
 
 export async function requestNotificationPermissions(): Promise<boolean> {
-  if (!isNotificationsAvailable) return false;
+  if (!isNotificationsAvailable || !Notifications) return false;
 
   try {
     if (Platform.OS === "android") {
@@ -52,7 +53,7 @@ export async function requestNotificationPermissions(): Promise<boolean> {
 }
 
 export async function scheduleReminder(sub: Subscription): Promise<void> {
-  if (!isNotificationsAvailable) return;
+  if (!isNotificationsAvailable || !Notifications) return;
   if (!sub.reminderEnabled) return;
   if (!sub.nextBillingDate) return;
 
@@ -80,9 +81,9 @@ export async function scheduleReminder(sub: Subscription): Promise<void> {
         sound: true,
       },
       trigger: {
-        type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
-        seconds: secondsUntil,
-      },
+        type: "date",
+        date: triggerDate,
+      } as any,
       identifier,
     });
   } catch (error) {
@@ -91,13 +92,13 @@ export async function scheduleReminder(sub: Subscription): Promise<void> {
 }
 
 export async function cancelReminder(subscriptionId: string): Promise<void> {
-  if (!isNotificationsAvailable) return;
+  if (!isNotificationsAvailable || !Notifications) return;
   const identifier = `reminder-${subscriptionId}`;
   await Notifications.cancelScheduledNotificationAsync(identifier).catch(() => {});
 }
 
 export async function cancelAllReminders(): Promise<void> {
-  if (!isNotificationsAvailable) return;
+  if (!isNotificationsAvailable || !Notifications) return;
   try {
     await Notifications.cancelAllScheduledNotificationsAsync();
   } catch (error) {
@@ -106,7 +107,7 @@ export async function cancelAllReminders(): Promise<void> {
 }
 
 export async function scheduleAllReminders(subscriptions: Subscription[]): Promise<void> {
-  if (!isNotificationsAvailable) return;
+  if (!isNotificationsAvailable || !Notifications) return;
   await cancelAllReminders();
   for (const sub of subscriptions) {
     await scheduleReminder(sub);
@@ -114,7 +115,7 @@ export async function scheduleAllReminders(subscriptions: Subscription[]): Promi
 }
 
 export async function getScheduledReminders(): Promise<any[]> {
-  if (!isNotificationsAvailable) return [];
+  if (!isNotificationsAvailable || !Notifications) return [];
   try {
     return await Notifications.getAllScheduledNotificationsAsync();
   } catch (error) {
@@ -122,3 +123,4 @@ export async function getScheduledReminders(): Promise<any[]> {
     return [];
   }
 }
+export { isNotificationsAvailable };

@@ -45,6 +45,7 @@ import {
   PressableScale,
 } from "@/components/ui";
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
+import { useSettingsStore } from "@/store/useSettingsStore";
 import { getSubscriptionActivePrice } from "@/utils/date";
 import { LinearGradient } from "expo-linear-gradient";
 
@@ -377,10 +378,9 @@ export default function HomeScreen() {
     0,
   );
 
-  // Determine dynamic currency symbol from first subscription
-  const currencySymbol = nextRenewingSub
-    ? getCurrencySymbol(nextRenewingSub.currency)
-    : "$";
+  // Global currency from settings
+  const { currencyCode, userName } = useSettingsStore();
+  const currencySymbol = getCurrencySymbol(currencyCode);
 
   return (
     <View style={styles.container}>
@@ -410,9 +410,22 @@ export default function HomeScreen() {
             </AppText>
           </View>
           {/* Profile Button */}
-          <View style={styles.profileBtn}>
-            <User size={18} color={colors.white} />
-          </View>
+          <TouchableOpacity
+            style={styles.profileBtn}
+            activeOpacity={0.75}
+            onPress={() => {
+              Haptics.selectionAsync();
+              router.push("/settings");
+            }}
+          >
+            {userName ? (
+              <AppText style={styles.profileInitials}>
+                {userName.trim().split(" ").map((w: string) => w[0]).join("").toUpperCase().slice(0, 2)}
+              </AppText>
+            ) : (
+              <User size={18} color={colors.white} />
+            )}
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -923,6 +936,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     marginLeft: spacing[12],
+  },
+  profileInitials: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: colors.white,
+    letterSpacing: -0.5,
   },
   scrollContent: {
     paddingHorizontal: spacing[16],

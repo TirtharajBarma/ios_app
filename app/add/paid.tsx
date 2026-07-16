@@ -26,7 +26,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
 import * as ImagePicker from "expo-image-picker";
 
-import { colors, spacing, hexToRGBA } from "@/constants";
+import { colors, spacing, hexToRGBA, CURRENCIES } from "@/constants";
 import {
   AppText,
   LogoCircle,
@@ -35,6 +35,7 @@ import {
   PressableScale,
 } from "@/components/ui";
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
+import { useSettingsStore } from "@/store/useSettingsStore";
 import { getNextRenewalDate } from "@/utils/date";
 
 /* ── Constants ──────────────────────────────────────────────────────── */
@@ -261,7 +262,7 @@ export default function UnifiedFormScreen() {
     existingSub ? String(existingSub.price) : "",
   );
   const [currency, setCurrency] = useState(() => {
-    if (!existingSub) return "INR";
+    if (!existingSub) return useSettingsStore.getState().currencyCode || "INR";
     return (existingSub.currency || "INR").slice(0, 3).toUpperCase();
   });
   const [startDate, setStartDate] = useState(() =>
@@ -408,9 +409,13 @@ export default function UnifiedFormScreen() {
   const [reminderEnabled, setReminderEnabled] = useState(() =>
     existingSub ? existingSub.reminderEnabled : true,
   );
-  const [reminderDays, setReminderDays] = useState(() =>
-    existingSub ? existingSub.reminderDays : 1,
-  );
+  const [reminderDays, setReminderDays] = useState(() => {
+    if (existingSub) return existingSub.reminderDays;
+    const globalTiming = useSettingsStore.getState().notificationTiming;
+    if (globalTiming === "3days") return 3;
+    if (globalTiming === "1week") return 7;
+    return 1;
+  });
   const [autoRenew, setAutoRenew] = useState(() =>
     existingSub ? existingSub.price > 0 : true,
   );
@@ -1498,15 +1503,10 @@ export default function UnifiedFormScreen() {
                       title: "Currency",
                       selectedValue: currency,
                       onSelect: (val: string) => setCurrency(val),
-                      options: [
-                        { label: "INR (₹)", value: "INR" },
-                        { label: "USD ($)", value: "USD" },
-                        { label: "EUR (€)", value: "EUR" },
-                        { label: "GBP (£)", value: "GBP" },
-                        { label: "JPY (¥)", value: "JPY" },
-                        { label: "AUD ($)", value: "AUD" },
-                        { label: "CAD ($)", value: "CAD" },
-                      ],
+                      options: CURRENCIES.map((c) => ({
+                        label: `${c.code} (${c.symbol})`,
+                        value: c.code,
+                      })),
                     };
                   case "cycle":
                     return {

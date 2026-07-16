@@ -14,7 +14,7 @@ import Animated, {
   useSharedValue,
   useAnimatedScrollHandler,
 } from "react-native-reanimated";
-import { colors, spacing, hexToRGBA } from "@/constants";
+import { colors, spacing, hexToRGBA, getCurrencySymbol } from "@/constants";
 import { AppText, Card, SectionHeader } from "@/components/ui";
 import {
   OverviewTopBar,
@@ -22,6 +22,7 @@ import {
 } from "@/components/common/OverviewHeader";
 import SummaryCard from "@/components/cards/SummaryCard";
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
+import { useSettingsStore } from "@/store/useSettingsStore";
 import type { Subscription } from "@/types/subscription";
 
 function AnalyticsScreen() {
@@ -66,16 +67,9 @@ function AnalyticsScreen() {
 
   const hasSubscriptions = subscriptions.length > 0;
 
-  // Determine currency symbol from subscriptions
-  const getSymbol = (code?: string) => {
-    if (code === "INR") return "₹";
-    if (code === "EUR") return "€";
-    if (code === "GBP") return "£";
-    if (code === "JPY") return "¥";
-    return "$";
-  };
-  const firstCurrency = subscriptions.find((s) => s.currency)?.currency;
-  const currencySymbol = getSymbol(firstCurrency);
+  // Global currency from settings
+  const { currencyCode } = useSettingsStore();
+  const currencySymbol = getCurrencySymbol(currencyCode);
 
   // Memoize category breakdown
   const { categories, maxCategorySpend } = React.useMemo(() => {
