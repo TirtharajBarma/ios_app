@@ -40,7 +40,7 @@ const COLUMN_DEFAULTS: Record<string, string> = {
   website: "NULL",
   splitEnabled: "0",
   splitType: "NULL",
-  splitValue: "1.0",
+  splitValue: "NULL",
   promoEnabled: "0",
   promoPrice: "NULL",
   promoDurationValue: "NULL",

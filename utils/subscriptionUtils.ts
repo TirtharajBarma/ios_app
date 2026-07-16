@@ -1,6 +1,6 @@
 import { parseISO, isSameMonth } from "date-fns";
 import type { Subscription } from "@/types/subscription";
-import { toMonthly as dateToMonthly } from "./date";
+import { toMonthly as dateToMonthly, getSubscriptionActivePrice } from "./date";
 
 /** Normalize any billing cycle to a monthly cost. Delegates to date.ts for accuracy. */
 export function toMonthly(price: number, cycle: string, customIntervalMonths?: number): number {
@@ -9,11 +9,13 @@ export function toMonthly(price: number, cycle: string, customIntervalMonths?: n
 
 /**
  * Calculates the total monthly spend across all paid subscriptions.
+ * Uses the active price (promo/split-adjusted) rather than the raw price.
  */
 export function calculateMonthlySpend(subscriptions: Subscription[]): number {
   return subscriptions.reduce((acc, sub) => {
     if (sub.isTrial) return acc;
-    return acc + toMonthly(sub.price, sub.billingCycle, sub.customIntervalMonths);
+    const activePrice = getSubscriptionActivePrice(sub);
+    return acc + toMonthly(activePrice, sub.billingCycle, sub.customIntervalMonths);
   }, 0);
 }
 
@@ -24,13 +26,15 @@ export const calculateMonthlyAverage = calculateMonthlySpend;
 
 /**
  * Calculates the total cost of subscriptions due in the current month.
+ * Uses the active price (promo/split-adjusted) rather than the raw price.
  */
 export function calculateDueThisMonth(
   subscriptions: Subscription[],
   referenceDate: Date = new Date()
 ): number {
   return subscriptions.reduce((acc, sub) => {
-    const cost = sub.isTrial ? 0 : sub.price;
+    if (sub.isTrial) return acc;
+    const cost = getSubscriptionActivePrice(sub);
     try {
       const renewalDate = parseISO(sub.nextBillingDate);
       if (isSameMonth(renewalDate, referenceDate)) {

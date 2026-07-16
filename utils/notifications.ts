@@ -1,7 +1,6 @@
 import { Platform } from "react-native";
 import { parseISO, differenceInSeconds } from "date-fns";
 import type { Subscription } from "@/types/subscription";
-import { toMonthly } from "@/utils/subscriptionUtils";
 
 // Safely require expo-notifications inside a try/catch block to prevent crash when module is not compiled/linked yet
 let Notifications: any = null;

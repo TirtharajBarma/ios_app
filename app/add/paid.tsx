@@ -10,6 +10,7 @@ import {
   Keyboard,
   Platform,
   Animated,
+  ActivityIndicator,
   type ScrollView as RNScrollView,
   KeyboardAvoidingView,
 } from "react-native";
@@ -223,6 +224,7 @@ export default function UnifiedFormScreen() {
     website,
     logo,
     editId,
+    trial,
   } = useLocalSearchParams<{
     name: string;
     category: string;
@@ -230,12 +232,16 @@ export default function UnifiedFormScreen() {
     website: string;
     logo: string;
     editId?: string;
+    trial?: string;
   }>();
 
   const isEditMode = Boolean(editId);
   const existingSub = isEditMode
     ? subscriptions.find((s) => s.id === editId)
     : null;
+  // When creating a NEW trial (from the select screen), seed trial mode.
+  // When editing, the existing record's isTrial is the source of truth.
+  const startAsTrial = !isEditMode && trial === "1";
 
   // --- Dynamic Style States ---
   const [selectedColor, setSelectedColor] = useState(
@@ -254,7 +260,7 @@ export default function UnifiedFormScreen() {
 
   // --- Form Input States ---
   const [isTrial, setIsTrial] = useState(
-    existingSub ? existingSub.isTrial : false,
+    existingSub ? existingSub.isTrial : startAsTrial,
   );
   const [customName, setCustomName] = useState(
     () => existingSub?.name || name || "Subscription",
@@ -788,11 +794,16 @@ export default function UnifiedFormScreen() {
         <PressableScale
           onPress={handleSave}
           scale={0.92}
-          style={styles.addBtnContainer}
+          style={[styles.addBtnContainer, isSaving && { opacity: 0.6 }]}
+          disabled={isSaving}
         >
-          <AppText variant="subheadline" weight="700" color={colors.black}>
-            {isEditMode ? "Save" : "Add"}
-          </AppText>
+          {isSaving ? (
+            <ActivityIndicator size="small" color={colors.black} />
+          ) : (
+            <AppText variant="subheadline" weight="700" color={colors.black}>
+              {isEditMode ? "Save" : "Add"}
+            </AppText>
+          )}
         </PressableScale>
       </View>
 

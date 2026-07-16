@@ -22,7 +22,7 @@ import { format, parseISO } from "date-fns";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 
-import { colors, spacing } from "@/constants";
+import { colors, spacing, getCurrencySymbol } from "@/constants";
 import { AppText, LogoCircle, Toggle, PressableScale } from "@/components/ui";
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
 import { getSubscriptionActivePrice } from "@/utils/date";
@@ -154,14 +154,6 @@ export default function SubscriptionDetailScreen() {
 
   const formattedStartDate = safeFormat(parseDate(subscription.startDate || subscription.createdAt), "MMM d, yyyy");
   const formattedNextDate = safeFormat(parseDate(nextBillingDate), "MMM d, yyyy");
-
-  const getCurrencySymbol = (code: string) => {
-    if (code === "INR") return "₹";
-    if (code === "USD") return "$";
-    if (code === "EUR") return "€";
-    if (code === "GBP") return "£";
-    return "$";
-  };
 
   return (
     <View style={[styles.container, { backgroundColor: brandColor || colors.accent }]}>

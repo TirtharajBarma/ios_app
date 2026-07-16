@@ -138,8 +138,10 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
 
     // Sort nearest renewal first
     subscriptions.sort((a, b) => {
-      const timeA = a.nextBillingDate ? new Date(a.nextBillingDate).getTime() : Infinity;
-      const timeB = b.nextBillingDate ? new Date(b.nextBillingDate).getTime() : Infinity;
+      const timeA = a.nextBillingDate && !isNaN(new Date(a.nextBillingDate).getTime())
+        ? new Date(a.nextBillingDate).getTime() : Infinity;
+      const timeB = b.nextBillingDate && !isNaN(new Date(b.nextBillingDate).getTime())
+        ? new Date(b.nextBillingDate).getTime() : Infinity;
       return timeA - timeB;
     });
     set({ subscriptions, stats: computeStats(subscriptions), isLoaded: true });
@@ -151,8 +153,10 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     const sub = await db.insertSubscription(id, input);
     set((state) => {
       const subscriptions = [...state.subscriptions, sub].sort((a, b) => {
-        const timeA = a.nextBillingDate ? new Date(a.nextBillingDate).getTime() : Infinity;
-        const timeB = b.nextBillingDate ? new Date(b.nextBillingDate).getTime() : Infinity;
+        const timeA = a.nextBillingDate && !isNaN(new Date(a.nextBillingDate).getTime())
+          ? new Date(a.nextBillingDate).getTime() : Infinity;
+        const timeB = b.nextBillingDate && !isNaN(new Date(b.nextBillingDate).getTime())
+          ? new Date(b.nextBillingDate).getTime() : Infinity;
         return timeA - timeB;
       });
       return { subscriptions, stats: computeStats(subscriptions) };
@@ -174,14 +178,14 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
         updatedAt: new Date().toISOString(),
       };
       updated.sort((a, b) => {
-        const timeA = a.nextBillingDate ? new Date(a.nextBillingDate).getTime() : Infinity;
-        const timeB = b.nextBillingDate ? new Date(b.nextBillingDate).getTime() : Infinity;
+        const timeA = a.nextBillingDate && !isNaN(new Date(a.nextBillingDate).getTime())
+          ? new Date(a.nextBillingDate).getTime() : Infinity;
+        const timeB = b.nextBillingDate && !isNaN(new Date(b.nextBillingDate).getTime())
+          ? new Date(b.nextBillingDate).getTime() : Infinity;
         return timeA - timeB;
       });
       return { subscriptions: updated, stats: computeStats(updated) };
     });
-    const updatedSub = get().subscriptions.find((s) => s.id === id);
-    if (updatedSub) scheduleReminder(updatedSub).catch(() => {});
   },
 
   removeSubscription: async (id) => {
@@ -214,15 +218,35 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
       const priceInUSD = sub.price / subCurrencyRate;
       const newPrice = Math.round((priceInUSD * rateTo) * 100) / 100;
       
-      await db.updateSubscription(sub.id, {
+      // Also convert promoPrice if present
+      let newPromoPrice = sub.promoPrice;
+      if (sub.promoEnabled && sub.promoPrice != null) {
+        const promoInUSD = sub.promoPrice / subCurrencyRate;
+        newPromoPrice = Math.round((promoInUSD * rateTo) * 100) / 100;
+      }
+      
+      // Also convert share-type splitValue (fixed amount split)
+      let newSplitValue = sub.splitValue;
+      if (sub.splitEnabled && sub.splitType === "share" && sub.splitValue != null) {
+        const splitInUSD = sub.splitValue / subCurrencyRate;
+        newSplitValue = Math.round((splitInUSD * rateTo) * 100) / 100;
+      }
+      
+      const dbUpdates: any = {
         price: newPrice,
         currency: newCurrency,
-      });
+      };
+      if (newPromoPrice !== sub.promoPrice) dbUpdates.promoPrice = newPromoPrice;
+      if (newSplitValue !== sub.splitValue) dbUpdates.splitValue = newSplitValue;
+      
+      await db.updateSubscription(sub.id, dbUpdates);
       
       updatedSubs.push({
         ...sub,
         price: newPrice,
         currency: newCurrency,
+        promoPrice: newPromoPrice,
+        splitValue: newSplitValue,
       });
     }
     

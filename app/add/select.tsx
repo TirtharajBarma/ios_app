@@ -32,8 +32,8 @@ export default function SelectScreen() {
 
   const handleSelectTrial = () => {
     router.push({
-      pathname: "/add/trial",
-      params: { id, name, category, brandColor, website, logo },
+      pathname: "/add/paid",
+      params: { id, name, category, brandColor, website, logo, trial: "1" },
     });
   };
 

@@ -35,6 +35,7 @@ import Animated, {
   withSequence,
   withSpring,
   cancelAnimation,
+  runOnJS,
 } from "react-native-reanimated";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
@@ -205,7 +206,7 @@ function FloatingActiveLogo({
     .maxDuration(250)
     .onEnd(() => {
       if (!wasDragged.value) {
-        onPress();
+        runOnJS(onPress)();
       }
     });
 
@@ -239,6 +240,10 @@ function FloatingActiveLogo({
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+
+  // Flag: when a floating logo handles a tap, prevent the parent card
+  // PressableScale from also firing its onPress and navigating away.
+  const childLogoHandledPress = React.useRef(false);
 
   // Load store state
   const { subscriptions, stats, loadSubscriptions, removeSubscription } =
@@ -313,6 +318,17 @@ export default function HomeScreen() {
     }
   };
 
+  const confirmDelete = (sub: any) => {
+    Alert.alert(
+      `Delete ${sub.name}?`,
+      "This action cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete", style: "destructive", onPress: () => handleDeleteSubscription(sub.id) },
+      ],
+    );
+  };
+
   const handleLongPress = (sub: any) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     Alert.alert(sub.name, "Choose an action", [
@@ -321,7 +337,7 @@ export default function HomeScreen() {
       {
         text: "Delete",
         style: "destructive",
-        onPress: () => handleDeleteSubscription(sub.id),
+        onPress: () => confirmDelete(sub),
       },
       { text: "Cancel", style: "cancel" },
     ]);
@@ -357,6 +373,17 @@ export default function HomeScreen() {
       );
     }
   }, [subscriptions, sortBy]);
+
+  // "Up next" always shows the soonest-renewing subscriptions regardless of sort
+  const upNextSubscriptions = React.useMemo(() => {
+    return [...subscriptions]
+      .sort(
+        (a, b) =>
+          new Date(a.nextBillingDate).getTime() -
+          new Date(b.nextBillingDate).getTime(),
+      )
+      .slice(0, 3);
+  }, [subscriptions]);
 
   const dueThisMonthTotal = React.useMemo(() => {
     const now = new Date();
@@ -589,18 +616,23 @@ export default function HomeScreen() {
                 </LinearGradient>
               </PressableScale>
 
-              {/* Absolute Info Button outside PressableScale so it ACTUALLY works */}
               {cardPage === 1 && (
                 <TouchableOpacity
                   activeOpacity={0.6}
-                  hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
                   onPress={() => {
+                    console.log("INFO BUTTON PRESSED");
                     Haptics.selectionAsync();
                     setExplanationType("annual");
                   }}
                   style={[
                     styles.infoButton,
-                    { position: "absolute", bottom: 16, right: 16, zIndex: 100 }
+                    {
+                      position: "absolute",
+                      bottom: 16,
+                      right: 16,
+                      zIndex: 100,
+                      elevation: 10,
+                    },
                   ]}
                 >
                   <Info size={15} color="rgba(255,255,255,0.72)" />
@@ -611,10 +643,14 @@ export default function HomeScreen() {
               {/* Right Card: Next renewing logo + active count */}
               <PressableScale
                 onPress={() => {
-                  if (nextRenewingSub) {
-                    Haptics.selectionAsync();
-                    router.push(`/subscription/${nextRenewingSub.id}`);
+                  if (childLogoHandledPress.current) {
+                    childLogoHandledPress.current = false;
+                    return;
                   }
+                  // Tapping the card background (empty space) goes to the
+                  // full subscriptions list — not to a specific subscription.
+                  Haptics.selectionAsync();
+                  router.push("/subscriptions");
                 }}
                 style={styles.rightStatCard}
               >
@@ -637,7 +673,10 @@ export default function HomeScreen() {
                           sub={sub}
                           index={index}
                           total={activeLogoSubs.length}
-                          onPress={() => handleCardPress(sub)}
+                          onPress={() => {
+                            childLogoHandledPress.current = true;
+                            handleCardPress(sub);
+                          }}
                         />
                       ))
                     ) : (
@@ -692,7 +731,7 @@ export default function HomeScreen() {
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.horizontalScrollContent}
               >
-                {subscriptions.slice(0, 3).map((sub) => {
+                {upNextSubscriptions.map((sub) => {
                   const subStatus = getRenewalStatus(sub.nextBillingDate);
                   return (
                     <PressableScale

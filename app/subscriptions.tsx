@@ -207,9 +207,11 @@ export default function SubscriptionsListScreen() {
           return a.name.localeCompare(b.name);
         }
         if (sortBy === "price") {
-          const priceA = a.isTrial ? 0 : toMonthly(a.price, a.billingCycle, a.customIntervalMonths);
-          const priceB = b.isTrial ? 0 : toMonthly(b.price, b.billingCycle, b.customIntervalMonths);
-          return priceB - priceA; // High to Low
+          const priceA = a.isTrial ? 0 : getSubscriptionActivePrice(a);
+          const priceB = b.isTrial ? 0 : getSubscriptionActivePrice(b);
+          const monthlyA = toMonthly(priceA, a.billingCycle, a.customIntervalMonths);
+          const monthlyB = toMonthly(priceB, b.billingCycle, b.customIntervalMonths);
+          return monthlyB - monthlyA; // High to Low
         }
         // Default: Renewal Date
         try {
@@ -354,7 +356,7 @@ export default function SubscriptionsListScreen() {
                             <AppText style={styles.listItemSubtitle} numberOfLines={1}>
                               {sub.isTrial
                                 ? `Trial ends on ${format(parseISO(sub.trialEndDate || sub.nextBillingDate), "MMM d")}`
-                                : `Starts on ${format(parseISO(sub.startDate || sub.nextBillingDate), "MMM d")}`}
+                                : `Renews on ${getRenewalStatus(sub.nextBillingDate).text}`}
                             </AppText>
                           </View>
                         </View>

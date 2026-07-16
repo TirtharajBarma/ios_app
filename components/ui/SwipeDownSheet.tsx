@@ -29,7 +29,6 @@ import Animated, {
   withTiming,
   runOnJS,
   interpolate,
-  Extrapolate,
 } from "react-native-reanimated";
 import { colors, spacing } from "@/constants";
 
@@ -106,14 +105,16 @@ export default function SwipeDownSheet({
         translateY.value,
         [0, 300],
         [1, 0.15],
-        Extrapolate.CLAMP,
+        "clamp",
       );
     })
     .onEnd((e) => {
       if (translateY.value > CLOSE_THRESHOLD || e.velocityY > CLOSE_VELOCITY) {
         // Animate fully off-screen
         backdropOpacity.value = withTiming(0, { duration: 200 });
-        translateY.value = withSpring(999, SPRING_CLOSE);
+        translateY.value = withSpring(999, SPRING_CLOSE, () => {
+          runOnJS(handleAnimationEnd)();
+        });
         runOnJS(finishClose)();
       } else {
         // Snap back
@@ -124,7 +125,9 @@ export default function SwipeDownSheet({
 
   const backdropTap = Gesture.Tap().onEnd(() => {
     backdropOpacity.value = withTiming(0, { duration: 200 });
-    translateY.value = withSpring(999, SPRING_CLOSE);
+    translateY.value = withSpring(999, SPRING_CLOSE, () => {
+      runOnJS(handleAnimationEnd)();
+    });
     runOnJS(finishClose)();
   });
 

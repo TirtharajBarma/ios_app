@@ -28,7 +28,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
-import { colors, spacing, radius, shadows, springConfig, gradients } from "@/constants";
+import { colors, spacing, radius, shadows, shadowStyle, springConfig, gradients } from "@/constants";
 import type { GradientStops } from "@/constants/gradients";
 
 // ─── Padding presets ────────────────────────────────────────────────
@@ -115,8 +115,8 @@ const Card = forwardRef<View, CardProps>(function Card(
     overflow: "hidden",
   };
 
-  const shadowStyle =
-    shadow === "none" ? {} : { ...(shadows[shadow].native as ViewStyle) };
+  const appliedShadow =
+    shadow === "none" ? {} : shadowStyle(shadow);
 
   const renderContent = () => {
     if (gradientKey) {
@@ -153,7 +153,7 @@ const Card = forwardRef<View, CardProps>(function Card(
     return (
       <AnimatedPressable
         ref={ref as any}
-        style={[baseStyle, shadowStyle, animatedStyle, style]}
+        style={[baseStyle, appliedShadow, animatedStyle, style]}
         onPress={onPress}
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
@@ -169,7 +169,7 @@ const Card = forwardRef<View, CardProps>(function Card(
   return (
     <View
       ref={ref}
-      style={[baseStyle, shadowStyle, style]}
+      style={[baseStyle, appliedShadow, style]}
     >
       {renderBlurOrContent()}
     </View>

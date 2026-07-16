@@ -6,7 +6,8 @@ import { ChevronRight, Trash2, Repeat } from "lucide-react-native";
 import { format, parseISO, differenceInDays, isSameDay } from "date-fns";
 import * as Haptics from "expo-haptics";
 import { Card, AppText, LogoCircle } from "@/components/ui";
-import { colors, spacing, radius, hexToRGBA } from "@/constants";
+import { colors, spacing, radius, hexToRGBA, getCurrencySymbol } from "@/constants";
+import { getSubscriptionActivePrice } from "@/utils/date";
 import type { Subscription } from "@/types/subscription";
 
 export interface SubscriptionCardProps {
@@ -19,20 +20,25 @@ export interface SubscriptionCardProps {
 }
 
 function getRenewalStatus(dateStr: string) {
-  const today = new Date();
-  const renewalDate = parseISO(dateStr);
-  const diffDays = differenceInDays(renewalDate, today);
+  try {
+    const today = new Date();
+    const renewalDate = parseISO(dateStr);
+    if (isNaN(renewalDate.getTime())) return { text: "-", color: colors.textMuted };
+    const diffDays = differenceInDays(renewalDate, today);
 
-  if (diffDays < 0) {
-    return { text: "Overdue", color: colors.danger };
-  } else if (isSameDay(renewalDate, today)) {
-    return { text: "Today", color: colors.danger };
-  } else if (diffDays === 1) {
-    return { text: "Tomorrow", color: colors.warning };
-  } else if (diffDays > 1 && diffDays < 7) {
-    return { text: `In ${diffDays} days`, color: colors.accent };
-  } else {
-    return { text: format(renewalDate, "MMM d"), color: colors.textMuted };
+    if (diffDays < 0) {
+      return { text: "Overdue", color: colors.danger };
+    } else if (isSameDay(renewalDate, today)) {
+      return { text: "Today", color: colors.danger };
+    } else if (diffDays === 1) {
+      return { text: "Tomorrow", color: colors.warning };
+    } else if (diffDays > 1 && diffDays < 7) {
+      return { text: `In ${diffDays} days`, color: colors.accent };
+    } else {
+      return { text: format(renewalDate, "MMM d"), color: colors.textMuted };
+    }
+  } catch {
+    return { text: "-", color: colors.textMuted };
   }
 }
 
@@ -54,17 +60,11 @@ function SubscriptionCard({
   onEdit,
   style,
 }: SubscriptionCardProps) {
-  const { name, price, billingCycle, nextBillingDate, color, isTrial, currency, logoUrl, website } = subscription;
+  const { name, billingCycle, nextBillingDate, color, isTrial, currency, logoUrl, website } = subscription;
   const status = getRenewalStatus(nextBillingDate);
-
-  const getSymbol = (code: string) => {
-    if (code === "INR") return "₹";
-    if (code === "EUR") return "€";
-    if (code === "GBP") return "£";
-    if (code === "JPY") return "¥";
-    return "$";
-  };
-  const formattedPrice = `${getSymbol(currency || "USD")}${price.toFixed(2)}`;
+  const activePrice = getSubscriptionActivePrice(subscription);
+  const symbol = getCurrencySymbol(currency);
+  const formattedPrice = `${symbol}${activePrice.toFixed(2)}`;
 
   const handleLongPress = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);

@@ -103,7 +103,7 @@ function mapDbToSubscription(dbSub: DbSubscription): Subscription {
     name: dbSub.name,
     color: dbSub.brandColor || "#007AFF",
     logoUrl: dbSub.logo || undefined,
-    price: dbSub.price || 0,
+    price: dbSub.price ?? 0,
     currency: dbSub.currency || "USD",
     billingCycle: parsedCycle,
     customIntervalMonths: customMonths,
@@ -168,7 +168,7 @@ function mapDomainToDb(id: string, input: NewSubscriptionInput): Omit<DbSubscrip
     reminderDays: input.reminderDays,
     splitEnabled: input.splitEnabled ? 1 : 0,
     splitType: input.splitType || null,
-    splitValue: input.splitValue ?? null,
+    splitValue: input.splitValue ?? 0,
     promoEnabled: input.promoEnabled ? 1 : 0,
     promoPrice: input.promoPrice ?? null,
     promoDurationValue: input.promoDurationValue ?? null,
@@ -194,7 +194,12 @@ export async function insertSubscription(
   input: NewSubscriptionInput
 ): Promise<Subscription> {
   const dbInput = mapDomainToDb(id, input);
-  const createdDb = await dbCreateSubscription(dbInput);
+  await dbCreateSubscription(dbInput);
+  // Read back from DB to get the canonical persisted record (timestamps etc.)
+  const createdDb = await dbGetSubscriptionById(id);
+  if (!createdDb) {
+    throw new Error(`Failed to read back subscription ${id} after insert`);
+  }
   return mapDbToSubscription(createdDb);
 }
 
@@ -211,7 +216,8 @@ export async function updateSubscription(
   if (input.logoUrl !== undefined) dbUpdates.logo = input.logoUrl;
   if (input.price !== undefined) dbUpdates.price = input.price;
   if (input.currency !== undefined) dbUpdates.currency = input.currency;
-  if (input.billingCycle !== undefined) dbUpdates.billingCycle = input.rawBillingCycle || input.billingCycle;
+  if (input.rawBillingCycle !== undefined) dbUpdates.billingCycle = input.rawBillingCycle;
+  else if (input.billingCycle !== undefined) dbUpdates.billingCycle = input.billingCycle;
   if (input.isTrial !== undefined) dbUpdates.isTrial = input.isTrial ? 1 : 0;
   
   if (input.nextBillingDate !== undefined) {
@@ -229,6 +235,8 @@ export async function updateSubscription(
       }
     }
   }
+  
+  // These must come AFTER nextBillingDate logic to avoid overwriting the correct field
   
   if (input.color !== undefined) dbUpdates.brandColor = input.color;
   if (input.category !== undefined) dbUpdates.category = input.category;

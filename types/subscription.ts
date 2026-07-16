@@ -94,39 +94,6 @@ export type NewSubscriptionInput = Omit<
   "id" | "createdAt" | "updatedAt"
 >;
 
-/** Row shape as stored in SQLite (dates are TEXT, price is REAL). */
-export interface SubscriptionRow {
-  id: string;
-  name: string;
-  color: string;
-  logo_url: string | null;
-  price: number;
-  currency: string;
-  billing_cycle: string;
-  custom_interval_months: number | null;
-  next_billing_date: string;
-  category: string;
-  reminder_enabled: number; // SQLite boolean 0/1
-  reminder_days: number;
-  note: string | null;
-  
-  // Split columns
-  split_enabled?: number;
-  split_type?: string | null;
-  split_value?: number | null;
-
-  // Promo columns
-  promo_enabled?: number;
-  promo_price?: number | null;
-  promo_duration_value?: number | null;
-  promo_duration_unit?: string | null;
-  promo_start_date?: string | null;
-  promo_end_date?: string | null;
-
-  created_at: string;
-  updated_at: string;
-}
-
 /** Aggregated stats derived from the list of subscriptions. */
 export interface SubscriptionStats {
   /** Total count of active subscriptions. */

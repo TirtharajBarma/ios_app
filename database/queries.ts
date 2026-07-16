@@ -19,7 +19,7 @@ export async function createSubscription(
         splitEnabled, splitType, splitValue,
         promoEnabled, promoPrice, promoDurationValue, promoDurationUnit, promoStartDate, promoEndDate,
         createdAt, updatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
     `;
 
     await db.runAsync(
@@ -44,7 +44,7 @@ export async function createSubscription(
       sub.reminderDays,
       sub.splitEnabled ?? 0,
       sub.splitType ?? null,
-      sub.splitValue ?? null,
+      sub.splitValue ?? 0,
       sub.promoEnabled ?? 0,
       sub.promoPrice ?? null,
       sub.promoDurationValue ?? null,

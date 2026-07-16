@@ -1,7 +1,9 @@
 import React, { memo } from "react";
 import { View, StyleSheet } from "react-native";
 import { AppText, LogoCircle } from "@/components/ui";
-import { colors, spacing, radius, hexToRGBA } from "@/constants";
+import { colors, spacing, radius, hexToRGBA, getCurrencySymbol } from "@/constants";
+import { getSubscriptionActivePrice } from "@/utils/date";
+import { useSettingsStore } from "@/store/useSettingsStore";
 
 export interface DetailsHeroProps {
   name: string;
@@ -14,6 +16,12 @@ export interface DetailsHeroProps {
   logoUrl?: string;
   whiteBackground?: boolean;
   website?: string;
+  promoEnabled?: boolean;
+  promoPrice?: number;
+  promoEndDate?: string;
+  splitEnabled?: boolean;
+  splitType?: "people" | "percentage" | "share";
+  splitValue?: number;
 }
 
 function DetailsHero({
@@ -27,21 +35,26 @@ function DetailsHero({
   logoUrl,
   whiteBackground,
   website,
+  promoEnabled,
+  promoPrice,
+  promoEndDate,
+  splitEnabled,
+  splitType,
+  splitValue,
 }: DetailsHeroProps) {
-  const getSymbol = (code: string) => {
-    if (code === "INR") return "₹";
-    if (code === "EUR") return "€";
-    if (code === "GBP") return "£";
-    if (code === "JPY") return "¥";
-    if (code === "CAD") return "CA$";
-    if (code === "AUD") return "A$";
-    if (code === "CHF") return "Fr.";
-    if (code === "CNY") return "¥";
-    if (code === "SGD") return "S$";
-    if (code === "HKD") return "HK$";
-    return "$";
-  };
-  const formattedPrice = `${getSymbol(currency)}${price.toFixed(2)}`;
+  const currencyCode = useSettingsStore((s) => s.currencyCode);
+  const symbol = getCurrencySymbol(currencyCode);
+  const activePrice = getSubscriptionActivePrice({
+    price,
+    isTrial,
+    promoEnabled,
+    promoPrice,
+    promoEndDate,
+    splitEnabled,
+    splitType,
+    splitValue,
+  });
+  const formattedPrice = `${symbol}${activePrice.toFixed(2)}`;
 
   const getCycleSuffix = (cycle: string) => {
     const c = cycle.toLowerCase();

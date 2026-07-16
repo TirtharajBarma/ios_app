@@ -2,7 +2,9 @@ import React, { memo } from "react";
 import { View, ScrollView, type StyleProp, type ViewStyle } from "react-native";
 import { parseISO, differenceInDays, isSameDay } from "date-fns";
 import { Card, AppText, LogoCircle, SectionHeader } from "@/components/ui";
-import { colors, spacing, radius, hexToRGBA } from "@/constants";
+import { colors, spacing, radius, hexToRGBA, getCurrencySymbol } from "@/constants";
+import { getSubscriptionActivePrice } from "@/utils/date";
+import { useSettingsStore } from "@/store/useSettingsStore";
 import type { Subscription } from "@/types/subscription";
 
 export interface UpcomingSectionProps {
@@ -41,16 +43,11 @@ const UpcomingCard = memo(function UpcomingCard({
   subscription: Subscription;
   onPress?: () => void;
 }) {
-  const { name, price, nextBillingDate, color, currency, logoUrl, website } = subscription;
+  const { name, nextBillingDate, color, logoUrl, website } = subscription;
   const daysText = getRelativeDays(nextBillingDate);
-  
-  const getSymbol = (code: string) => {
-    if (code === "INR") return "₹";
-    if (code === "EUR") return "€";
-    if (code === "GBP") return "£";
-    if (code === "JPY") return "¥";
-    return "$";
-  };
+  const currencyCode = useSettingsStore((s) => s.currencyCode);
+  const activePrice = getSubscriptionActivePrice(subscription);
+  const symbol = getCurrencySymbol(currencyCode);
 
   // Custom transparent-accent border + background look
   const customBg = hexToRGBA(color, 0.06);
@@ -89,7 +86,7 @@ const UpcomingCard = memo(function UpcomingCard({
             website={website}
           />
           <AppText variant="footnote" weight="700" color={colors.white}>
-            {getSymbol(currency || "USD")}{price.toFixed(0)}
+            {symbol}{activePrice.toFixed(0)}
           </AppText>
         </View>
 
