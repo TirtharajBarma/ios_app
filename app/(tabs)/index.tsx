@@ -6,13 +6,33 @@ import {
   TouchableOpacity,
   Alert,
 } from "react-native";
-import { useRouter } from "expo-router";
-import { differenceInCalendarDays, parseISO, startOfDay, format } from "date-fns";
+import { useRouter, useFocusEffect } from "expo-router";
+import {
+  differenceInCalendarDays,
+  parseISO,
+  startOfDay,
+  format,
+} from "date-fns";
 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Info, Calendar, User, Inbox, Repeat, ChevronRight, Users } from "lucide-react-native";
+import {
+  Info,
+  Calendar,
+  User,
+  Inbox,
+  Repeat,
+  ChevronRight,
+  Users,
+} from "lucide-react-native";
 import * as Haptics from "expo-haptics";
-import Animated, { FadeInUp, useSharedValue, useAnimatedStyle, withTiming } from "react-native-reanimated";
+import Animated, {
+  FadeInUp,
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  withRepeat,
+  withSequence,
+} from "react-native-reanimated";
 
 import { colors, spacing, getCurrencySymbol } from "@/constants";
 import {
@@ -78,6 +98,78 @@ function getRenewalStatus(dateStr: string) {
   }
 }
 
+function FloatingActiveLogo({
+  sub,
+  index,
+  total,
+  onPress,
+}: {
+  sub: any;
+  index: number;
+  total: number;
+  onPress: () => void;
+}) {
+  const float = useSharedValue(0);
+  const configsByTotal = {
+    1: [{ size: 40, style: styles.activeLogoSolo }],
+    2: [
+      { size: 36, style: styles.activeLogoTwoMain },
+      { size: 28, style: styles.activeLogoTwoTop },
+    ],
+    3: [
+      { size: 34, style: styles.activeLogoThreeMain },
+      { size: 28, style: styles.activeLogoThreeLeft },
+      { size: 24, style: styles.activeLogoThreeTop },
+    ],
+    4: [
+      { size: 32, style: styles.activeLogoFourMain },
+      { size: 26, style: styles.activeLogoFourLeft },
+      { size: 24, style: styles.activeLogoFourTop },
+      { size: 22, style: styles.activeLogoFourRight },
+    ],
+  };
+  const configs =
+    configsByTotal[Math.min(total, 4) as keyof typeof configsByTotal];
+  const config = configs[index] || configs[configs.length - 1];
+
+  useEffect(() => {
+    float.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: 800 + index * 100 }),
+        withTiming(0, { duration: 800 + index * 100 }),
+      ),
+      -1,
+      true,
+    );
+  }, [float, index]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateY: (float.value - 0.5) * (4 + index) },
+      { scale: 0.98 + float.value * 0.04 },
+    ],
+  }));
+
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.7}
+      style={[styles.activeLogoBubble, config.style]}
+    >
+      <Animated.View style={animatedStyle}>
+        <LogoCircle
+          source={sub.logoUrl}
+          name={sub.name}
+          color={sub.color}
+          size={config.size}
+          bordered
+          website={sub.website}
+        />
+      </Animated.View>
+    </TouchableOpacity>
+  );
+}
+
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -112,6 +204,12 @@ export default function HomeScreen() {
   useEffect(() => {
     loadSubscriptions();
   }, [loadSubscriptions]);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      loadSubscriptions();
+    }, [loadSubscriptions])
+  );
 
   const handleAddPress = () => {
     Haptics.selectionAsync();
@@ -211,6 +309,15 @@ export default function HomeScreen() {
   const nextRenewingSub =
     subscriptions.find((s) => !s.isTrial) ||
     (subscriptions.length > 0 ? subscriptions[0] : null);
+  const activeSubscriptions = React.useMemo(
+    () => subscriptions.filter((sub) => !sub.isTrial),
+    [subscriptions],
+  );
+  const activeLogoSubs = activeSubscriptions.slice(0, 4);
+  const activeOverflowCount = Math.max(
+    activeSubscriptions.length - activeLogoSubs.length,
+    0,
+  );
 
   // Determine dynamic currency symbol from first subscription
   const currencySymbol = nextRenewingSub
@@ -299,7 +406,11 @@ export default function HomeScreen() {
                       <View style={styles.cardHeader}>
                         <View style={styles.statLabelRow}>
                           <View style={styles.statIconBox}>
-                            <Calendar size={14} color="#FF5A00" strokeWidth={2.5} />
+                            <Calendar
+                              size={14}
+                              color="#FF5A00"
+                              strokeWidth={2.5}
+                            />
                           </View>
                           <AppText style={styles.statLabelText}>
                             Monthly average
@@ -320,7 +431,11 @@ export default function HomeScreen() {
                         </TouchableOpacity>
                       </View>
 
-                      <AppText style={styles.largePriceText} numberOfLines={1} adjustsFontSizeToFit>
+                      <AppText
+                        style={styles.largePriceText}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                      >
                         {currencySymbol}
                         {stats.monthlyTotal.toFixed(2)}
                       </AppText>
@@ -332,34 +447,65 @@ export default function HomeScreen() {
                     {/* 3. Lower Part */}
                     <View style={styles.cardFooterContainer}>
                       {/* Page 0: Next due / Due this month */}
-                      <Animated.View style={[styles.cardFooterStacked, page0Style]}>
+                      <Animated.View
+                        style={[styles.cardFooterStacked, page0Style]}
+                      >
                         <View style={styles.statLabelRow}>
                           <View style={styles.calendarIconBg}>
-                            <Calendar size={14} color="#FF9500" strokeWidth={2.4} />
+                            <Calendar
+                              size={14}
+                              color="#FF9500"
+                              strokeWidth={2.4}
+                            />
                           </View>
-                          <AppText style={styles.statLabelText} numberOfLines={1} ellipsizeMode="tail">
-                            {subscriptions.length === 1 ? "Next due" : "Due this month"}
+                          <AppText
+                            style={styles.statLabelText}
+                            numberOfLines={1}
+                            ellipsizeMode="tail"
+                          >
+                            {subscriptions.length === 1
+                              ? "Next due"
+                              : "Due this month"}
                           </AppText>
                         </View>
-                        <AppText style={styles.footerValueText} numberOfLines={1}>
+                        <AppText
+                          style={styles.footerValueText}
+                          numberOfLines={1}
+                        >
                           {subscriptions.length === 1
-                            ? (nextRenewingSub ? `${currencySymbol}${getSubscriptionActivePrice(nextRenewingSub).toFixed(2)}` : "-")
+                            ? nextRenewingSub
+                              ? `${currencySymbol}${getSubscriptionActivePrice(nextRenewingSub).toFixed(2)}`
+                              : "-"
                             : `${currencySymbol}${dueThisMonthTotal.toFixed(2)}`}
                         </AppText>
                       </Animated.View>
 
                       {/* Page 1: Yearly average */}
-                      <Animated.View style={[styles.cardFooterStacked, page1Style]}>
+                      <Animated.View
+                        style={[styles.cardFooterStacked, page1Style]}
+                      >
                         <View style={styles.statLabelRow}>
                           <View style={styles.calendarIconBg}>
-                            <Calendar size={14} color="#FF9500" strokeWidth={2.4} />
+                            <Calendar
+                              size={14}
+                              color="#FF9500"
+                              strokeWidth={2.4}
+                            />
                           </View>
-                          <AppText style={styles.statLabelText} numberOfLines={1} ellipsizeMode="tail">
+                          <AppText
+                            style={styles.statLabelText}
+                            numberOfLines={1}
+                            ellipsizeMode="tail"
+                          >
                             Yearly average
                           </AppText>
                         </View>
-                        <AppText style={styles.footerValueText} numberOfLines={1}>
-                          {currencySymbol}{stats.yearlyTotal.toFixed(2)}
+                        <AppText
+                          style={styles.footerValueText}
+                          numberOfLines={1}
+                        >
+                          {currencySymbol}
+                          {stats.yearlyTotal.toFixed(2)}
                         </AppText>
                       </Animated.View>
                     </View>
@@ -398,18 +544,26 @@ export default function HomeScreen() {
                   end={{ x: 1, y: 1 }}
                   style={[styles.cardGradientFill, styles.rightStatInner]}
                 >
-                  <View style={styles.nextRenewLogoBox}>
-                    {nextRenewingSub ? (
-                      <LogoCircle
-                        source={nextRenewingSub.logoUrl}
-                        name={nextRenewingSub.name}
-                        color={nextRenewingSub.color}
-                        size={56}
-                        bordered
-                        website={nextRenewingSub.website}
-                      />
+                  <View style={styles.activeLogoCluster}>
+                    {activeLogoSubs.length > 0 ? (
+                      activeLogoSubs.map((sub, index) => (
+                        <FloatingActiveLogo
+                          key={sub.id}
+                          sub={sub}
+                          index={index}
+                          total={activeLogoSubs.length}
+                          onPress={() => handleCardPress(sub)}
+                        />
+                      ))
                     ) : (
                       <View style={styles.emptyLogo} />
+                    )}
+                    {activeOverflowCount > 0 && (
+                      <View style={styles.activeOverflowBadge}>
+                        <AppText style={styles.activeOverflowText}>
+                          +{activeOverflowCount}
+                        </AppText>
+                      </View>
                     )}
                   </View>
 
@@ -465,13 +619,14 @@ export default function HomeScreen() {
                     >
                       <LinearGradient
                         colors={[
-                          `${sub.color}33`,
+                          "rgba(62, 62, 64, 0.9)",
                           "rgba(31, 31, 33, 0.98)",
-                          "rgba(20, 20, 22, 1)",
+                          "rgba(18, 18, 20, 1)",
+                          "rgba(13, 13, 15, 1)",
                         ]}
-                        locations={[0, 0.48, 1]}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
+                        locations={[0, 0.34, 0.72, 1]}
+                        start={{ x: 0.05, y: 0 }}
+                        end={{ x: 0.9, y: 1 }}
                         style={styles.upNextGradientFill}
                       >
                         <View style={styles.upNextTop}>
@@ -479,7 +634,7 @@ export default function HomeScreen() {
                             source={sub.logoUrl}
                             name={sub.name}
                             color={sub.color}
-                            size={54}
+                            size={44}
                             bordered
                             website={sub.website}
                           />
@@ -504,7 +659,14 @@ export default function HomeScreen() {
                           <AppText style={styles.upNextTitle} numberOfLines={1}>
                             {sub.name}
                           </AppText>
-                          <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6, gap: 4 }}>
+                          <View
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              marginTop: 6,
+                              gap: 4,
+                            }}
+                          >
                             {!sub.isTrial && (
                               <Repeat size={11} color={colors.textMuted} />
                             )}
@@ -543,7 +705,11 @@ export default function HomeScreen() {
                   style={styles.titleChevronRow}
                 >
                   <AppText style={styles.sectionTitle}>Subscriptions</AppText>
-                  <ChevronRight size={22} color="rgba(255, 255, 255, 0.4)" style={{ marginLeft: 6, marginTop: 4 }} />
+                  <ChevronRight
+                    size={22}
+                    color="rgba(255, 255, 255, 0.4)"
+                    style={{ marginLeft: 6, marginTop: 4 }}
+                  />
                 </TouchableOpacity>
                 <PressableScale
                   onPress={toggleSort}
@@ -609,11 +775,25 @@ export default function HomeScreen() {
                             ? "Free"
                             : `${currencySymbol}${getSubscriptionActivePrice(sub).toFixed(2)}`}
                         </AppText>
-                        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 3, marginTop: 2 }}>
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            justifyContent: "flex-end",
+                            gap: 3,
+                            marginTop: 2,
+                          }}
+                        >
                           {sub.splitEnabled && (
-                            <Users size={11} color={colors.accent} style={{ marginRight: 2 }} />
+                            <Users
+                              size={11}
+                              color={colors.accent}
+                              style={{ marginRight: 2 }}
+                            />
                           )}
-                          <AppText style={[styles.listItemCycle, { marginTop: 0 }]}>
+                          <AppText
+                            style={[styles.listItemCycle, { marginTop: 0 }]}
+                          >
                             {sub.isTrial
                               ? "Trial"
                               : formatCycleLabel(
@@ -822,14 +1002,49 @@ const styles = StyleSheet.create({
   dotActive: {
     backgroundColor: "#FF9500",
   },
-  nextRenewLogoBox: {
-    width: 66,
-    height: 66,
-    borderRadius: 33,
-    backgroundColor: "rgba(255, 255, 255, 0.05)",
+  activeLogoCluster: {
+    width: "100%",
+    height: 70,
+    position: "relative",
+    marginTop: spacing[4],
+  },
+  activeLogoBubble: {
+    position: "absolute",
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.28,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  activeLogoSolo: { left: 41, top: 14, zIndex: 4 },
+  activeLogoTwoMain: { right: 20, top: 24, zIndex: 4 },
+  activeLogoTwoTop: { left: 24, top: 8, zIndex: 3 },
+  activeLogoThreeMain: { left: 48, top: 26, zIndex: 4 },
+  activeLogoThreeLeft: { left: 22, top: 16, zIndex: 3 },
+  activeLogoThreeTop: { right: 28, top: 6, zIndex: 2 },
+  activeLogoFourMain: { left: 50, top: 28, zIndex: 4 },
+  activeLogoFourLeft: { left: 18, top: 20, zIndex: 3 },
+  activeLogoFourTop: { left: 54, top: 4, zIndex: 2 },
+  activeLogoFourRight: { right: 18, top: 18, zIndex: 1 },
+  activeOverflowBadge: {
+    position: "absolute",
+    right: 8,
+    top: 4,
+    minWidth: 28,
+    height: 28,
+    borderRadius: 14,
+    paddingHorizontal: 7,
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
     alignItems: "center",
     justifyContent: "center",
-    marginTop: spacing[4],
+  },
+  activeOverflowText: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: "800",
+    color: colors.white,
   },
   emptyLogo: {
     width: 56,
@@ -876,8 +1091,7 @@ const styles = StyleSheet.create({
     lineHeight: 23,
     fontWeight: "700",
   },
-  sectionContainer: {
-  },
+  sectionContainer: {},
   sectionTitle: {
     fontSize: 25,
     lineHeight: 31,
@@ -889,10 +1103,10 @@ const styles = StyleSheet.create({
     gap: spacing[12],
   },
   upNextCard: {
-    width: 192,
-    height: 138,
+    width: 184,
+    height: 128,
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.1)",
+    borderColor: "rgba(255, 255, 255, 0.095)",
     borderRadius: 22,
     overflow: "hidden",
     shadowColor: "#000000",
@@ -903,7 +1117,7 @@ const styles = StyleSheet.create({
   },
   upNextGradientFill: {
     flex: 1,
-    padding: 14,
+    padding: 13,
     justifyContent: "space-between",
   },
   upNextTop: {
@@ -927,14 +1141,14 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   upNextTitle: {
-    fontSize: 18,
-    lineHeight: 23,
+    fontSize: 17,
+    lineHeight: 22,
     fontWeight: "700",
     color: colors.white,
   },
   upNextSubtitle: {
-    fontSize: 13,
-    lineHeight: 17,
+    fontSize: 12,
+    lineHeight: 16,
     color: colors.textMuted,
     fontWeight: "600",
     marginTop: 6,

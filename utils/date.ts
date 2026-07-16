@@ -83,6 +83,48 @@ export function advanceCycle(
   return next.toISOString();
 }
 
+/** Advance a Date by one billing cycle. Supports raw custom cycles from forms. */
+export function advanceCycleDate(
+  date: Date,
+  cycle: BillingCycle | string,
+  customMonths = 1
+): Date {
+  const base = startOfDay(date);
+  if (cycle === "weekly") return addWeeks(base, 1);
+  if (cycle === "bi-weekly") return addWeeks(base, 2);
+  if (cycle === "monthly") return addMonths(base, 1);
+  if (cycle === "quarterly") return addMonths(base, 3);
+  if (cycle === "semi-yearly") return addMonths(base, 6);
+  if (cycle === "yearly") return addYears(base, 1);
+
+  if (cycle.startsWith("custom:")) {
+    const [, rawValue, rawUnit] = cycle.split(":");
+    const value = Number(rawValue) || 1;
+    const unit = rawUnit || "months";
+    if (unit === "days") return addDays(base, value);
+    if (unit === "weeks") return addWeeks(base, value);
+    if (unit === "years") return addYears(base, value);
+    return addMonths(base, value);
+  }
+
+  return addMonths(base, customMonths);
+}
+
+/** Next renewal after the reference date, preserving the original billing day. */
+export function getNextRenewalDate(
+  startDate: Date,
+  cycle: BillingCycle | string,
+  customMonths = 1,
+  referenceDate = today()
+): Date {
+  const reference = startOfDay(referenceDate);
+  let next = advanceCycleDate(startDate, cycle, customMonths);
+  while (next <= reference) {
+    next = advanceCycleDate(next, cycle, customMonths);
+  }
+  return next;
+}
+
 /** Number of billing periods per year (used to normalize costs). */
 export function periodsPerYear(cycle: BillingCycle, customMonths = 1): number {
   switch (cycle) {

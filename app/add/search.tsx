@@ -33,6 +33,20 @@ const TABS = [
   "Indian",
 ] as const;
 
+const normalizeSearch = (value: string) =>
+  value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+
+const serviceMatchesQuery = (service: Service, query: string) => {
+  const normalizedQuery = normalizeSearch(query);
+  if (!normalizedQuery) return false;
+  return [
+    service.name,
+    service.category,
+    service.id,
+    service.website || "",
+  ].some((value) => normalizeSearch(value).includes(normalizedQuery));
+};
+
 export default function AddSearchScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -97,10 +111,7 @@ export default function AddSearchScreen() {
   // Filter lists based on tab or search query
   const filteredSearchList = useMemo(() => {
     if (!query.trim()) return [];
-    return services.filter((s) =>
-      s.name.toLowerCase().includes(query.toLowerCase()) ||
-      s.category.toLowerCase().includes(query.toLowerCase())
-    );
+    return services.filter((service) => serviceMatchesQuery(service, query));
   }, [query]);
 
   const categoryServices = useMemo(() => {

@@ -42,6 +42,7 @@ export const services: Service[] = [
   { id: "todoist", name: "Todoist Pro", category: "Productivity", brandColor: "#E44332", iconUrl: iconFor("todoist.com"), website: "todoist.com" },
 
   // ─── Storage ───────────────────────────────────────────────────────
+  { id: "google-one", name: "Google One", category: "Storage", brandColor: "#1A73E8", iconUrl: iconFor("one.google.com"), whiteBackground: true, website: "one.google.com" },
   { id: "box-storage", name: "Box", category: "Storage", brandColor: "#0061FC", iconUrl: iconFor("box.com"), website: "box.com" },
 
   // ─── Gaming ────────────────────────────────────────────────────────
