@@ -10,7 +10,7 @@ import { useRouter } from "expo-router";
 import { differenceInCalendarDays, parseISO, startOfDay, format } from "date-fns";
 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Info, Calendar, User, Inbox, Repeat } from "lucide-react-native";
+import { Info, Calendar, User, Inbox, Repeat, ChevronRight } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import Animated, { FadeInUp, useSharedValue, useAnimatedStyle, withTiming } from "react-native-reanimated";
 
@@ -530,9 +530,17 @@ export default function HomeScreen() {
               style={styles.sectionContainer}
             >
               <View style={styles.subscriptionsHeader}>
-                <View style={styles.titleChevronRow}>
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    router.push("/subscriptions");
+                  }}
+                  style={styles.titleChevronRow}
+                >
                   <AppText style={styles.sectionTitle}>Subscriptions</AppText>
-                </View>
+                  <ChevronRight size={22} color="rgba(255, 255, 255, 0.4)" style={{ marginLeft: 6, marginTop: 4 }} />
+                </TouchableOpacity>
                 <PressableScale
                   onPress={toggleSort}
                   scale={0.95}

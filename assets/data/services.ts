@@ -23,13 +23,13 @@ export const services: Service[] = [
 
   // ─── Entertainment ─────────────────────────────────────────────────
   { id: "crunchyroll", name: "Crunchyroll", category: "Entertainment", brandColor: "#DF6300", iconUrl: iconFor("crunchyroll.com"), website: "crunchyroll.com" },
-  { id: "jiohotstar", name: "JioHotstar", category: "Entertainment", brandColor: "#0D6EFD", iconUrl: iconFor("jiostar.com"), website: "jiostar.com" },
+  { id: "jiohotstar", name: "JioHotstar", category: "Entertainment", brandColor: "#0D6EFD", iconUrl: "local:jiohotstar", website: "jiostar.com" },
   { id: "zee5", name: "ZEE5", category: "Entertainment", brandColor: "#8B008B", iconUrl: iconFor("zee5.com"), website: "zee5.com" },
   { id: "sonyliv", name: "SonyLIV", category: "Entertainment", brandColor: "#1F1F1F", iconUrl: iconFor("sonyliv.com"), whiteBackground: true, website: "sonyliv.com" },
-  { id: "jiocinema", name: "JioCinema", category: "Entertainment", brandColor: "#2196F3", iconUrl: iconFor("jiocinema.com"), website: "jiocinema.com" },
-  { id: "hoichoi", name: "hoichoi", category: "Entertainment", brandColor: "#E91E63", iconUrl: iconFor("hoichoi.com"), website: "hoichoi.com" },
-  { id: "lionsgate-play", name: "Lionsgate Play", category: "Entertainment", brandColor: "#1A1A1A", iconUrl: iconFor("lionsgateplay.com"), whiteBackground: true, website: "lionsgateplay.com" },
-  { id: "aha", name: "aha", category: "Entertainment", brandColor: "#E50914", iconUrl: iconFor("ahatelugu.com"), website: "ahatelugu.com" },
+  { id: "jiocinema", name: "JioCinema", category: "Entertainment", brandColor: "#2196F3", iconUrl: "local:jiocinema", website: "jiocinema.com" },
+  { id: "hoichoi", name: "hoichoi", category: "Entertainment", brandColor: "#E91E63", iconUrl: "local:hoichoi", website: "hoichoi.com" },
+  { id: "lionsgate-play", name: "Lionsgate Play", category: "Entertainment", brandColor: "#1A1A1A", iconUrl: "local:lionsgateplay", whiteBackground: true, website: "lionsgateplay.com" },
+  { id: "aha", name: "aha", category: "Entertainment", brandColor: "#E50914", iconUrl: "local:aha", website: "ahatelugu.com" },
 
   // ─── Music ─────────────────────────────────────────────────────────
   { id: "pandora", name: "Pandora Plus", category: "Music", brandColor: "#00A0FF", iconUrl: iconFor("pandora.com"), website: "pandora.com" },
@@ -62,7 +62,7 @@ export const services: Service[] = [
   { id: "myfitnesspal", name: "MyFitnessPal", category: "Health", brandColor: "#0066EE", iconUrl: iconFor("myfitnesspal.com"), website: "myfitnesspal.com" },
   { id: "strava", name: "Strava Summit", category: "Health", brandColor: "#FC671A", iconUrl: iconFor("strava.com"), website: "strava.com" },
   { id: "cult-fit", name: "Cult.fit", category: "Health", brandColor: "#FF5722", iconUrl: iconFor("cult.fit"), website: "cult.fit" },
-  { id: "healthifyme", name: "HealthifyMe", category: "Health", brandColor: "#4CAF50", iconUrl: iconFor("healthifyme.com"), website: "healthifyme.com" },
+  { id: "healthifyme", name: "HealthifyMe", category: "Health", brandColor: "#4CAF50", iconUrl: "local:healthifyme", website: "healthifyme.com" },
   { id: "practo", name: "Practo Plus", category: "Health", brandColor: "#43A047", iconUrl: iconFor("practo.com"), website: "practo.com" },
   { id: "pharmeasy", name: "PharmEasy", category: "Health", brandColor: "#4FC3F7", iconUrl: iconFor("pharmeasy.in"), website: "pharmeasy.in" },
 

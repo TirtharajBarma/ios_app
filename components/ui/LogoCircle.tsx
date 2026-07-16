@@ -29,6 +29,15 @@ export interface LogoCircleProps {
   website?: string;
 }
 
+const LOCAL_LOGOS: Record<string, any> = {
+  "local:jiohotstar": require("../../assets/images/logos/jiohotstar.jpg"),
+  "local:jiocinema": require("../../assets/images/logos/jiocinema.jpg"),
+  "local:hoichoi": require("../../assets/images/logos/hoichoi.jpg"),
+  "local:lionsgateplay": require("../../assets/images/logos/lionsgateplay.jpg"),
+  "local:aha": require("../../assets/images/logos/aha.jpg"),
+  "local:healthifyme": require("../../assets/images/logos/healthifyme.jpg"),
+};
+
 const LogoCircle = forwardRef<View, LogoCircleProps>(function LogoCircle(
   {
     source,
@@ -59,6 +68,7 @@ const LogoCircle = forwardRef<View, LogoCircleProps>(function LogoCircle(
     setErrorCount((prev) => prev + 1);
   }, []);
 
+  const resolvedSource = typeof source === "string" && LOCAL_LOGOS[source] ? LOCAL_LOGOS[source] : source;
   let currentSource: any = null;
 
   // Helper to extract clean domain
@@ -68,6 +78,7 @@ const LogoCircle = forwardRef<View, LogoCircleProps>(function LogoCircle(
       if (clean) return clean;
     }
     if (typeof source === "string" && source.trim()) {
+      if (source.startsWith("local:")) return null;
       if (source.includes("logo.clearbit.com/")) {
         return source.split("logo.clearbit.com/")[1].split("/")[0];
       }
@@ -89,15 +100,15 @@ const LogoCircle = forwardRef<View, LogoCircleProps>(function LogoCircle(
 
   const domain = getDomain();
 
-  if (source && errorCount === 0) {
-    currentSource = typeof source === "string" ? { uri: source } : source;
-  } else if (!source && domain && errorCount === 0) {
+  if (resolvedSource && errorCount === 0) {
+    currentSource = typeof resolvedSource === "string" ? { uri: resolvedSource } : resolvedSource;
+  } else if (!resolvedSource && domain && errorCount === 0) {
     currentSource = {
       uri: `https://www.google.com/s2/favicons?sz=128&domain=${domain}`,
     };
   } else if (domain && errorCount === 1) {
     // Only try Google Favicon as fallback if the failed source was NOT already a google favicon
-    const isGoogleFavicon = typeof source === "string" && source.includes("google.com/s2/favicons");
+    const isGoogleFavicon = typeof resolvedSource === "string" && resolvedSource.includes("google.com/s2/favicons");
     if (!isGoogleFavicon) {
       currentSource = {
         uri: `https://www.google.com/s2/favicons?sz=128&domain=${domain}`,
