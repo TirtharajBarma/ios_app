@@ -31,14 +31,14 @@ import { LinearGradient } from "expo-linear-gradient";
 
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
-import { AppText, LogoCircle } from "@/components/ui";
+import { AppText, LogoCircle, Loading } from "@/components/ui";
 import { colors, spacing, radius, getCurrencySymbol } from "@/constants";
 import { toMonthly, getSubscriptionActivePrice } from "@/utils/date";
 
 export default function SubscriptionsListScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { subscriptions, removeSubscription, loadSubscriptions } = useSubscriptionStore();
+  const { subscriptions, removeSubscription, loadSubscriptions, isLoaded } = useSubscriptionStore();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<"date" | "name" | "price">("date");
@@ -191,7 +191,7 @@ export default function SubscriptionsListScreen() {
         }
         // Filters
         if (hideExpired && isExpired(sub)) return false;
-        if (hideCancelled && sub.reminderEnabled === false && !sub.isTrial && !sub.nextBillingDate) return false;
+        // hideCancelled filter removed — no isCancelled field exists on subscriptions
         if (hideEnding) {
           try {
             const trialEnd = sub.isTrial ? parseISO(sub.trialEndDate || sub.nextBillingDate) : null;
@@ -251,6 +251,9 @@ export default function SubscriptionsListScreen() {
           activeOpacity={0.8}
           onPress={() => router.back()}
           style={styles.backBtn}
+          accessibilityLabel="Go back"
+          accessibilityRole="button"
+          accessibilityHint="Navigates to the previous screen"
         >
           <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
         </TouchableOpacity>
@@ -267,6 +270,9 @@ export default function SubscriptionsListScreen() {
               router.push("/add/search");
             }}
             style={styles.pillIconBtn}
+            accessibilityLabel="Add subscription"
+            accessibilityRole="button"
+            accessibilityHint="Opens the subscription addition flow"
           >
             <Plus size={18} color={colors.white} strokeWidth={2.5} />
           </TouchableOpacity>
@@ -278,6 +284,9 @@ export default function SubscriptionsListScreen() {
               setMenuVisible(!menuVisible);
             }}
             style={styles.pillIconBtn}
+            accessibilityLabel="Open menu"
+            accessibilityRole="button"
+            accessibilityHint="Shows sorting, grouping, and filter options"
           >
             <MoreHorizontal size={18} color={colors.white} strokeWidth={2.5} />
           </TouchableOpacity>
@@ -292,7 +301,11 @@ export default function SubscriptionsListScreen() {
           { paddingBottom: insets.bottom + 88 },
         ]}
       >
-        {groupedData.length === 0 ? (
+        {!isLoaded ? (
+          <View style={{ gap: spacing[16], paddingTop: spacing[16] }}>
+            <Loading.ListSkeleton count={4} />
+          </View>
+        ) : groupedData.length === 0 ? (
           <View style={styles.emptyContainer}>
             <AppText variant="body" color={colors.textMuted} style={styles.emptyText}>
               No subscriptions found
@@ -339,6 +352,9 @@ export default function SubscriptionsListScreen() {
                           styles.listItemRow,
                           !isLast && styles.listItemBorder,
                         ]}
+                        accessibilityLabel={`Subscription ${sub.name}`}
+                        accessibilityRole="button"
+                        accessibilityHint="Tap to view details, long press for actions"
                       >
                         <View style={styles.listItemLeft}>
                           <LogoCircle
@@ -477,6 +493,9 @@ export default function SubscriptionsListScreen() {
                   style={styles.menuRow}
                   activeOpacity={0.7}
                   onPress={() => setSortMenuOpen(true)}
+                  accessibilityLabel="Open sort menu"
+                  accessibilityRole="button"
+                  accessibilityHint="Shows sorting options"
                 >
                   <View style={styles.menuRowLeft}>
                     <ArrowUpDown size={15} color={colors.white} />
@@ -489,6 +508,9 @@ export default function SubscriptionsListScreen() {
                   style={styles.menuRow}
                   activeOpacity={0.7}
                   onPress={() => setGroupMenuOpen(true)}
+                  accessibilityLabel="Open group menu"
+                  accessibilityRole="button"
+                  accessibilityHint="Shows grouping options"
                 >
                   <View style={styles.menuRowLeft}>
                     <LayoutGrid size={15} color={colors.white} />
@@ -508,6 +530,10 @@ export default function SubscriptionsListScreen() {
                     Haptics.selectionAsync();
                     setHideCancelled(!hideCancelled);
                   }}
+                  accessibilityLabel="Toggle hide cancelled"
+                  accessibilityRole="switch"
+                  accessibilityState={{ checked: hideCancelled }}
+                  accessibilityHint="Shows or hides cancelled subscriptions"
                 >
                   <View style={styles.menuRowLeft}>
                     {hideCancelled && <Check size={14} color={colors.accent} style={{ marginRight: 6 }} />}
@@ -524,6 +550,10 @@ export default function SubscriptionsListScreen() {
                     Haptics.selectionAsync();
                     setHideExpired(!hideExpired);
                   }}
+                  accessibilityLabel="Toggle hide expired"
+                  accessibilityRole="switch"
+                  accessibilityState={{ checked: hideExpired }}
+                  accessibilityHint="Shows or hides expired subscriptions"
                 >
                   <View style={styles.menuRowLeft}>
                     {hideExpired && <Check size={14} color={colors.accent} style={{ marginRight: 6 }} />}
@@ -540,6 +570,10 @@ export default function SubscriptionsListScreen() {
                     Haptics.selectionAsync();
                     setHideEnding(!hideEnding);
                   }}
+                  accessibilityLabel="Toggle hide ending"
+                  accessibilityRole="switch"
+                  accessibilityState={{ checked: hideEnding }}
+                  accessibilityHint="Shows or hides subscriptions ending soon"
                 >
                   <View style={styles.menuRowLeft}>
                     {hideEnding && <Check size={14} color={colors.accent} style={{ marginRight: 6 }} />}
@@ -569,6 +603,9 @@ export default function SubscriptionsListScreen() {
                     setSortMenuOpen(false);
                     setMenuVisible(false);
                   }}
+                  accessibilityLabel="Sort by renewal date"
+                  accessibilityRole="button"
+                  accessibilityHint="Sorts subscriptions by next renewal date"
                 >
                   <AppText style={[styles.menuText, { color: sortBy === "date" ? colors.accent : colors.white }]}>
                     Renewal Date
@@ -585,6 +622,9 @@ export default function SubscriptionsListScreen() {
                     setSortMenuOpen(false);
                     setMenuVisible(false);
                   }}
+                  accessibilityLabel="Sort by name"
+                  accessibilityRole="button"
+                  accessibilityHint="Sorts subscriptions alphabetically"
                 >
                   <AppText style={[styles.menuText, { color: sortBy === "name" ? colors.accent : colors.white }]}>
                     Name (A-Z)
@@ -601,6 +641,9 @@ export default function SubscriptionsListScreen() {
                     setSortMenuOpen(false);
                     setMenuVisible(false);
                   }}
+                  accessibilityLabel="Sort by price"
+                  accessibilityRole="button"
+                  accessibilityHint="Sorts subscriptions by price, high to low"
                 >
                   <AppText style={[styles.menuText, { color: sortBy === "price" ? colors.accent : colors.white }]}>
                     Price (High to Low)
@@ -628,6 +671,9 @@ export default function SubscriptionsListScreen() {
                     setGroupMenuOpen(false);
                     setMenuVisible(false);
                   }}
+                  accessibilityLabel="Group by category"
+                  accessibilityRole="button"
+                  accessibilityHint="Groups subscriptions by their category"
                 >
                   <AppText style={[styles.menuText, { color: groupBy === "category" ? colors.accent : colors.white }]}>
                     Category
@@ -644,6 +690,9 @@ export default function SubscriptionsListScreen() {
                     setGroupMenuOpen(false);
                     setMenuVisible(false);
                   }}
+                  accessibilityLabel="Remove grouping"
+                  accessibilityRole="button"
+                  accessibilityHint="Shows all subscriptions in a single list"
                 >
                   <AppText style={[styles.menuText, { color: groupBy === "none" ? colors.accent : colors.white }]}>
                     None

@@ -48,7 +48,7 @@ export default function CurrencyScreen() {
                     Haptics.selectionAsync();
                     await convertAllCurrencies(currencyCode, item.code);
                     await setCurrencyCode(item.code);
-                    setTimeout(() => router.back(), 180);
+                    router.back();
                   }}
                   style={[styles.currencyRow, isSelected && styles.currencyRowSelected]}
                 >

@@ -447,6 +447,15 @@ export default function UnifiedFormScreen() {
     reminderEnabled,
     reminderDays,
     notes,
+    isTrial,
+    autoRenew,
+    splitEnabled,
+    splitType,
+    splitValue,
+    promoEnabled,
+    promoPrice,
+    promoDurationValue,
+    promoDurationUnit,
   }));
 
   const hasUnsavedChanges = useMemo(() => {
@@ -466,7 +475,16 @@ export default function UnifiedFormScreen() {
       initialFormState.category !== category ||
       initialFormState.reminderEnabled !== reminderEnabled ||
       initialFormState.reminderDays !== reminderDays ||
-      initialFormState.notes !== notes
+      initialFormState.notes !== notes ||
+      initialFormState.isTrial !== isTrial ||
+      initialFormState.autoRenew !== autoRenew ||
+      initialFormState.splitEnabled !== splitEnabled ||
+      initialFormState.splitType !== splitType ||
+      initialFormState.splitValue !== splitValue ||
+      initialFormState.promoEnabled !== promoEnabled ||
+      initialFormState.promoPrice !== promoPrice ||
+      initialFormState.promoDurationValue !== promoDurationValue ||
+      initialFormState.promoDurationUnit !== promoDurationUnit
     );
   }, [
     amount,
@@ -485,6 +503,15 @@ export default function UnifiedFormScreen() {
     selectedColor,
     startDate,
     trialEndDate,
+    isTrial,
+    autoRenew,
+    splitEnabled,
+    splitType,
+    splitValue,
+    promoEnabled,
+    promoPrice,
+    promoDurationValue,
+    promoDurationUnit,
     initialFormState,
   ]);
 
@@ -1852,7 +1879,15 @@ export default function UnifiedFormScreen() {
         <TouchableOpacity
           activeOpacity={1}
           style={styles.datePickerBackdrop}
-          onPress={() => setActiveDatePicker(null)}
+          onPress={() => {
+            // Restore snapshot on backdrop tap (same as Cancel behavior)
+            if (calendarSnapshot) {
+              setStartDate(calendarSnapshot.startDate);
+              setTrialEndDate(calendarSnapshot.trialEndDate);
+            }
+            setCalendarSnapshot(null);
+            setActiveDatePicker(null);
+          }}
         />
         <BlurView intensity={80} tint="dark" style={styles.datePickerModal}>
           <View style={styles.datePickerHeader}>

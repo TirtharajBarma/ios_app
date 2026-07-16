@@ -1,6 +1,6 @@
 import React, { memo } from "react";
 import { View, ScrollView, type StyleProp, type ViewStyle } from "react-native";
-import { parseISO, differenceInDays, isSameDay } from "date-fns";
+import { parseISO, differenceInCalendarDays, isSameDay, startOfDay } from "date-fns";
 import { Card, AppText, LogoCircle, SectionHeader } from "@/components/ui";
 import { colors, spacing, radius, hexToRGBA, getCurrencySymbol } from "@/constants";
 import { getSubscriptionActivePrice } from "@/utils/date";
@@ -16,9 +16,9 @@ export interface UpcomingSectionProps {
 
 function getRelativeDays(dateStr: string): string {
   try {
-    const today = new Date();
-    const renewalDate = parseISO(dateStr);
-    const diffDays = differenceInDays(renewalDate, today);
+    const today = startOfDay(new Date());
+    const renewalDate = startOfDay(parseISO(dateStr));
+    const diffDays = differenceInCalendarDays(renewalDate, today);
 
     if (isSameDay(renewalDate, today)) {
       return "Today";

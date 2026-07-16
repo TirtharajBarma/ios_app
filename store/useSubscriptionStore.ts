@@ -40,6 +40,9 @@ function computeStats(subscriptions: Subscription[]): SubscriptionStats {
   let minDays = Infinity;
 
   for (const sub of subscriptions) {
+    // Only count active (non-trial) subscriptions for renewal alerts
+    if (sub.isTrial) continue;
+
     const d = daysUntil(sub.nextBillingDate);
     if (d >= 0 && d < minDays) {
       minDays = d;
@@ -96,11 +99,14 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
   loadSubscriptions: async () => {
     await db.initializeDatabase();
     
-    // Wipe database of old seed/mock data once on startup
-    const CLEANUP_KEY = "@db_cleanup_done_v3";
+    // Wipe database of old seed/mock data once on startup (D-03 guard: only if no real data)
+    const CLEANUP_KEY = "@db_cleanup_done_v4";
     const isCleaned = await AsyncStorage.getItem(CLEANUP_KEY);
     if (!isCleaned) {
-      await db.deleteAllSubscriptions();
+      const existing = await db.getAllSubscriptions();
+      if (existing.length === 0) {
+        await db.deleteAllSubscriptions();
+      }
       await AsyncStorage.setItem(CLEANUP_KEY, "true");
     }
 
@@ -112,6 +118,8 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     let changed = false;
 
     for (const sub of subscriptions) {
+      // Only auto-advance paid subscriptions; trials that have ended remain
+      // at their trialEndDate — the UI layer shows them as "Expired"
       if (!sub.isTrial && sub.nextBillingDate) {
         const billDate = new Date(sub.nextBillingDate);
         if (billDate < today) {
@@ -203,7 +211,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     const EXCHANGE_RATES = await getExchangeRates();
     
     const subs = get().subscriptions;
-    const rateFrom = EXCHANGE_RATES[oldCurrency?.toUpperCase()] ?? 1.0;
+    // B-04: removed unused rateFrom. Each sub is converted from its own currency → USD → newCurrency
     const rateTo = EXCHANGE_RATES[newCurrency?.toUpperCase()] ?? 1.0;
     
     const updatedSubs: Subscription[] = [];

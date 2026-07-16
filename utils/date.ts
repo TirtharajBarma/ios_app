@@ -118,8 +118,12 @@ export function getNextRenewalDate(
   referenceDate = today()
 ): Date {
   const reference = startOfDay(referenceDate);
+  const start = startOfDay(startDate);
+  if (start > reference) {
+    return start;
+  }
   const safeCustomMonths = customMonths > 0 ? customMonths : 1;
-  let next = advanceCycleDate(startDate, cycle, safeCustomMonths);
+  let next = advanceCycleDate(start, cycle, safeCustomMonths);
   let safety = 0;
   while (next <= reference && safety < 366) {
     next = advanceCycleDate(next, cycle, safeCustomMonths);
@@ -181,6 +185,32 @@ export function toYearly(
 /** ISO string for a reminder trigger: reminderDays before a renewal. */
 export function reminderTriggerDate(iso: string, reminderDays: number): string {
   return addDays(toDate(iso), -reminderDays).toISOString();
+}
+
+/**
+ * Format a billing cycle string into a human-readable label.
+ * Handles standard cycles and custom cycle strings like "custom:3:months".
+ */
+export function formatBillingCycleLabel(
+  rawCycle?: string,
+  cycle?: string
+): string {
+  const value = rawCycle || cycle || "monthly";
+  const lower = value.toLowerCase();
+  if (lower === "monthly") return "Monthly";
+  if (lower === "yearly") return "Yearly";
+  if (lower === "weekly") return "Weekly";
+  if (lower === "bi-weekly") return "Bi-weekly";
+  if (lower === "quarterly") return "Quarterly";
+  if (lower === "semi-yearly") return "Semi-yearly";
+  if (lower.startsWith("custom:")) {
+    const parts = lower.split(":");
+    const num = parts[1] || "1";
+    const unit = parts[2] || "months";
+    const unitLabel = unit.charAt(0).toUpperCase() + unit.slice(1);
+    return `Every ${num} ${unitLabel}`;
+  }
+  return value;
 }
 
 /** Calculate active price based on promo code and split details */

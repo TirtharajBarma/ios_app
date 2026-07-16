@@ -1,5 +1,6 @@
 import React, { useEffect } from "react";
 import { View, StyleSheet } from "react-native";
+import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   TrendingUp,
@@ -15,7 +16,7 @@ import Animated, {
   useAnimatedScrollHandler,
 } from "react-native-reanimated";
 import { colors, spacing, hexToRGBA, getCurrencySymbol } from "@/constants";
-import { AppText, Card, SectionHeader } from "@/components/ui";
+import { AppText, Card, SectionHeader, Loading } from "@/components/ui";
 import {
   OverviewTopBar,
   OverviewLargeHeader,
@@ -23,12 +24,13 @@ import {
 import SummaryCard from "@/components/cards/SummaryCard";
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
+import { getSubscriptionActivePrice } from "@/utils/date";
 import type { Subscription } from "@/types/subscription";
 
 function AnalyticsScreen() {
   const scrollY = useSharedValue(0);
   const insets = useSafeAreaInsets();
-  const { subscriptions, stats, loadSubscriptions } = useSubscriptionStore();
+  const { subscriptions, stats, loadSubscriptions, isLoaded } = useSubscriptionStore();
 
   const [nowTime, setNowTime] = React.useState(0);
 
@@ -68,7 +70,8 @@ function AnalyticsScreen() {
   const hasSubscriptions = subscriptions.length > 0;
 
   // Global currency from settings
-  const { currencyCode } = useSettingsStore();
+  const router = useRouter();
+  const { currencyCode, userName } = useSettingsStore();
   const currencySymbol = getCurrencySymbol(currencyCode);
 
   // Memoize category breakdown
@@ -101,8 +104,8 @@ function AnalyticsScreen() {
       <OverviewTopBar
         scrollY={scrollY}
         title="Analytics"
-        profileName="Analytics"
-        onProfilePress={() => {}}
+        profileName={userName || "Analytics"}
+        onProfilePress={() => router.push("/settings")}
       />
 
       <Animated.ScrollView
@@ -116,11 +119,16 @@ function AnalyticsScreen() {
       >
         <OverviewLargeHeader
           title="Analytics"
-          profileName="Analytics"
-          onProfilePress={() => {}}
+          profileName={userName || "Analytics"}
+          onProfilePress={() => router.push("/settings")}
         />
 
-        {!hasSubscriptions ? (
+        {!isLoaded ? (
+          <View style={{ gap: spacing[16], paddingTop: spacing[16] }}>
+            <Loading.CardSkeleton />
+            <Loading.ListSkeleton count={3} />
+          </View>
+        ) : !hasSubscriptions ? (
           <View style={styles.emptyContainer}>
             <BarChart3 size={32} color={colors.textSecondary} />
             <AppText variant="headline" color={colors.textSecondary} style={{ marginTop: spacing[12] }}>
@@ -314,7 +322,8 @@ function getMostExpensive(subs: Subscription[]): string {
   let max = 0;
   for (const sub of subs) {
     if (sub.isTrial) continue;
-    if (sub.price > max) max = sub.price;
+    const effectivePrice = getSubscriptionActivePrice(sub);
+    if (effectivePrice > max) max = effectivePrice;
   }
   return max > 0 ? max.toFixed(2) : "0.00";
 }

@@ -24,6 +24,7 @@ import {
   Repeat,
   ChevronRight,
   Users,
+  Plus,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import Animated, {
@@ -39,7 +40,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
-import { colors, spacing, getCurrencySymbol } from "@/constants";
+import { colors, spacing, radius, getCurrencySymbol } from "@/constants";
 import {
   EmptyState,
   AppText,
@@ -47,6 +48,7 @@ import {
   PressableScale,
   OverviewExplanationSheet,
   ExplanationType,
+  Loading,
 } from "@/components/ui";
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
@@ -91,7 +93,7 @@ function getRenewalStatus(dateStr: string) {
     if (diffDays < 0) {
       return { text: "Overdue", color: colors.danger };
     } else if (diffDays === 0) {
-      return { text: "Today", color: colors.danger };
+      return { text: "Today", color: colors.warning };
     } else if (diffDays === 1) {
       return { text: "Tomorrow", color: colors.warning };
     } else if (diffDays > 1 && diffDays < 30) {
@@ -223,7 +225,13 @@ function FloatingActiveLogo({
 
   return (
     <GestureDetector gesture={composed}>
-      <Animated.View style={[styles.activeLogoBubble, config.style, animatedStyle]}>
+      <Animated.View
+        style={[styles.activeLogoBubble, config.style, animatedStyle]}
+        accessible={true}
+        accessibilityLabel={`${sub.name} subscription`}
+        accessibilityRole="button"
+        accessibilityHint="Tap to view subscription details"
+      >
         <LogoCircle
           source={sub.logoUrl}
           name={sub.name}
@@ -246,7 +254,7 @@ export default function HomeScreen() {
   const childLogoHandledPress = React.useRef(false);
 
   // Load store state
-  const { subscriptions, stats, loadSubscriptions, removeSubscription } =
+  const { subscriptions, stats, loadSubscriptions, removeSubscription, isLoaded } =
     useSubscriptionStore();
   const [sortBy, setSortBy] = useState<"date" | "price" | "name">("date");
   const [cardPage, setCardPage] = useState(0);
@@ -273,9 +281,7 @@ export default function HomeScreen() {
     };
   });
 
-  useEffect(() => {
-    loadSubscriptions();
-  }, []);
+
 
   useFocusEffect(
     React.useCallback(() => {
@@ -452,10 +458,13 @@ export default function HomeScreen() {
               Haptics.selectionAsync();
               router.push("/settings");
             }}
+            accessibilityLabel="Open Settings"
+            accessibilityRole="button"
+            accessibilityHint="Navigates to the Settings screen"
           >
             {userName ? (
               <AppText style={styles.profileInitials}>
-                {userName.trim().split(" ").map((w: string) => w[0]).join("").toUpperCase().slice(0, 2)}
+                {userName.trim().split(" ").filter(Boolean).map((w: string) => w[0]).join("").toUpperCase().slice(0, 2)}
               </AppText>
             ) : (
               <User size={18} color={colors.white} />
@@ -471,7 +480,16 @@ export default function HomeScreen() {
           { paddingBottom: insets.bottom + spacing[40] },
         ]}
       >
-        {!hasSubscriptions ? (
+        {!isLoaded ? (
+          <View style={{ gap: spacing[16], paddingTop: spacing[16] }}>
+            <View style={{ flexDirection: "row", gap: spacing[12] }}>
+              <Loading.CardSkeleton style={{ flex: 1.6 }} />
+              <Loading.CardSkeleton style={{ flex: 1 }} />
+            </View>
+            <Loading.Box height={48} borderRadius={radius[24]} style={{ marginTop: spacing[8], marginBottom: spacing[8] }} />
+            <Loading.ListSkeleton count={3} />
+          </View>
+        ) : !hasSubscriptions ? (
           <EmptyState
             icon={<Inbox size={32} color={colors.textSecondary} />}
             title="No subscriptions yet"
@@ -494,6 +512,9 @@ export default function HomeScreen() {
                     setCardPage((p) => (p === 0 ? 1 : 0));
                   }}
                   style={[styles.leftStatCard, { flex: undefined, width: "100%" }]}
+                  accessibilityLabel="Toggle statistics page"
+                  accessibilityRole="button"
+                  accessibilityHint="Switches between monthly due and estimated annual cost"
                 >
                 <LinearGradient
                   colors={[
@@ -620,7 +641,6 @@ export default function HomeScreen() {
                 <TouchableOpacity
                   activeOpacity={0.6}
                   onPress={() => {
-                    console.log("INFO BUTTON PRESSED");
                     Haptics.selectionAsync();
                     setExplanationType("annual");
                   }}
@@ -634,6 +654,9 @@ export default function HomeScreen() {
                       elevation: 10,
                     },
                   ]}
+                  accessibilityLabel="Annual explanation info"
+                  accessibilityRole="button"
+                  accessibilityHint="Shows information about the annual cost estimation"
                 >
                   <Info size={15} color="rgba(255,255,255,0.72)" />
                 </TouchableOpacity>
@@ -653,6 +676,9 @@ export default function HomeScreen() {
                   router.push("/subscriptions");
                 }}
                 style={styles.rightStatCard}
+                accessibilityLabel="View all Subscriptions"
+                accessibilityRole="button"
+                accessibilityHint="Navigate to the Subscriptions screen"
               >
                 <LinearGradient
                   colors={[
@@ -709,14 +735,20 @@ export default function HomeScreen() {
                 onPress={handleAddPress}
                 scale={0.97}
                 style={styles.addCapsuleBtn}
+                accessibilityLabel="Add Subscription"
+                accessibilityRole="button"
+                accessibilityHint="Open the Add Subscription flow"
               >
-                <AppText
-                  weight="700"
-                  color={colors.white}
-                  style={styles.addBtnText}
-                >
-                  + Add
-                </AppText>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Plus size={18} color={colors.white} strokeWidth={2.5} />
+                  <AppText
+                    weight="700"
+                    color={colors.white}
+                    style={styles.addBtnText}
+                  >
+                    Add
+                  </AppText>
+                </View>
               </PressableScale>
             </Animated.View>
 

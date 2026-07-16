@@ -20,6 +20,7 @@ export default function RootLayout() {
   const router = useRouter();
   const { loadSettings } = useSettingsStore();
   const [isLocked, setIsLocked] = useState(false);
+  const [biometricLabel, setBiometricLabel] = useState("Unlock");
   const appState = useRef(AppState.currentState);
 
   // Initial setup: load db, check onboarding, and lock the app on start if faceId is enabled in storage
@@ -28,33 +29,38 @@ export default function RootLayout() {
     requestNotificationPermissions().catch((e) => console.warn("Notification permissions failed:", e));
     loadSettings();
 
-    // Check onboarding status
+    // Check onboarding, then conditionally apply Face ID lock
     AsyncStorage.getItem(ONBOARDING_KEY).then((value: string | null) => {
       if (!value) {
         router.replace("/onboarding");
+        return; // Skip Face ID lock during onboarding
       }
-    });
-
-    // Check Face ID preference directly in AsyncStorage on start (instant lock before store loads)
-    AsyncStorage.getItem("@subo_settings_v2").then((val: string | null) => {
-      if (val) {
-        try {
-          const parsed = JSON.parse(val);
-          if (parsed.state && parsed.state.faceIdEnabled) {
-            setIsLocked(true);
-            setTimeout(() => authenticate(), 150);
+      // Only check Face ID after confirming onboarding is done
+      AsyncStorage.getItem("@subo_settings_v2").then((val: string | null) => {
+        if (val) {
+          try {
+            const parsed = JSON.parse(val);
+            if (parsed.faceIdEnabled) {
+              setIsLocked(true);
+              setTimeout(() => authenticate(), 150);
+            }
+          } catch (e) {
+            console.warn("Failed to parse settings for startup lock:", e);
           }
-        } catch (e) {
-          console.warn("Failed to parse settings for startup lock:", e);
         }
-      }
+      });
     });
-  }, [router]);
+  }, [router, loadSettings]);
 
   const authenticate = async () => {
     try {
       const hasHW = await LocalAuthentication.hasHardwareAsync();
       const enrolled = await LocalAuthentication.isEnrolledAsync();
+      if (hasHW && enrolled) {
+        const types = await LocalAuthentication.supportedAuthenticationTypesAsync();
+        const hasFaceId = types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION);
+        setBiometricLabel(hasFaceId ? "Unlock with Face ID" : "Unlock with Fingerprint");
+      }
       if (!hasHW || !enrolled) {
         setIsLocked(false);
         return;
@@ -167,9 +173,16 @@ export default function RootLayout() {
             <AppText variant="body" color={colors.textMuted} style={styles.lockSubtitle}>
               Authentication is required to view your subscription details.
             </AppText>
-            <TouchableOpacity onPress={authenticate} style={styles.unlockBtn} activeOpacity={0.85}>
+            <TouchableOpacity
+              onPress={authenticate}
+              style={styles.unlockBtn}
+              activeOpacity={0.85}
+              accessibilityLabel="Unlock app with biometrics"
+              accessibilityRole="button"
+              accessibilityHint="Authenticates using Face ID or fingerprint"
+            >
               <AppText variant="body" weight="700" color={colors.black}>
-                Unlock with Face ID
+                {biometricLabel}
               </AppText>
             </TouchableOpacity>
           </View>

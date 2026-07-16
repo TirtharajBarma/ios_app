@@ -90,6 +90,7 @@ export default function SettingsScreen() {
 
   const [showImportModal, setShowImportModal] = useState(false);
   const [importText, setImportText] = useState("");
+  const [isImporting, setIsImporting] = useState(false);
 
   const handleImportData = async () => {
     Haptics.selectionAsync();
@@ -99,11 +100,14 @@ export default function SettingsScreen() {
 
   const processImport = async () => {
     if (!importText.trim()) return;
+    if (isImporting) return;
+    setIsImporting(true);
     try {
       const data = JSON.parse(importText);
       if (data && Array.isArray(data.subscriptions)) {
-        // Clear existing
-        for (const sub of subscriptions) {
+        // Clear existing — take snapshot to avoid mutating while iterating
+        const existingSubs = [...subscriptions];
+        for (const sub of existingSubs) {
           await removeSubscription(sub.id);
         }
         // Import new
@@ -139,8 +143,10 @@ export default function SettingsScreen() {
       }
     } catch (error) {
       Alert.alert("Import Failed", "Invalid JSON format.");
+    } finally {
+      setIsImporting(false);
+      setShowImportModal(false);
     }
-    setShowImportModal(false);
   };
 
   const handleClearAllData = () => {
@@ -320,9 +326,10 @@ export default function SettingsScreen() {
                 Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                 processImport();
               }}
-              style={{ flex: 1, height: 44, borderRadius: 22, backgroundColor: colors.white, alignItems: "center", justifyContent: "center" }}
+              disabled={isImporting}
+              style={{ flex: 1, height: 44, borderRadius: 22, backgroundColor: isImporting ? colors.textMuted : colors.white, alignItems: "center", justifyContent: "center" }}
             >
-              <AppText weight="700" color={colors.black}>Import</AppText>
+              <AppText weight="700" color={colors.black}>{isImporting ? "Importing..." : "Import"}</AppText>
             </TouchableOpacity>
           </View>
         </View>
@@ -356,8 +363,8 @@ function SettingsRow({
   danger?: boolean;
 }) {
   return (
-    <Animated.View>
-      <Animated.View style={styles.row}>
+    <TouchableOpacity activeOpacity={0.7} onPress={onPress}>
+      <View style={styles.row}>
         <View style={styles.rowLeft}>
           <View style={styles.iconWrap}>{icon}</View>
           <View>
@@ -376,8 +383,8 @@ function SettingsRow({
           </View>
         </View>
         <ChevronRight size={14} color={colors.textMuted} />
-      </Animated.View>
-    </Animated.View>
+      </View>
+    </TouchableOpacity>
   );
 }
 

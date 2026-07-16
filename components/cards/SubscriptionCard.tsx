@@ -3,11 +3,11 @@ import { View, StyleSheet, Alert, type StyleProp, type ViewStyle } from "react-n
 import Animated, { FadeInUp } from "react-native-reanimated";
 import { Swipeable } from "react-native-gesture-handler";
 import { ChevronRight, Trash2, Repeat } from "lucide-react-native";
-import { format, parseISO, differenceInDays, isSameDay } from "date-fns";
+import { format, parseISO, differenceInCalendarDays, isSameDay, startOfDay } from "date-fns";
 import * as Haptics from "expo-haptics";
 import { Card, AppText, LogoCircle } from "@/components/ui";
 import { colors, spacing, radius, hexToRGBA, getCurrencySymbol } from "@/constants";
-import { getSubscriptionActivePrice } from "@/utils/date";
+import { getSubscriptionActivePrice, formatBillingCycleLabel } from "@/utils/date";
 import type { Subscription } from "@/types/subscription";
 
 export interface SubscriptionCardProps {
@@ -21,10 +21,10 @@ export interface SubscriptionCardProps {
 
 function getRenewalStatus(dateStr: string) {
   try {
-    const today = new Date();
-    const renewalDate = parseISO(dateStr);
+    const today = startOfDay(new Date());
+    const renewalDate = startOfDay(parseISO(dateStr));
     if (isNaN(renewalDate.getTime())) return { text: "-", color: colors.textMuted };
-    const diffDays = differenceInDays(renewalDate, today);
+    const diffDays = differenceInCalendarDays(renewalDate, today);
 
     if (diffDays < 0) {
       return { text: "Overdue", color: colors.danger };
@@ -184,7 +184,7 @@ function SubscriptionCard({
                 color={status.color === colors.textMuted ? colors.textMuted : status.color}
                 style={{ opacity: 0.8 }}
               >
-                {CYCLE_LABELS[billingCycle] || billingCycle}
+                {formatBillingCycleLabel(subscription.rawBillingCycle, billingCycle)}
               </AppText>
               {!isTrial && (
                 <Repeat size={10} color={status.color === colors.textMuted ? colors.textMuted : status.color} style={{ opacity: 0.8 }} />

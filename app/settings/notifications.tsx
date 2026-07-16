@@ -49,6 +49,9 @@ export default function NotificationsScreen() {
         const isGranted = status === "granted";
         if (isGranted !== notificationsEnabled) {
           await setNotificationsEnabled(isGranted);
+          if (!isGranted) {
+            await cancelAllReminders();
+          }
         }
       } catch (e) {
         console.warn("Failed to check notifications permission:", e);
@@ -85,13 +88,11 @@ export default function NotificationsScreen() {
         return;
       }
       await setNotificationsEnabled(true);
-      // Re-schedule all existing subscriptions with current timing
-      const daysOption = TIMING_OPTIONS.find((o) => o.value === notificationTiming);
-      const daysAhead = daysOption?.days ?? 1;
+      // Re-schedule all existing subscriptions using their own configured reminder offsets
       const enriched = subscriptions.map((s) => ({
         ...s,
         reminderEnabled: s.reminderEnabled !== false,
-        reminderDays: daysAhead,
+        reminderDays: s.reminderDays !== undefined && s.reminderDays !== null ? s.reminderDays : 1,
       }));
       await scheduleAllReminders(enriched);
     } else {
@@ -100,18 +101,27 @@ export default function NotificationsScreen() {
     }
   };
 
-  // When timing changes, re-schedule all reminders with new timing
+  // When timing changes, re-schedule all reminders with new timing (B-20: preserving individual custom offsets)
   const handleTimingChange = async (timing: NotificationTiming) => {
     Haptics.selectionAsync();
+    const prevTiming = notificationTiming;
     await setNotificationTiming(timing);
     if (!notificationsEnabled) return;
+
+    const prevOption = TIMING_OPTIONS.find((o) => o.value === prevTiming);
+    const prevDays = prevOption?.days ?? 1;
     const daysOption = TIMING_OPTIONS.find((o) => o.value === timing);
     const daysAhead = daysOption?.days ?? 1;
-    const enriched = subscriptions.map((s) => ({
-      ...s,
-      reminderEnabled: s.reminderEnabled !== false,
-      reminderDays: daysAhead,
-    }));
+
+    // Only update subscriptions whose reminderDays matches the previous global default
+    const enriched = subscriptions.map((s) => {
+      const isCustom = s.reminderDays !== prevDays;
+      return {
+        ...s,
+        reminderEnabled: s.reminderEnabled !== false,
+        reminderDays: isCustom ? s.reminderDays : daysAhead,
+      };
+    });
     await scheduleAllReminders(enriched);
   };
 

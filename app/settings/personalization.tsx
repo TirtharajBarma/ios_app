@@ -50,6 +50,7 @@ export default function PersonalizationScreen() {
     ? nameInput
         .trim()
         .split(" ")
+        .filter(Boolean)
         .map((w) => w[0])
         .join("")
         .toUpperCase()
@@ -229,9 +230,9 @@ const styles = StyleSheet.create({
     width: 84,
     height: 84,
     borderRadius: 42,
-    backgroundColor: hexToRGBA("#FF6030", 0.25),
+    backgroundColor: hexToRGBA(colors.accent, 0.15),
     borderWidth: 2,
-    borderColor: hexToRGBA("#FF6030", 0.4),
+    borderColor: hexToRGBA(colors.accent, 0.3),
     alignItems: "center",
     justifyContent: "center",
     marginBottom: spacing[4],
@@ -241,7 +242,7 @@ const styles = StyleSheet.create({
     fontSize: 28,
     lineHeight: 34,
     fontWeight: "800",
-    color: "#FF8050",
+    color: colors.accent,
     textAlign: "center",
     textAlignVertical: "center",
   },

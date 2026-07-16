@@ -14,7 +14,6 @@ import {
   Bell,
   FileText,
   ChevronLeft,
-  Trash2,
   Users,
   Percent,
 } from "lucide-react-native";
@@ -174,9 +173,7 @@ export default function SubscriptionDetailScreen() {
               Edit
             </AppText>
           </PressableScale>
-          <PressableScale onPress={handleDelete} scale={0.88} style={styles.navCircleBtn}>
-            <Trash2 size={18} color={colors.white} />
-          </PressableScale>
+
         </View>
       </View>
 
@@ -247,7 +244,7 @@ export default function SubscriptionDetailScreen() {
                 <Calendar size={18} color={colors.white} />
               </View>
               <AppText weight="600" color={colors.white} style={styles.rowLabel}>
-                Next bill
+                {isTrial ? "Trial ends" : "Next bill"}
               </AppText>
             </View>
             <AppText weight="600" color={colors.white} style={styles.rowValue}>
@@ -329,7 +326,7 @@ export default function SubscriptionDetailScreen() {
           </View>
 
           {/* Row 4: Notes */}
-          <View style={styles.detailRow}>
+          <View style={[styles.detailRow, note ? { height: undefined, minHeight: 56, paddingVertical: 12 } : {}]}>
             <View style={styles.rowLeft}>
               <View style={styles.iconWrapper}>
                 <FileText size={18} color={colors.white} />
@@ -338,7 +335,7 @@ export default function SubscriptionDetailScreen() {
                 Notes
               </AppText>
             </View>
-            <AppText weight="600" color={colors.white} style={styles.rowValue} numberOfLines={1}>
+            <AppText weight="600" color={colors.white} style={[styles.rowValue, { textAlign: 'right', flex: 1 }]}>
               {note || "No notes"}
             </AppText>
           </View>

@@ -108,7 +108,9 @@ function mapDbToSubscription(dbSub: DbSubscription): Subscription {
     billingCycle: parsedCycle,
     customIntervalMonths: customMonths,
     rawBillingCycle: dbSub.billingCycle || undefined,
-    nextBillingDate: dbSub.isTrial === 1 ? (dbSub.trialEndDate || "") : (dbSub.renewDate || dbSub.trialEndDate || ""),
+    nextBillingDate: dbSub.isTrial === 1
+      ? (dbSub.trialEndDate || new Date().toISOString())
+      : (dbSub.renewDate || dbSub.trialEndDate || new Date().toISOString()),
     category: (dbSub.category?.toLowerCase() || "other") as any,
     reminderEnabled: dbSub.reminderEnabled === 1,
     reminderDays: dbSub.reminderDays,
