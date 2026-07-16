@@ -32,7 +32,10 @@ import Animated, {
   withTiming,
   withRepeat,
   withSequence,
+  withSpring,
+  cancelAnimation,
 } from "react-native-reanimated";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
 import { colors, spacing, getCurrencySymbol } from "@/constants";
 import {
@@ -110,6 +113,12 @@ function FloatingActiveLogo({
   onPress: () => void;
 }) {
   const float = useSharedValue(0);
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const scale = useSharedValue(1);
+  const rotate = useSharedValue(0);
+  const wasDragged = useSharedValue(false);
+
   const configsByTotal = {
     1: [{ size: 40, style: styles.activeLogoSolo }],
     2: [
@@ -143,20 +152,69 @@ function FloatingActiveLogo({
     );
   }, [float, index]);
 
+  const panGesture = Gesture.Pan()
+    .onBegin(() => {
+      wasDragged.value = false;
+      cancelAnimation(float);
+      float.value = 0.5;
+      scale.value = withSpring(1.3, { damping: 12, stiffness: 200 });
+    })
+    .onUpdate((e) => {
+      wasDragged.value = true;
+      translateX.value = e.translationX;
+      translateY.value = e.translationY;
+      rotate.value = e.translationX * 0.15;
+    })
+    .onEnd((e) => {
+      translateX.value = withSpring(0, { damping: 14, stiffness: 120 });
+      translateY.value = withSpring(0, { damping: 14, stiffness: 120 });
+      rotate.value = withSpring(0, { damping: 14, stiffness: 120 });
+      scale.value = withSpring(1, { damping: 14, stiffness: 150 });
+      float.value = withRepeat(
+        withSequence(
+          withTiming(1, { duration: 800 + index * 100 }),
+          withTiming(0, { duration: 800 + index * 100 }),
+        ),
+        -1,
+        true,
+      );
+    })
+    .onFinalize(() => {
+      if (!wasDragged.value) {
+        scale.value = withSequence(
+          withSpring(1.4, { damping: 10, stiffness: 300 }),
+          withSpring(1, { damping: 12, stiffness: 150 }),
+        );
+        rotate.value = withSequence(
+          withSpring(8, { damping: 10, stiffness: 200 }),
+          withSpring(-5, { damping: 10, stiffness: 200 }),
+          withSpring(0, { damping: 12, stiffness: 150 }),
+        );
+      }
+    });
+
+  const tapGesture = Gesture.Tap()
+    .maxDuration(250)
+    .onEnd(() => {
+      if (!wasDragged.value) {
+        onPress();
+      }
+    });
+
+  const composed = Gesture.Simultaneous(panGesture, tapGesture);
+
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [
-      { translateY: (float.value - 0.5) * (4 + index) },
-      { scale: 0.98 + float.value * 0.04 },
+      { translateX: translateX.value },
+      { translateY: translateY.value + (float.value - 0.5) * (4 + index) },
+      { rotate: `${rotate.value}deg` },
+      { scale: scale.value * (0.98 + float.value * 0.04) },
     ],
   }));
 
   return (
-    <TouchableOpacity
-      onPress={onPress}
-      activeOpacity={0.7}
-      style={[styles.activeLogoBubble, config.style]}
-    >
-      <Animated.View style={animatedStyle}>
+    <GestureDetector gesture={composed}>
+      <Animated.View style={[styles.activeLogoBubble, config.style, animatedStyle]}>
         <LogoCircle
           source={sub.logoUrl}
           name={sub.name}
@@ -166,7 +224,7 @@ function FloatingActiveLogo({
           website={sub.website}
         />
       </Animated.View>
-    </TouchableOpacity>
+    </GestureDetector>
   );
 }
 
