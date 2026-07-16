@@ -47,10 +47,9 @@ export async function initializeDatabase(): Promise<SQLite.SQLiteDatabase> {
       console.log("Database: Successfully initialized.");
       return db;
     } catch (error) {
+      initPromise = null;
       console.error("Database initialization error:", error);
       throw new Error(`Failed to initialize database: ${error instanceof Error ? error.message : "unknown error"}`);
-    } finally {
-      initPromise = null;
     }
   })();
 
@@ -117,24 +116,24 @@ function mapDbToSubscription(dbSub: DbSubscription): Subscription {
     
     // Extensions
     isTrial: dbSub.isTrial === 1,
-    trialStartDate: dbSub.trialStartDate || undefined,
-    trialEndDate: dbSub.trialEndDate || undefined,
-    startDate: dbSub.startDate || undefined,
-    paymentMethod: dbSub.paymentMethod || undefined,
-    website: dbSub.website || undefined,
+    trialStartDate: dbSub.trialStartDate ?? undefined,
+    trialEndDate: dbSub.trialEndDate ?? undefined,
+    startDate: dbSub.startDate ?? undefined,
+    paymentMethod: dbSub.paymentMethod ?? undefined,
+    website: dbSub.website ?? undefined,
 
     // Splitting
     splitEnabled: dbSub.splitEnabled === 1,
-    splitType: dbSub.splitType as any || undefined,
-    splitValue: dbSub.splitValue || undefined,
+    splitType: (dbSub.splitType as any) ?? undefined,
+    splitValue: dbSub.splitValue ?? undefined,
 
     // Promo
     promoEnabled: dbSub.promoEnabled === 1,
-    promoPrice: dbSub.promoPrice || undefined,
-    promoDurationValue: dbSub.promoDurationValue || undefined,
-    promoDurationUnit: dbSub.promoDurationUnit as any || undefined,
-    promoStartDate: dbSub.promoStartDate || undefined,
-    promoEndDate: dbSub.promoEndDate || undefined,
+    promoPrice: dbSub.promoPrice ?? undefined,
+    promoDurationValue: dbSub.promoDurationValue ?? undefined,
+    promoDurationUnit: (dbSub.promoDurationUnit as any) ?? undefined,
+    promoStartDate: dbSub.promoStartDate ?? undefined,
+    promoEndDate: dbSub.promoEndDate ?? undefined,
 
     createdAt: dbSub.createdAt,
     updatedAt: dbSub.updatedAt,
@@ -169,10 +168,10 @@ function mapDomainToDb(id: string, input: NewSubscriptionInput): Omit<DbSubscrip
     reminderDays: input.reminderDays,
     splitEnabled: input.splitEnabled ? 1 : 0,
     splitType: input.splitType || null,
-    splitValue: input.splitValue || null,
+    splitValue: input.splitValue ?? null,
     promoEnabled: input.promoEnabled ? 1 : 0,
-    promoPrice: input.promoPrice || null,
-    promoDurationValue: input.promoDurationValue || null,
+    promoPrice: input.promoPrice ?? null,
+    promoDurationValue: input.promoDurationValue ?? null,
     promoDurationUnit: input.promoDurationUnit || null,
     promoStartDate: input.promoStartDate || null,
     promoEndDate: input.promoEndDate || null,
@@ -221,8 +220,9 @@ export async function updateSubscription(
     } else if (input.isTrial === false) {
       dbUpdates.renewDate = input.nextBillingDate;
     } else {
-      // isTrial not in update payload — check what we already have
-      if (dbUpdates.isTrial === 1) {
+      // isTrial not in update payload — fetch existing record to check
+      const existing = await dbGetSubscriptionById(id);
+      if (existing?.isTrial === 1) {
         dbUpdates.trialEndDate = input.nextBillingDate;
       } else {
         dbUpdates.renewDate = input.nextBillingDate;

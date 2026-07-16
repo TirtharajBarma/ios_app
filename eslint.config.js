@@ -7,7 +7,6 @@ module.exports = defineConfig([
   {
     ignores: ["dist/*"],
     rules: {
-      "react-hooks/immutability": "off",
     }
   }
 ]);

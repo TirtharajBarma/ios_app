@@ -8,7 +8,7 @@
     "scheme": "subscription",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon",
+      "icon": "./assets/images/icon.png",
       "bundleIdentifier": "com.tirtharajbarma.subscription",
       "infoPlist": {
         "NSFaceIDUsageDescription": "Authentication is required to unlock the app and access your subscription details."

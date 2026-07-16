@@ -20,6 +20,7 @@ function PressableScale({
   scale = 0.95,
   children,
   disabled,
+  style,
   ...rest
 }: PressableScaleProps) {
   const scaleValue = useSharedValue(1);
@@ -40,7 +41,7 @@ function PressableScale({
 
   return (
     <AnimatedPressable
-      style={animatedStyle}
+      style={[animatedStyle, style]}
       onPress={onPress}
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}

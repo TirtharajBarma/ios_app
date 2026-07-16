@@ -82,11 +82,13 @@ export type Shadows = typeof shadows;
 /** Platform-aware shadow helper — returns the correct props for the running OS. */
 export function shadowStyle(level: keyof typeof shadows): ViewStyle {
   // On iOS the native props are enough; Android only understands elevation.
-  if (typeof globalThis !== "undefined" && "OS" in (globalThis as Record<string, unknown>)) {
-    const os = (globalThis as Record<string, unknown>).OS as string;
-    if (os === "android") {
+  try {
+    const { Platform } = require("react-native");
+    if (Platform.OS === "android") {
       return { ...shadows[level].android };
     }
+  } catch {
+    // Not in a React Native environment, fall through to native
   }
   return { ...shadows[level].native };
 }

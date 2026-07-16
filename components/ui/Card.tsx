@@ -116,7 +116,7 @@ const Card = forwardRef<View, CardProps>(function Card(
   };
 
   const shadowStyle =
-    shadow === "none" ? {} : (shadows[shadow] as ViewStyle);
+    shadow === "none" ? {} : { ...(shadows[shadow].native as ViewStyle) };
 
   const renderContent = () => {
     if (gradientKey) {
@@ -170,7 +170,6 @@ const Card = forwardRef<View, CardProps>(function Card(
     <View
       ref={ref}
       style={[baseStyle, shadowStyle, style]}
-      {...rest}
     >
       {renderBlurOrContent()}
     </View>

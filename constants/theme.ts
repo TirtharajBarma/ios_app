@@ -54,9 +54,18 @@ export function hexToRGBA(hex: string, opacity: number): string {
   // Strip leading # if present
   const clean = hex.replace("#", "");
 
-  const r = parseInt(clean.substring(0, 2), 16);
-  const g = parseInt(clean.substring(2, 4), 16);
-  const b = parseInt(clean.substring(4, 6), 16);
+  // Handle shorthand hex (e.g., "FFF" -> "FFFFFF")
+  let fullHex = clean;
+  if (clean.length === 3) {
+    fullHex = clean[0] + clean[0] + clean[1] + clean[1] + clean[2] + clean[2];
+  }
+
+  // Handle 8-character hex with alpha (ignore the alpha portion)
+  const hex6 = fullHex.substring(0, 6);
+
+  const r = parseInt(hex6.substring(0, 2), 16) || 0;
+  const g = parseInt(hex6.substring(2, 4), 16) || 0;
+  const b = parseInt(hex6.substring(4, 6), 16) || 0;
 
   return `rgba(${r}, ${g}, ${b}, ${opacity})`;
 }

@@ -16,7 +16,7 @@
  *     {content}
  *   </SwipeDownSheet>
  */
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState } from "react";
 import { StyleSheet, View, ViewStyle, StyleProp } from "react-native";
 import {
   GestureDetector,
@@ -60,6 +60,7 @@ export default function SwipeDownSheet({
   // close animation.  Set to false only after the close animation finishes,
   // so React doesn't unmount the sheet mid-animation.
   const [showing, setShowing] = useState(false);
+  const isClosingRef = React.useRef(false);
 
   const translateY = useSharedValue(0);
   const backdropOpacity = useSharedValue(0);
@@ -69,29 +70,32 @@ export default function SwipeDownSheet({
   useEffect(() => {
     if (visible && !prevVisible.current) {
       // Opening: show the sheet immediately, then spring into position.
+      isClosingRef.current = false;
       setShowing(true);
       translateY.value = 0;
       backdropOpacity.value = withTiming(1, { duration: 240 });
     } else if (!visible && prevVisible.current) {
       // Programmatic close (Done button, etc.) — animate off-screen.
-      backdropOpacity.value = withTiming(0, { duration: 200 });
-      translateY.value = withSpring(999, SPRING_CLOSE, () => {
-        runOnJS(handleAnimationEnd)();
-      });
+      if (!isClosingRef.current) {
+        isClosingRef.current = true;
+        backdropOpacity.value = withTiming(0, { duration: 200 });
+        translateY.value = withSpring(999, SPRING_CLOSE, () => {
+          runOnJS(handleAnimationEnd)();
+        });
+      }
     }
     prevVisible.current = visible;
-  }, [visible]);
+  }, [visible, backdropOpacity, translateY]);
 
-  const handleAnimationEnd = useCallback(() => {
+  const handleAnimationEnd = () => {
     setShowing(false);
-  }, []);
+  };
 
   // Called from worklet to fire after close animation finishes.
-  const finishClose = useCallback(() => {
+  const finishClose = () => {
+    isClosingRef.current = true;
     runOnJS(onClose)();
-    // Delay unmount so the spring animation visually completes first.
-    setTimeout(() => runOnJS(handleAnimationEnd)(), ANIM_CLOSE_MS);
-  }, [onClose, handleAnimationEnd]);
+  };
 
   // ── Gesture ─────────────────────────────────────────────────────────
   const pan = Gesture.Pan()
@@ -148,7 +152,7 @@ export default function SwipeDownSheet({
         <Animated.View
           style={[
             styles.sheet,
-            { height: `${heightRatio * 100}%` },
+            heightRatio ? { height: `${heightRatio * 100}%` } : undefined,
             sheetStyle,
             containerStyle,
           ]}

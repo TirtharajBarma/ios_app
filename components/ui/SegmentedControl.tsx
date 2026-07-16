@@ -79,10 +79,9 @@ const SegmentedControl = forwardRef<View, SegmentedControlProps>(function Segmen
   const handlePress = useCallback(
     (index: number) => {
       Haptics.selectionAsync();
-      activeSV.value = withSpring(index, springConfig.default);
       onChange(index);
     },
-    [activeSV, onChange],
+    [onChange],
   );
 
   return (

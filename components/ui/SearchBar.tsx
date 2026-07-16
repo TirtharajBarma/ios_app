@@ -48,6 +48,8 @@ function SearchBar(
     placeholder = "Search",
     value,
     onChangeText,
+    onFocus: onFocusProp,
+    onBlur: onBlurProp,
     ...rest
   }: SearchBarProps,
   ref: React.ForwardedRef<TextInput>,
@@ -59,18 +61,18 @@ function SearchBar(
     (e: Parameters<NonNullable<TextInputProps["onFocus"]>>[0]) => {
       setFocused(true);
       focusSV.value = withTiming(1, { duration: duration.fast });
-      rest.onFocus?.(e);
+      onFocusProp?.(e);
     },
-    [focusSV, rest],
+    [focusSV, onFocusProp],
   );
 
   const handleBlur = useCallback(
     (e: Parameters<NonNullable<TextInputProps["onBlur"]>>[0]) => {
       setFocused(false);
       focusSV.value = withTiming(0, { duration: duration.fast });
-      rest.onBlur?.(e);
+      onBlurProp?.(e);
     },
-    [focusSV, rest],
+    [focusSV, onBlurProp],
   );
 
   const handleClear = useCallback(() => {

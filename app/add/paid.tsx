@@ -11,6 +11,7 @@ import {
   Platform,
   Animated,
   type ScrollView as RNScrollView,
+  KeyboardAvoidingView,
 } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -26,7 +27,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
 import * as ImagePicker from "expo-image-picker";
 
-import { colors, spacing, hexToRGBA, CURRENCIES } from "@/constants";
+import { colors, spacing, hexToRGBA, CURRENCIES, getCurrencySymbol } from "@/constants";
 import {
   AppText,
   LogoCircle,
@@ -323,8 +324,8 @@ export default function UnifiedFormScreen() {
   const [notesCardY, setNotesCardY] = useState(0);
 
   const [showCustomCycleModal, setShowCustomCycleModal] = useState(false);
-  const [showNameEditModal, setShowNameEditModal] = useState(false);
-  const [nameEditValue, setNameEditValue] = useState("");
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [nameBeforeEdit, setNameBeforeEdit] = useState("");
   const [showColorEditModal, setShowColorEditModal] = useState(false);
   const [colorEditValue, setColorEditValue] = useState("");
   const [activeDatePicker, setActiveDatePicker] = useState<
@@ -532,8 +533,21 @@ export default function UnifiedFormScreen() {
   };
   const handleEditName = () => {
     Haptics.selectionAsync();
-    setNameEditValue(customName);
-    setShowNameEditModal(true);
+    setNameBeforeEdit(customName);
+    setIsEditingName(true);
+  };
+  const handleSaveName = () => {
+    if (!isEditingName) return;
+    setIsEditingName(false);
+    const trimmed = customName.trim();
+    if (!trimmed) {
+      setCustomName(nameBeforeEdit);
+    } else {
+      setCustomName(trimmed);
+      if (trimmed !== nameBeforeEdit) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+    }
   };
   const handleCurrencyPress = () => {
     Keyboard.dismiss();
@@ -568,6 +582,22 @@ export default function UnifiedFormScreen() {
     if (isSaving) return;
     if (!customName.trim()) {
       Alert.alert("Error", "Please enter subscription name");
+      return;
+    }
+    if (!isTrial && renewing && (!amount || Number(amount) <= 0)) {
+      Alert.alert("Error", "Please enter a valid subscription amount");
+      return;
+    }
+    if (promoEnabled && (!promoPrice || Number(promoPrice) < 0)) {
+      Alert.alert("Error", "Please enter a valid promo price");
+      return;
+    }
+    if (promoEnabled && (!promoDurationValue || Number(promoDurationValue) <= 0)) {
+      Alert.alert("Error", "Promo duration must be at least 1");
+      return;
+    }
+    if (isTrial && trialEndDate <= startDate) {
+      Alert.alert("Error", "Trial end date must be after start date");
       return;
     }
 
@@ -672,15 +702,6 @@ export default function UnifiedFormScreen() {
     }
   };
 
-  const getCurrencySymbol = (code: string) => {
-    if (code === "INR") return "₹";
-    if (code === "USD") return "$";
-    if (code === "EUR") return "€";
-    if (code === "GBP") return "£";
-    if (code === "JPY") return "¥";
-    return "$";
-  };
-
   const formatReminderLabel = (days: number) => {
     if (days === 0) return "Same Day";
     if (days === 1) return "1 Day Before";
@@ -730,6 +751,14 @@ export default function UnifiedFormScreen() {
       150,
     );
   };
+
+  const isModalActive =
+    isEditingName ||
+    showColorEditModal ||
+    showCustomCycleModal ||
+    customizeVisible ||
+    activePicker !== null ||
+    activeDatePicker !== null;
 
   return (
     <View style={styles.container}>
@@ -805,15 +834,41 @@ export default function UnifiedFormScreen() {
                 bordered={logoStyle === "default"}
                 website={website}
               />
-              <PressableScale
-                onPress={handleEditName}
-                scale={0.96}
-                style={styles.heroNamePill}
-              >
-                <AppText variant="title3" weight="700" color={colors.white}>
-                  {customName}
-                </AppText>
-              </PressableScale>
+              {isEditingName ? (
+                <View style={styles.heroNamePill}>
+                  <TextInput
+                    style={{
+                      color: colors.white,
+                      fontSize: 20,
+                      fontWeight: "700",
+                      letterSpacing: 0.38,
+                      padding: 0,
+                      margin: 0,
+                      minWidth: 100,
+                      textAlign: "center",
+                    }}
+                    value={customName}
+                    onChangeText={setCustomName}
+                    autoFocus
+                    selectTextOnFocus
+                    onBlur={handleSaveName}
+                    onSubmitEditing={handleSaveName}
+                    returnKeyType="done"
+                    placeholder="Subscription name"
+                    placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                  />
+                </View>
+              ) : (
+                <PressableScale
+                  onPress={handleEditName}
+                  scale={0.96}
+                  style={styles.heroNamePill}
+                >
+                  <AppText variant="title3" weight="700" color={colors.white}>
+                    {customName}
+                  </AppText>
+                </PressableScale>
+              )}
               <AppText variant="footnote" style={styles.heroStatus}>
                 {isTrial
                   ? "Free trial subscription"
@@ -1209,7 +1264,6 @@ export default function UnifiedFormScreen() {
             </SectionCard>
           </View>
 
-          {keyboardVisible && <View style={{ height: 300 }} />}
         </ScrollView>
       </View>
 
@@ -1248,14 +1302,40 @@ export default function UnifiedFormScreen() {
               bordered={logoStyle === "default"}
               website={website}
             />
-            <TouchableOpacity
-              onPress={handleEditName}
-              style={styles.previewNamePill}
-            >
-              <AppText variant="subheadline" weight="700" color={colors.white}>
-                {customName}
-              </AppText>
-            </TouchableOpacity>
+            {isEditingName ? (
+              <View style={styles.previewNamePill}>
+                <TextInput
+                  style={{
+                    color: colors.white,
+                    fontSize: 15,
+                    fontWeight: "700",
+                    letterSpacing: -0.24,
+                    padding: 0,
+                    margin: 0,
+                    minWidth: 100,
+                    textAlign: "center",
+                  }}
+                  value={customName}
+                  onChangeText={setCustomName}
+                  autoFocus
+                  selectTextOnFocus
+                  onBlur={handleSaveName}
+                  onSubmitEditing={handleSaveName}
+                  returnKeyType="done"
+                  placeholder="Subscription name"
+                  placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                />
+              </View>
+            ) : (
+              <TouchableOpacity
+                onPress={handleEditName}
+                style={styles.previewNamePill}
+              >
+                <AppText variant="subheadline" weight="700" color={colors.white}>
+                  {customName}
+                </AppText>
+              </TouchableOpacity>
+            )}
           </View>
 
           {/* Color Picker */}
@@ -1659,91 +1739,96 @@ export default function UnifiedFormScreen() {
         animationType="fade"
         onRequestClose={() => setShowCustomCycleModal(false)}
       >
-        <View style={styles.dropdownOverlay}>
-          <TouchableOpacity
-            style={styles.dropdownDismissArea}
-            activeOpacity={1}
-            onPress={() => setShowCustomCycleModal(false)}
-          />
-          <View style={styles.customCycleCard}>
-            <View style={styles.dropdownHeader}>
-              <AppText
-                variant="caption1"
-                weight="700"
-                color={colors.textSecondary}
-                style={styles.dropdownTitle}
-              >
-                Custom Billing Cycle
-              </AppText>
-            </View>
-            <View style={styles.customCycleBody}>
-              <View style={styles.customCycleInputRow}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={{ flex: 1 }}
+        >
+          <View style={styles.dropdownOverlay}>
+            <TouchableOpacity
+              style={styles.dropdownDismissArea}
+              activeOpacity={1}
+              onPress={() => setShowCustomCycleModal(false)}
+            />
+            <View style={styles.customCycleCard}>
+              <View style={styles.dropdownHeader}>
                 <AppText
-                  variant="subheadline"
-                  color={colors.textSecondary}
-                  style={styles.customCycleInputLabel}
-                >
-                  Every
-                </AppText>
-                <TextInput
-                  style={styles.customCycleInput}
-                  keyboardType="numeric"
-                  value={customCycleVal}
-                  onChangeText={(val) =>
-                    setCustomCycleVal(val.replace(/[^0-9]/g, ""))
-                  }
-                  placeholder="1"
-                  placeholderTextColor={colors.textMuted}
-                />
-              </View>
-              <View style={styles.customCycleUnitRow}>
-                {(["days", "weeks", "months", "years"] as const).map((unit) => {
-                  const isAct = customCycleUnit === unit;
-                  return (
-                    <TouchableOpacity
-                      key={unit}
-                      onPress={() => {
-                        Haptics.selectionAsync();
-                        setCustomCycleUnit(unit);
-                      }}
-                      style={[
-                        styles.customCycleUnitTab,
-                        isAct && styles.customCycleUnitTabActive,
-                      ]}
-                    >
-                      <AppText
-                        variant="caption1"
-                        weight="700"
-                        color={isAct ? colors.white : colors.textSecondary}
-                      >
-                        {unit.charAt(0).toUpperCase() + unit.slice(1)}
-                      </AppText>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-              <TouchableOpacity
-                onPress={() => {
-                  Haptics.notificationAsync(
-                    Haptics.NotificationFeedbackType.Success,
-                  );
-                  const valNum = Number(customCycleVal) || 1;
-                  setBillingCycle(`custom:${valNum}:${customCycleUnit}`);
-                  setShowCustomCycleModal(false);
-                }}
-                style={styles.customCycleSaveBtn}
-              >
-                <AppText
-                  variant="subheadline"
+                  variant="caption1"
                   weight="700"
-                  color={colors.black}
+                  color={colors.textSecondary}
+                  style={styles.dropdownTitle}
                 >
-                  Save
+                  Custom Billing Cycle
                 </AppText>
-              </TouchableOpacity>
+              </View>
+              <View style={styles.customCycleBody}>
+                <View style={styles.customCycleInputRow}>
+                  <AppText
+                    variant="subheadline"
+                    color={colors.textSecondary}
+                    style={styles.customCycleInputLabel}
+                  >
+                    Every
+                  </AppText>
+                  <TextInput
+                    style={styles.customCycleInput}
+                    keyboardType="numeric"
+                    value={customCycleVal}
+                    onChangeText={(val) =>
+                      setCustomCycleVal(val.replace(/[^0-9]/g, ""))
+                    }
+                    placeholder="1"
+                    placeholderTextColor={colors.textMuted}
+                  />
+                </View>
+                <View style={styles.customCycleUnitRow}>
+                  {(["days", "weeks", "months", "years"] as const).map((unit) => {
+                    const isAct = customCycleUnit === unit;
+                    return (
+                      <TouchableOpacity
+                        key={unit}
+                        onPress={() => {
+                          Haptics.selectionAsync();
+                          setCustomCycleUnit(unit);
+                        }}
+                        style={[
+                          styles.customCycleUnitTab,
+                          isAct && styles.customCycleUnitTabActive,
+                        ]}
+                      >
+                        <AppText
+                          variant="caption1"
+                          weight="700"
+                          color={isAct ? colors.white : colors.textSecondary}
+                        >
+                          {unit.charAt(0).toUpperCase() + unit.slice(1)}
+                        </AppText>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+                <TouchableOpacity
+                  onPress={() => {
+                    Haptics.notificationAsync(
+                      Haptics.NotificationFeedbackType.Success,
+                    );
+                    const valNum = Number(customCycleVal) || 1;
+                    setBillingCycle(`custom:${valNum}:${customCycleUnit}`);
+                    setShowCustomCycleModal(false);
+                  }}
+                  style={styles.customCycleSaveBtn}
+                >
+                  <AppText
+                    variant="subheadline"
+                    weight="700"
+                    color={colors.black}
+                  >
+                    Save
+                  </AppText>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* ── Date Picker Modal ──────────────────────────────────────── */}
@@ -1996,73 +2081,7 @@ export default function UnifiedFormScreen() {
         </BlurView>
       </Modal>
 
-      {/* ── Name Edit Modal ────────────────────────────────────────── */}
-      <Modal
-        visible={showNameEditModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowNameEditModal(false)}
-      >
-        <TouchableOpacity
-          activeOpacity={1}
-          style={styles.datePickerBackdrop}
-          onPress={() => setShowNameEditModal(false)}
-        />
-        <BlurView intensity={80} tint="dark" style={styles.datePickerModal}>
-          <View style={styles.datePickerHeader}>
-            <TouchableOpacity
-              onPress={() => setShowNameEditModal(false)}
-              style={styles.datePickerCancelBtn}
-            >
-              <AppText
-                variant="callout"
-                weight="600"
-                color={colors.textSecondary}
-              >
-                Cancel
-              </AppText>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => {
-                Haptics.notificationAsync(
-                  Haptics.NotificationFeedbackType.Success,
-                );
-                if (nameEditValue.trim()) setCustomName(nameEditValue.trim());
-                setShowNameEditModal(false);
-              }}
-              style={styles.datePickerDoneBtn}
-            >
-              <AppText variant="callout" weight="700" color={colors.black}>
-                Done
-              </AppText>
-            </TouchableOpacity>
-          </View>
-          <View
-            style={{
-              paddingHorizontal: spacing[24],
-              paddingBottom: spacing[24],
-            }}
-          >
-            <TextInput
-              style={{
-                backgroundColor: "#2C2C2E",
-                borderRadius: 12,
-                padding: spacing[16],
-                fontSize: 17,
-                color: colors.white,
-                borderWidth: 0.5,
-                borderColor: "rgba(255, 255, 255, 0.12)",
-              }}
-              placeholder="Subscription name"
-              placeholderTextColor={colors.textMuted}
-              value={nameEditValue}
-              onChangeText={setNameEditValue}
-              autoFocus
-              selectTextOnFocus
-            />
-          </View>
-        </BlurView>
-      </Modal>
+
 
       {/* ── Color Edit Modal ───────────────────────────────────────── */}
       <Modal
@@ -2076,76 +2095,83 @@ export default function UnifiedFormScreen() {
           style={styles.datePickerBackdrop}
           onPress={() => setShowColorEditModal(false)}
         />
-        <BlurView intensity={80} tint="dark" style={styles.datePickerModal}>
-          <View style={styles.datePickerHeader}>
-            <TouchableOpacity
-              onPress={() => setShowColorEditModal(false)}
-              style={styles.datePickerCancelBtn}
-            >
-              <AppText
-                variant="callout"
-                weight="600"
-                color={colors.textSecondary}
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={{ flex: 1 }}
+        >
+          <View style={{ flex: 1, justifyContent: "center", paddingHorizontal: 36 }} pointerEvents="box-none">
+            <BlurView intensity={80} tint="dark" style={styles.datePickerModalRelative}>
+              <View style={styles.datePickerHeader}>
+                <TouchableOpacity
+                  onPress={() => setShowColorEditModal(false)}
+                  style={styles.datePickerCancelBtn}
+                >
+                  <AppText
+                    variant="callout"
+                    weight="600"
+                    color={colors.textSecondary}
+                  >
+                    Cancel
+                  </AppText>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => {
+                    const hexPattern = /^#[0-9A-Fa-f]{6}$/;
+                    if (hexPattern.test(colorEditValue)) {
+                      Haptics.notificationAsync(
+                        Haptics.NotificationFeedbackType.Success,
+                      );
+                      setSelectedColor(colorEditValue);
+                      setShowColorEditModal(false);
+                    } else {
+                      Haptics.notificationAsync(
+                        Haptics.NotificationFeedbackType.Error,
+                      );
+                      Alert.alert(
+                        "Invalid Color",
+                        "Please enter a valid hex color (e.g. #FF5733)",
+                      );
+                    }
+                  }}
+                  style={styles.datePickerDoneBtn}
+                >
+                  <AppText variant="callout" weight="700" color={colors.black}>
+                    Done
+                  </AppText>
+                </TouchableOpacity>
+              </View>
+              <View
+                style={{
+                  paddingHorizontal: spacing[24],
+                  paddingBottom: spacing[24],
+                }}
               >
-                Cancel
-              </AppText>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => {
-                const hexPattern = /^#[0-9A-Fa-f]{6}$/;
-                if (hexPattern.test(colorEditValue)) {
-                  Haptics.notificationAsync(
-                    Haptics.NotificationFeedbackType.Success,
-                  );
-                  setSelectedColor(colorEditValue);
-                  setShowColorEditModal(false);
-                } else {
-                  Haptics.notificationAsync(
-                    Haptics.NotificationFeedbackType.Error,
-                  );
-                  Alert.alert(
-                    "Invalid Color",
-                    "Please enter a valid hex color (e.g. #FF5733)",
-                  );
-                }
-              }}
-              style={styles.datePickerDoneBtn}
-            >
-              <AppText variant="callout" weight="700" color={colors.black}>
-                Done
-              </AppText>
-            </TouchableOpacity>
+                <TextInput
+                  style={{
+                    backgroundColor: "#2C2C2E",
+                    borderRadius: 12,
+                    padding: spacing[16],
+                    fontSize: 17,
+                    color: colors.white,
+                    borderWidth: 0.5,
+                    borderColor: "rgba(255, 255, 255, 0.12)",
+                  }}
+                  placeholder="#FF5733"
+                  placeholderTextColor={colors.textMuted}
+                  value={colorEditValue}
+                  onChangeText={setColorEditValue}
+                  autoFocus
+                  selectTextOnFocus
+                  autoCapitalize="characters"
+                />
+              </View>
+            </BlurView>
           </View>
-          <View
-            style={{
-              paddingHorizontal: spacing[24],
-              paddingBottom: spacing[24],
-            }}
-          >
-            <TextInput
-              style={{
-                backgroundColor: "#2C2C2E",
-                borderRadius: 12,
-                padding: spacing[16],
-                fontSize: 17,
-                color: colors.white,
-                borderWidth: 0.5,
-                borderColor: "rgba(255, 255, 255, 0.12)",
-              }}
-              placeholder="#FF5733"
-              placeholderTextColor={colors.textMuted}
-              value={colorEditValue}
-              onChangeText={setColorEditValue}
-              autoFocus
-              selectTextOnFocus
-              autoCapitalize="characters"
-            />
-          </View>
-        </BlurView>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* ── Keyboard Done Button ───────────────────────────────────── */}
-      {keyboardVisible && (
+      {keyboardVisible && !isModalActive && (
         <Animated.View
           style={{
             position: "absolute",
@@ -2567,6 +2593,19 @@ const styles = StyleSheet.create({
     left: 36,
     right: 36,
     top: "45%",
+    backgroundColor: "rgba(36, 36, 38, 0.82)",
+    borderRadius: 30,
+    borderWidth: 0.5,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+    overflow: "hidden",
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 24 },
+    shadowOpacity: 0.45,
+    shadowRadius: 30,
+    elevation: 12,
+  },
+  datePickerModalRelative: {
+    width: "100%",
     backgroundColor: "rgba(36, 36, 38, 0.82)",
     borderRadius: 30,
     borderWidth: 0.5,

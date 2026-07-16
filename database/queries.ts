@@ -16,8 +16,10 @@ export async function createSubscription(
         id, name, logo, website, category, price, currency, billingCycle,
         isTrial, trialStartDate, trialEndDate, renewDate, startDate,
         paymentMethod, brandColor, notes, reminderEnabled, reminderDays,
+        splitEnabled, splitType, splitValue,
+        promoEnabled, promoPrice, promoDurationValue, promoDurationUnit, promoStartDate, promoEndDate,
         createdAt, updatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
     `;
 
     await db.runAsync(
@@ -40,6 +42,15 @@ export async function createSubscription(
       sub.notes,
       sub.reminderEnabled,
       sub.reminderDays,
+      sub.splitEnabled ?? 0,
+      sub.splitType ?? null,
+      sub.splitValue ?? null,
+      sub.promoEnabled ?? 0,
+      sub.promoPrice ?? null,
+      sub.promoDurationValue ?? null,
+      sub.promoDurationUnit ?? null,
+      sub.promoStartDate ?? null,
+      sub.promoEndDate ?? null,
       now,
       now
     );
@@ -176,20 +187,20 @@ export async function searchSubscriptions(query: string): Promise<DbSubscription
 export async function getUpcomingRenewals(limit: number = 10): Promise<DbSubscription[]> {
   try {
     const db = getDatabase();
+    const now = new Date().toISOString();
     const sql = `
       SELECT * FROM subscriptions 
+      WHERE 
+        (isTrial = 1 AND trialEndDate IS NOT NULL AND trialEndDate >= ?)
+        OR (isTrial = 0 AND renewDate IS NOT NULL AND renewDate >= ?)
       ORDER BY 
-        CASE 
-          WHEN isTrial = 1 THEN trialEndDate 
-          ELSE renewDate 
-        END IS NULL,
         CASE 
           WHEN isTrial = 1 THEN trialEndDate 
           ELSE renewDate 
         END ASC
       LIMIT ?;
     `;
-    const rows = await db.getAllAsync<DbSubscription>(sql, limit);
+    const rows = await db.getAllAsync<DbSubscription>(sql, now, now, limit);
     return rows;
   } catch (error) {
     console.error("Database: Failed to fetch upcoming renewals", error);

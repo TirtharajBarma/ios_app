@@ -33,7 +33,12 @@ function DetailsHero({
     if (code === "EUR") return "€";
     if (code === "GBP") return "£";
     if (code === "JPY") return "¥";
-    if (code === "CAD" || code === "AUD") return "$";
+    if (code === "CAD") return "CA$";
+    if (code === "AUD") return "A$";
+    if (code === "CHF") return "Fr.";
+    if (code === "CNY") return "¥";
+    if (code === "SGD") return "S$";
+    if (code === "HKD") return "HK$";
     return "$";
   };
   const formattedPrice = `${getSymbol(currency)}${price.toFixed(2)}`;

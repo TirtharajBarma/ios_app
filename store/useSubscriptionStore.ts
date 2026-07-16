@@ -1,11 +1,12 @@
 import { create } from "zustand";
+import { startOfYear, endOfYear, startOfDay, parseISO } from "date-fns";
 import type {
   NewSubscriptionInput,
   Subscription,
   SubscriptionStats,
 } from "@/types/subscription";
 import * as db from "@/database/database";
-import { toMonthly, toYearly, daysUntil, advanceCycle, getSubscriptionActivePrice } from "@/utils/date";
+import { toMonthly, toYearly, daysUntil, advanceCycle, advanceCycleDate, getSubscriptionActivePrice } from "@/utils/date";
 import { scheduleReminder, cancelReminder } from "@/utils/notifications";
 import AsyncStorage from "@/utils/storage";
 import { getExchangeRates } from "@/utils/currency";
@@ -115,8 +116,10 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
         const billDate = new Date(sub.nextBillingDate);
         if (billDate < today) {
           let nextDate = sub.nextBillingDate;
-          while (new Date(nextDate) < today) {
+          let safety = 0;
+          while (new Date(nextDate) < today && safety < 366) {
             nextDate = advanceCycle(nextDate, sub.billingCycle, sub.customIntervalMonths);
+            safety++;
           }
           await db.updateSubscription(sub.id, { nextBillingDate: nextDate });
           sub.nextBillingDate = nextDate;
@@ -127,12 +130,18 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
 
     if (changed) {
       subscriptions = await db.getAllSubscriptions();
+      // Re-schedule reminders for all subs whose dates were auto-advanced
+      for (const sub of subscriptions) {
+        scheduleReminder(sub).catch(() => {});
+      }
     }
 
     // Sort nearest renewal first
-    subscriptions.sort(
-      (a, b) => new Date(a.nextBillingDate).getTime() - new Date(b.nextBillingDate).getTime()
-    );
+    subscriptions.sort((a, b) => {
+      const timeA = a.nextBillingDate ? new Date(a.nextBillingDate).getTime() : Infinity;
+      const timeB = b.nextBillingDate ? new Date(b.nextBillingDate).getTime() : Infinity;
+      return timeA - timeB;
+    });
     set({ subscriptions, stats: computeStats(subscriptions), isLoaded: true });
   },
 
@@ -141,9 +150,11 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     const id = generateId();
     const sub = await db.insertSubscription(id, input);
     set((state) => {
-      const subscriptions = [...state.subscriptions, sub].sort(
-        (a, b) => new Date(a.nextBillingDate).getTime() - new Date(b.nextBillingDate).getTime()
-      );
+      const subscriptions = [...state.subscriptions, sub].sort((a, b) => {
+        const timeA = a.nextBillingDate ? new Date(a.nextBillingDate).getTime() : Infinity;
+        const timeB = b.nextBillingDate ? new Date(b.nextBillingDate).getTime() : Infinity;
+        return timeA - timeB;
+      });
       return { subscriptions, stats: computeStats(subscriptions) };
     });
     scheduleReminder(sub).catch(() => {});
@@ -162,9 +173,11 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
         ...input,
         updatedAt: new Date().toISOString(),
       };
-      updated.sort(
-        (a, b) => new Date(a.nextBillingDate).getTime() - new Date(b.nextBillingDate).getTime()
-      );
+      updated.sort((a, b) => {
+        const timeA = a.nextBillingDate ? new Date(a.nextBillingDate).getTime() : Infinity;
+        const timeB = b.nextBillingDate ? new Date(b.nextBillingDate).getTime() : Infinity;
+        return timeA - timeB;
+      });
       return { subscriptions: updated, stats: computeStats(updated) };
     });
     const updatedSub = get().subscriptions.find((s) => s.id === id);
@@ -186,14 +199,19 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     const EXCHANGE_RATES = await getExchangeRates();
     
     const subs = get().subscriptions;
-    const rateFrom = EXCHANGE_RATES[oldCurrency?.toUpperCase()] || 1.0;
-    const rateTo = EXCHANGE_RATES[newCurrency?.toUpperCase()] || 1.0;
+    const rateFrom = EXCHANGE_RATES[oldCurrency?.toUpperCase()] ?? 1.0;
+    const rateTo = EXCHANGE_RATES[newCurrency?.toUpperCase()] ?? 1.0;
     
     const updatedSubs: Subscription[] = [];
     
     for (const sub of subs) {
-      const subRateFrom = EXCHANGE_RATES[sub.currency?.toUpperCase()] || rateFrom;
-      const priceInUSD = sub.price / subRateFrom;
+      const subCurrencyRate = EXCHANGE_RATES[sub.currency?.toUpperCase()];
+      if (subCurrencyRate === undefined || subCurrencyRate === 0) {
+        // Skip subscriptions with unknown currency — don't corrupt their price
+        updatedSubs.push(sub);
+        continue;
+      }
+      const priceInUSD = sub.price / subCurrencyRate;
       const newPrice = Math.round((priceInUSD * rateTo) * 100) / 100;
       
       await db.updateSubscription(sub.id, {

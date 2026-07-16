@@ -13,16 +13,22 @@ export interface UpcomingSectionProps {
 }
 
 function getRelativeDays(dateStr: string): string {
-  const today = new Date();
-  const renewalDate = parseISO(dateStr);
-  const diffDays = differenceInDays(renewalDate, today);
+  try {
+    const today = new Date();
+    const renewalDate = parseISO(dateStr);
+    const diffDays = differenceInDays(renewalDate, today);
 
-  if (isSameDay(renewalDate, today)) {
-    return "Today";
-  } else if (diffDays === 1) {
-    return "Tomorrow";
-  } else {
-    return `In ${diffDays} days`;
+    if (isSameDay(renewalDate, today)) {
+      return "Today";
+    } else if (diffDays === 1) {
+      return "Tomorrow";
+    } else if (diffDays < 0) {
+      return "Overdue";
+    } else {
+      return `In ${diffDays} days`;
+    }
+  } catch {
+    return "-";
   }
 }
 
@@ -95,7 +101,7 @@ const UpcomingCard = memo(function UpcomingCard({
           <AppText
             variant="caption2"
             weight="600"
-            color={daysText === "Today" || daysText === "Tomorrow" ? colors.danger : colors.textMuted}
+            color={daysText === "Today" || daysText === "Tomorrow" || daysText === "Overdue" ? colors.danger : colors.textMuted}
             style={{ marginTop: 2 }}
           >
             {daysText}

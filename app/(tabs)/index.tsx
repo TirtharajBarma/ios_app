@@ -4,6 +4,7 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Pressable,
   Alert,
 } from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -43,10 +44,12 @@ import {
   AppText,
   LogoCircle,
   PressableScale,
+  OverviewExplanationSheet,
+  ExplanationType,
 } from "@/components/ui";
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
-import { getSubscriptionActivePrice } from "@/utils/date";
+import { getSubscriptionActivePrice, toMonthly } from "@/utils/date";
 import { LinearGradient } from "expo-linear-gradient";
 
 const MONTH_NAMES = [
@@ -79,26 +82,30 @@ function formatCycleLabel(
 }
 
 function getRenewalStatus(dateStr: string) {
-  const today = startOfDay(new Date());
-  const renewalDate = startOfDay(parseISO(dateStr));
-  const diffDays = differenceInCalendarDays(renewalDate, today);
+  try {
+    const today = startOfDay(new Date());
+    const renewalDate = startOfDay(parseISO(dateStr));
+    const diffDays = differenceInCalendarDays(renewalDate, today);
 
-  if (diffDays < 0) {
-    return { text: "Overdue", color: colors.danger };
-  } else if (diffDays === 0) {
-    return { text: "Today", color: colors.danger };
-  } else if (diffDays === 1) {
-    return { text: "Tomorrow", color: colors.warning };
-  } else if (diffDays > 1 && diffDays < 30) {
-    return {
-      text: `${MONTH_NAMES[renewalDate.getMonth()]} ${renewalDate.getDate()}`,
-      color: colors.warning,
-    };
-  } else {
-    return {
-      text: `${MONTH_NAMES[renewalDate.getMonth()]} ${renewalDate.getDate()}`,
-      color: colors.textMuted,
-    };
+    if (diffDays < 0) {
+      return { text: "Overdue", color: colors.danger };
+    } else if (diffDays === 0) {
+      return { text: "Today", color: colors.danger };
+    } else if (diffDays === 1) {
+      return { text: "Tomorrow", color: colors.warning };
+    } else if (diffDays > 1 && diffDays < 30) {
+      return {
+        text: `${MONTH_NAMES[renewalDate.getMonth()]} ${renewalDate.getDate()}`,
+        color: colors.warning,
+      };
+    } else {
+      return {
+        text: `${MONTH_NAMES[renewalDate.getMonth()]} ${renewalDate.getDate()}`,
+        color: colors.textMuted,
+      };
+    }
+  } catch {
+    return { text: "-", color: colors.textMuted };
   }
 }
 
@@ -238,6 +245,7 @@ export default function HomeScreen() {
     useSubscriptionStore();
   const [sortBy, setSortBy] = useState<"date" | "price" | "name">("date");
   const [cardPage, setCardPage] = useState(0);
+  const [explanationType, setExplanationType] = useState<ExplanationType | null>(null);
   const footerProgress = useSharedValue(0);
 
   useEffect(() => {
@@ -262,7 +270,7 @@ export default function HomeScreen() {
 
   useEffect(() => {
     loadSubscriptions();
-  }, [loadSubscriptions]);
+  }, []);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -337,7 +345,7 @@ export default function HomeScreen() {
   const sortedSubscriptions = React.useMemo(() => {
     const list = [...subscriptions];
     if (sortBy === "price") {
-      return list.sort((a, b) => b.price - a.price);
+      return list.sort((a, b) => getSubscriptionActivePrice(b) - getSubscriptionActivePrice(a));
     } else if (sortBy === "name") {
       return list.sort((a, b) => a.name.localeCompare(b.name));
     } else {
@@ -452,14 +460,14 @@ export default function HomeScreen() {
               entering={FadeInUp.delay(0).springify().damping(18)}
               style={styles.statsCardsRow}
             >
-              {/* Left Card: Monthly & Yearly Average */}
-              <PressableScale
-                onPress={() => {
-                  Haptics.selectionAsync();
-                  setCardPage((p) => (p === 0 ? 1 : 0));
-                }}
-                style={styles.leftStatCard}
-              >
+              <View style={{ flex: 1.6, position: "relative" }}>
+                <PressableScale
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    setCardPage((p) => (p === 0 ? 1 : 0));
+                  }}
+                  style={[styles.leftStatCard, { flex: undefined, width: "100%" }]}
+                >
                 <LinearGradient
                   colors={[
                     "rgba(97, 49, 35, 0.94)",
@@ -487,19 +495,6 @@ export default function HomeScreen() {
                             Monthly average
                           </AppText>
                         </View>
-                        <TouchableOpacity
-                          activeOpacity={0.7}
-                          onPress={() => {
-                            Haptics.selectionAsync();
-                            Alert.alert(
-                              "Monthly Average",
-                              "Normalized average of all your active paid subscriptions.",
-                            );
-                          }}
-                          style={styles.infoButton}
-                        >
-                          <Info size={15} color="rgba(255,255,255,0.72)" />
-                        </TouchableOpacity>
                       </View>
 
                       <AppText
@@ -568,7 +563,7 @@ export default function HomeScreen() {
                             numberOfLines={1}
                             ellipsizeMode="tail"
                           >
-                            Yearly average
+                            Estimated Annual Cost
                           </AppText>
                         </View>
                         <AppText
@@ -582,7 +577,7 @@ export default function HomeScreen() {
                     </View>
 
                     {/* Animated Dot Carousel */}
-                    <View style={styles.dotsRow}>
+                    <View style={[styles.dotsRow, { alignSelf: "flex-start", marginTop: 12 }]}>
                       <View
                         style={[styles.dot, cardPage === 0 && styles.dotActive]}
                       />
@@ -593,6 +588,25 @@ export default function HomeScreen() {
                   </View>
                 </LinearGradient>
               </PressableScale>
+
+              {/* Absolute Info Button outside PressableScale so it ACTUALLY works */}
+              {cardPage === 1 && (
+                <TouchableOpacity
+                  activeOpacity={0.6}
+                  hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    setExplanationType("annual");
+                  }}
+                  style={[
+                    styles.infoButton,
+                    { position: "absolute", bottom: 16, right: 16, zIndex: 100 }
+                  ]}
+                >
+                  <Info size={15} color="rgba(255,255,255,0.72)" />
+                </TouchableOpacity>
+              )}
+            </View>
 
               {/* Right Card: Next renewing logo + active count */}
               <PressableScale
@@ -885,6 +899,13 @@ export default function HomeScreen() {
           </View>
         )}
       </ScrollView>
+
+      <OverviewExplanationSheet
+        visible={explanationType !== null}
+        onClose={() => setExplanationType(null)}
+        type={explanationType}
+        currencySymbol={currencySymbol}
+      />
     </View>
   );
 }

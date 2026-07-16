@@ -2,8 +2,8 @@ import React, { useState, useRef } from "react";
 import {
   View,
   StyleSheet,
-  Dimensions,
   ScrollView,
+  useWindowDimensions,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -23,8 +23,6 @@ import {
 import { colors, spacing, radius, hexToRGBA, gradients } from "@/constants";
 import { AppText, AppButton } from "@/components/ui";
 import { LinearGradient } from "expo-linear-gradient";
-
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
 const ONBOARDING_COMPLETE_KEY = "@onboarding_complete";
 
@@ -58,6 +56,7 @@ const slides = [
 export default function OnboardingScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { width: screenWidth } = useWindowDimensions();
   const [currentIndex, setCurrentIndex] = useState(0);
   const scrollViewRef = useRef<ScrollView>(null);
   const isLastSlide = currentIndex === slides.length - 1;
@@ -69,7 +68,7 @@ export default function OnboardingScreen() {
     } else {
       const nextIndex = currentIndex + 1;
       setCurrentIndex(nextIndex);
-      scrollViewRef.current?.scrollTo({ x: nextIndex * SCREEN_WIDTH, animated: true });
+      scrollViewRef.current?.scrollTo({ x: nextIndex * screenWidth, animated: true });
     }
   };
 
@@ -86,7 +85,7 @@ export default function OnboardingScreen() {
 
   const handleScroll = (event: any) => {
     const contentOffset = event.nativeEvent.contentOffset;
-    const index = Math.round(contentOffset.x / SCREEN_WIDTH);
+    const index = Math.round(contentOffset.x / screenWidth);
     if (index !== currentIndex) setCurrentIndex(index);
   };
 
@@ -111,7 +110,7 @@ export default function OnboardingScreen() {
         contentContainerStyle={styles.scrollContent}
       >
         {slides.map((slide, index) => (
-          <View key={index} style={styles.slide}>
+          <View key={index} style={[styles.slide, { width: screenWidth }]}>
             <Animated.View
               entering={FadeIn.delay(200).duration(400)}
               style={styles.slideContent}
@@ -208,7 +207,6 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   slide: {
-    width: SCREEN_WIDTH,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: spacing[32],

@@ -64,7 +64,7 @@ export const CURRENCY_SYMBOLS: Record<string, string> = {
   JPY: "¥",
   CAD: "CA$",
   AUD: "A$",
-  CHF: "₣",
+  CHF: "Fr.",
   CNY: "¥",
   SGD: "S$",
   HKD: "HK$",
@@ -99,7 +99,7 @@ export const CURRENCIES = [
   { code: "JPY", symbol: "¥", name: "Japanese Yen", flag: "🇯🇵" },
   { code: "CAD", symbol: "CA$", name: "Canadian Dollar", flag: "🇨🇦" },
   { code: "AUD", symbol: "A$", name: "Australian Dollar", flag: "🇦🇺" },
-  { code: "CHF", symbol: "₣", name: "Swiss Franc", flag: "🇨🇭" },
+  { code: "CHF", symbol: "Fr.", name: "Swiss Franc", flag: "🇨🇭" },
   { code: "CNY", symbol: "¥", name: "Chinese Yuan", flag: "🇨🇳" },
   { code: "SGD", symbol: "S$", name: "Singapore Dollar", flag: "🇸🇬" },
   { code: "HKD", symbol: "HK$", name: "Hong Kong Dollar", flag: "🇭🇰" },
@@ -123,6 +123,7 @@ export const CURRENCIES = [
   { code: "HUF", symbol: "Ft", name: "Hungarian Forint", flag: "🇭🇺" },
   { code: "RUB", symbol: "₽", name: "Russian Ruble", flag: "🇷🇺" },
   { code: "UAH", symbol: "₴", name: "Ukrainian Hryvnia", flag: "🇺🇦" },
+  { code: "RON", symbol: "lei", name: "Romanian Leu", flag: "🇷🇴" },
 ];
 
 export function getCurrencySymbol(code: string): string {

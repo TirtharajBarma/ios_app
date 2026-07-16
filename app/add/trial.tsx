@@ -213,7 +213,7 @@ export default function TrialFormScreen() {
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       style={styles.container}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 44 : 0}
+      keyboardVerticalOffset={insets.top + 44}
     >
       <ScrollView
         showsVerticalScrollIndicator={false}

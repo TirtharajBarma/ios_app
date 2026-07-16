@@ -31,6 +31,8 @@ const TIMING_OPTIONS: { label: string; sublabel: string; value: NotificationTimi
   { label: "1 Week Before", sublabel: "Get notified a week before renewal",   value: "1week", days: 7 },
 ];
 
+const OPEN_SETTINGS_URL = Platform.OS === "ios" ? "app-settings:" : "package:com.anonymous.subscription";
+
 export default function NotificationsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -77,7 +79,7 @@ export default function NotificationsScreen() {
           "The app needs notification permission to send you renewal reminders. Tap 'Settings' to enable it.",
           [
             { text: "Cancel", style: "cancel" },
-            { text: "Settings", onPress: () => Linking.openURL("app-settings:") },
+            { text: "Settings", onPress: () => Linking.openURL(OPEN_SETTINGS_URL) },
           ]
         );
         return;
@@ -188,7 +190,7 @@ export default function NotificationsScreen() {
         <TouchableOpacity
           style={styles.openSettingsRow}
           activeOpacity={0.7}
-          onPress={() => Linking.openURL("app-settings:")}
+          onPress={() => Linking.openURL(OPEN_SETTINGS_URL)}
         >
           <AppText variant="footnote" color={colors.accent}>Manage in iPhone Settings</AppText>
           <ExternalLink size={14} color={colors.accent} />

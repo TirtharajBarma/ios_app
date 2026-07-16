@@ -69,3 +69,6 @@ export type { PressableScaleProps } from "./PressableScale";
 
 export { default as SwipeDownSheet } from "./SwipeDownSheet";
 export type { SwipeDownSheetProps } from "./SwipeDownSheet";
+
+export { default as OverviewExplanationSheet } from "./OverviewExplanationSheet";
+export type { OverviewExplanationSheetProps, ExplanationType } from "./OverviewExplanationSheet";

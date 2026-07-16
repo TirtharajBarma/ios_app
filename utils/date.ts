@@ -77,7 +77,7 @@ export function advanceCycle(
       break;
     case "custom":
     default:
-      next = addMonths(base, customMonths);
+      next = addMonths(base, customMonths > 0 ? customMonths : 1);
       break;
   }
   return next.toISOString();
@@ -118,15 +118,18 @@ export function getNextRenewalDate(
   referenceDate = today()
 ): Date {
   const reference = startOfDay(referenceDate);
-  let next = advanceCycleDate(startDate, cycle, customMonths);
-  while (next <= reference) {
-    next = advanceCycleDate(next, cycle, customMonths);
+  const safeCustomMonths = customMonths > 0 ? customMonths : 1;
+  let next = advanceCycleDate(startDate, cycle, safeCustomMonths);
+  let safety = 0;
+  while (next <= reference && safety < 366) {
+    next = advanceCycleDate(next, cycle, safeCustomMonths);
+    safety++;
   }
   return next;
 }
 
 /** Number of billing periods per year (used to normalize costs). */
-export function periodsPerYear(cycle: BillingCycle, customMonths = 1): number {
+export function periodsPerYear(cycle: BillingCycle | string, customMonths = 1): number {
   switch (cycle) {
     case "weekly":
       return 52;
@@ -141,8 +144,18 @@ export function periodsPerYear(cycle: BillingCycle, customMonths = 1): number {
     case "yearly":
       return 1;
     case "custom":
+      return customMonths > 0 ? 12 / customMonths : 12;
     default:
-      return 12 / customMonths;
+      if (cycle.startsWith("custom:")) {
+        const [, rawValue, rawUnit] = cycle.split(":");
+        const value = Number(rawValue) || 1;
+        const unit = rawUnit || "months";
+        if (unit === "days") return 365 / value;
+        if (unit === "weeks") return 52 / value;
+        if (unit === "years") return 1 / value;
+        return 12 / value;
+      }
+      return customMonths > 0 ? 12 / customMonths : 12;
   }
 }
 

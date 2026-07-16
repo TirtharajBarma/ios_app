@@ -30,6 +30,7 @@ import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
+import { useSettingsStore } from "@/store/useSettingsStore";
 import { AppText, LogoCircle } from "@/components/ui";
 import { colors, spacing, radius, getCurrencySymbol } from "@/constants";
 import { toMonthly, getSubscriptionActivePrice } from "@/utils/date";
@@ -115,12 +116,8 @@ export default function SubscriptionsListScreen() {
     }
   }, [menuVisible]);
 
-  const currencySymbol = useMemo(() => {
-    if (subscriptions.length > 0) {
-      return getCurrencySymbol(subscriptions[0].currency);
-    }
-    return "₹";
-  }, [subscriptions]);
+  const { currencyCode } = useSettingsStore();
+  const currencySymbol = getCurrencySymbol(currencyCode);
 
   const handleCardPress = (sub: any) => {
     Haptics.selectionAsync();
@@ -194,7 +191,15 @@ export default function SubscriptionsListScreen() {
         }
         // Filters
         if (hideExpired && isExpired(sub)) return false;
-        // In this schema, hidecancelled/hideending can be configured or ignored if not set
+        if (hideCancelled && sub.reminderEnabled === false && !sub.isTrial && !sub.nextBillingDate) return false;
+        if (hideEnding) {
+          try {
+            const trialEnd = sub.isTrial ? parseISO(sub.trialEndDate || sub.nextBillingDate) : null;
+            if (trialEnd && differenceInCalendarDays(trialEnd, new Date()) <= 3) return false;
+          } catch {
+            // ignore parse errors
+          }
+        }
         return true;
       })
       .sort((a, b) => {
@@ -215,7 +220,7 @@ export default function SubscriptionsListScreen() {
           return 0;
         }
       });
-  }, [subscriptions, searchQuery, sortBy, hideExpired]);
+  }, [subscriptions, searchQuery, sortBy, hideExpired, hideCancelled, hideEnding]);
 
   // Grouping Logic
   const groupedData = useMemo(() => {
