@@ -15,6 +15,8 @@ import {
   FileText,
   ChevronLeft,
   Trash2,
+  Users,
+  Percent,
 } from "lucide-react-native";
 import { format, parseISO } from "date-fns";
 import * as Haptics from "expo-haptics";
@@ -23,6 +25,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { colors, spacing } from "@/constants";
 import { AppText, LogoCircle, Toggle, PressableScale } from "@/components/ui";
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
+import { getSubscriptionActivePrice } from "@/utils/date";
 
 export default function SubscriptionDetailScreen() {
   const router = useRouter();
@@ -226,9 +229,13 @@ export default function SubscriptionDetailScreen() {
           <View style={styles.verticalDivider} />
           <View style={styles.statColumn}>
             <AppText weight="700" color={colors.white} style={styles.statValue}>
-              {price === 0 ? "Free" : `${getCurrencySymbol(currency)}${price.toFixed(2)}`}
+              {getSubscriptionActivePrice(subscription) === 0
+                ? "Free"
+                : `${getCurrencySymbol(currency)}${getSubscriptionActivePrice(subscription).toFixed(2)}`}
             </AppText>
-            <AppText style={styles.statLabel}>Cost</AppText>
+            <AppText style={styles.statLabel}>
+              {subscription.splitEnabled ? "Your share" : "Cost"}
+            </AppText>
           </View>
           <View style={styles.verticalDivider} />
           <View style={styles.statColumn}>
@@ -255,6 +262,46 @@ export default function SubscriptionDetailScreen() {
               on {formattedNextDate}
             </AppText>
           </View>
+
+          {/* Splitting Details Row */}
+          {subscription.splitEnabled && (
+            <View style={styles.detailRow}>
+              <View style={styles.rowLeft}>
+                <View style={styles.iconWrapper}>
+                  <Users size={18} color={colors.white} />
+                </View>
+                <AppText weight="600" color={colors.white} style={styles.rowLabel}>
+                  Bill split
+                </AppText>
+              </View>
+              <AppText weight="600" color={colors.white} style={styles.rowValue} numberOfLines={1} adjustsFontSizeToFit>
+                {subscription.splitType === "people"
+                  ? `1/${subscription.splitValue} share of ${getCurrencySymbol(currency)}${price.toFixed(2)}`
+                  : subscription.splitType === "percentage"
+                  ? `${subscription.splitValue}% share of ${getCurrencySymbol(currency)}${price.toFixed(2)}`
+                  : `Your share: ${getCurrencySymbol(currency)}${subscription.splitValue?.toFixed(2)} / ${getCurrencySymbol(currency)}${price.toFixed(2)}`}
+              </AppText>
+            </View>
+          )}
+
+          {/* Promo Details Row */}
+          {subscription.promoEnabled && (
+            <View style={styles.detailRow}>
+              <View style={styles.rowLeft}>
+                <View style={styles.iconWrapper}>
+                  <Percent size={17} color={colors.white} />
+                </View>
+                <AppText weight="600" color={colors.white} style={styles.rowLabel}>
+                  Promo price
+                </AppText>
+              </View>
+              <AppText weight="600" color={colors.white} style={styles.rowValue} numberOfLines={1} adjustsFontSizeToFit>
+                {subscription.promoEndDate && new Date() <= new Date(subscription.promoEndDate)
+                  ? `${getCurrencySymbol(currency)}${subscription.promoPrice?.toFixed(2)} until ${safeFormat(parseDate(subscription.promoEndDate), "MMM d, yyyy")}`
+                  : `Expired on ${subscription.promoEndDate ? safeFormat(parseDate(subscription.promoEndDate), "MMM d, yyyy") : "-"}`}
+              </AppText>
+            </View>
+          )}
 
           {/* Row 2: Category */}
           <View style={styles.detailRow}>

@@ -17,6 +17,20 @@ export interface DbSubscription {
   notes: string | null;
   reminderEnabled: number; // 0 = false, 1 = true
   reminderDays: number;    // number of days before
+  
+  // Splitting
+  splitEnabled?: number; // 0 or 1
+  splitType?: string | null;
+  splitValue?: number | null;
+
+  // Promo
+  promoEnabled?: number; // 0 or 1
+  promoPrice?: number | null;
+  promoDurationValue?: number | null;
+  promoDurationUnit?: string | null;
+  promoStartDate?: string | null;
+  promoEndDate?: string | null;
+
   createdAt: string;       // ISO Date String
   updatedAt: string;       // ISO Date String
 }
@@ -41,6 +55,15 @@ export const CREATE_TABLES_SQL = `
     notes TEXT,
     reminderEnabled INTEGER DEFAULT 0,
     reminderDays INTEGER DEFAULT 0,
+    splitEnabled INTEGER DEFAULT 0,
+    splitType TEXT,
+    splitValue REAL,
+    promoEnabled INTEGER DEFAULT 0,
+    promoPrice REAL,
+    promoDurationValue INTEGER,
+    promoDurationUnit TEXT,
+    promoStartDate TEXT,
+    promoEndDate TEXT,
     createdAt TEXT NOT NULL,
     updatedAt TEXT NOT NULL
   );

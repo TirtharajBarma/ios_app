@@ -29,7 +29,7 @@ export interface AppTextProps extends Omit<TextProps, "style"> {
   /** Truncate after N lines. */
   numberOfLines?: number;
   /** Additional styles merged after the variant defaults. */
-  style?: TextStyle | TextStyle[];
+  style?: TextStyle | (TextStyle | false | null | undefined)[];
 }
 
 const AppText = forwardRef<Text, AppTextProps>(function AppText(

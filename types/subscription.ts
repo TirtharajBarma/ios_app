@@ -71,6 +71,19 @@ export interface Subscription {
   paymentMethod?: string;
   website?: string;
 
+  // ─── Shared Split Billing ────────────────────────────────────────
+  splitEnabled?: boolean;
+  splitType?: "people" | "percentage" | "share";
+  splitValue?: number;
+
+  // ─── Dynamic Promos / Discount Pricing ────────────────────────────
+  promoEnabled?: boolean;
+  promoPrice?: number;
+  promoDurationValue?: number;
+  promoDurationUnit?: "weeks" | "months" | "years" | "cycles";
+  promoStartDate?: string;
+  promoEndDate?: string;
+
   createdAt: string;
   updatedAt: string;
 }
@@ -96,6 +109,20 @@ export interface SubscriptionRow {
   reminder_enabled: number; // SQLite boolean 0/1
   reminder_days: number;
   note: string | null;
+  
+  // Split columns
+  split_enabled?: number;
+  split_type?: string | null;
+  split_value?: number | null;
+
+  // Promo columns
+  promo_enabled?: number;
+  promo_price?: number | null;
+  promo_duration_value?: number | null;
+  promo_duration_unit?: string | null;
+  promo_start_date?: string | null;
+  promo_end_date?: string | null;
+
   created_at: string;
   updated_at: string;
 }

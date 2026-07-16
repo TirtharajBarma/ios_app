@@ -23,6 +23,7 @@ import {
   ArrowUpDown,
   LayoutGrid,
   Calendar,
+  Users,
 } from "lucide-react-native";
 import { parseISO, format, differenceInCalendarDays, startOfDay } from "date-fns";
 import * as Haptics from "expo-haptics";
@@ -31,7 +32,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
 import { AppText, LogoCircle } from "@/components/ui";
 import { colors, spacing, radius, getCurrencySymbol } from "@/constants";
-import { toMonthly } from "@/utils/date";
+import { toMonthly, getSubscriptionActivePrice } from "@/utils/date";
 
 export default function SubscriptionsListScreen() {
   const router = useRouter();
@@ -295,7 +296,8 @@ export default function SubscriptionsListScreen() {
             // Calculate group total monthly average spend
             const categoryTotal = group.items.reduce((sum, item) => {
               if (item.isTrial) return sum;
-              return sum + toMonthly(item.price, item.billingCycle, item.customIntervalMonths);
+              const activePrice = getSubscriptionActivePrice(item);
+              return sum + toMonthly(activePrice, item.billingCycle, item.customIntervalMonths);
             }, 0);
 
             return (
@@ -356,9 +358,12 @@ export default function SubscriptionsListScreen() {
                           <AppText style={styles.listItemPrice}>
                             {sub.isTrial
                               ? "Free"
-                              : `${currencySymbol}${sub.price.toFixed(2)}`}
+                              : `${currencySymbol}${getSubscriptionActivePrice(sub).toFixed(2)}`}
                           </AppText>
                           <View style={styles.listItemCycleRow}>
+                            {sub.splitEnabled && (
+                              <Users size={11} color={colors.accent} style={{ marginRight: 2 }} />
+                            )}
                             <AppText style={styles.listItemCycle}>
                               {sub.isTrial
                                 ? "Trial"

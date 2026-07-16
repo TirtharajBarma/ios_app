@@ -89,6 +89,34 @@ export default function UnifiedFormScreen() {
     return existingSub.rawBillingCycle || existingSub.billingCycle || "monthly";
   });
 
+  // Split Bill States
+  const [splitEnabled, setSplitEnabled] = useState(() => existingSub?.splitEnabled || false);
+  const [splitType, setSplitType] = useState<"people" | "percentage" | "share">(() => existingSub?.splitType || "people");
+  const [splitValue, setSplitValue] = useState(() => existingSub?.splitValue ? String(existingSub.splitValue) : "2");
+
+  // Promo / Introductory Pricing States
+  const [promoEnabled, setPromoEnabled] = useState(() => existingSub?.promoEnabled || false);
+  const [promoPrice, setPromoPrice] = useState(() => existingSub?.promoPrice ? String(existingSub.promoPrice) : "");
+  const [promoDurationValue, setPromoDurationValue] = useState(() => existingSub?.promoDurationValue ? String(existingSub.promoDurationValue) : "3");
+  const [promoDurationUnit, setPromoDurationUnit] = useState<"weeks" | "months" | "years" | "cycles">(() => existingSub?.promoDurationUnit || "months");
+
+  const previewPrice = useMemo(() => {
+    const basePrice = Number(amount || 0);
+    const val = Number(splitValue || 1);
+    if (splitType === "people") {
+      return basePrice / (val || 1);
+    } else if (splitType === "percentage") {
+      return basePrice * (val / 100);
+    } else {
+      return val;
+    }
+  }, [amount, splitType, splitValue]);
+
+  // Measured Y positions from onLayout for accurate scroll-to-input
+  const [splitCardY, setSplitCardY] = useState(0);
+  const [promoCardY, setPromoCardY] = useState(0);
+  const [notesCardY, setNotesCardY] = useState(0);
+
   const [showCustomCycleModal, setShowCustomCycleModal] = useState(false);
   const [showNameEditModal, setShowNameEditModal] = useState(false);
   const [nameEditValue, setNameEditValue] = useState("");
@@ -294,6 +322,32 @@ export default function UnifiedFormScreen() {
       ? "custom"
       : billingCycle.toLowerCase();
 
+    let calculatedPromoEndDate: string | undefined = undefined;
+    if (promoEnabled) {
+      const pVal = Number(promoDurationValue) || 1;
+      let pEnd = new Date(startDate);
+      if (promoDurationUnit === "weeks") {
+        pEnd.setDate(pEnd.getDate() + pVal * 7);
+      } else if (promoDurationUnit === "months") {
+        pEnd.setMonth(pEnd.getMonth() + pVal);
+      } else if (promoDurationUnit === "years") {
+        pEnd.setFullYear(pEnd.getFullYear() + pVal);
+      } else if (promoDurationUnit === "cycles") {
+        let monthsPerCycle = 1;
+        if (billingCycle === "weekly") monthsPerCycle = 0.23;
+        else if (billingCycle === "bi-weekly") monthsPerCycle = 0.46;
+        else if (billingCycle === "monthly") monthsPerCycle = 1;
+        else if (billingCycle === "quarterly") monthsPerCycle = 3;
+        else if (billingCycle === "semi-yearly") monthsPerCycle = 6;
+        else if (billingCycle === "yearly") monthsPerCycle = 12;
+        else if (billingCycle.startsWith("custom:")) {
+          monthsPerCycle = Number(customCycleVal) || 1;
+        }
+        pEnd.setMonth(pEnd.getMonth() + Math.round(pVal * monthsPerCycle));
+      }
+      calculatedPromoEndDate = pEnd.toISOString();
+    }
+
     const input = {
       name: customName,
       color: selectedColor,
@@ -314,6 +368,19 @@ export default function UnifiedFormScreen() {
       startDate: startDate.toISOString(),
       paymentMethod: paymentMethod === "None" ? undefined : paymentMethod,
       website: website || existingSub?.website || undefined,
+      
+      // Splitting
+      splitEnabled: splitEnabled,
+      splitType: splitEnabled ? splitType : undefined,
+      splitValue: splitEnabled ? Number(splitValue || 1) : undefined,
+
+      // Promo
+      promoEnabled: promoEnabled,
+      promoPrice: promoEnabled ? Number(promoPrice || 0) : undefined,
+      promoDurationValue: promoEnabled ? Number(promoDurationValue || 1) : undefined,
+      promoDurationUnit: promoEnabled ? promoDurationUnit : undefined,
+      promoStartDate: promoEnabled ? startDate.toISOString() : undefined,
+      promoEndDate: calculatedPromoEndDate,
     };
 
     try {
@@ -419,16 +486,13 @@ export default function UnifiedFormScreen() {
         </PressableScale>
       </View>
 
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        style={{ flex: 1 }}
-        keyboardVerticalOffset={Platform.OS === "ios" ? 44 : 0}
-      >
+      <View style={{ flex: 1 }}>
         <ScrollView
           ref={scrollRef}
           showsVerticalScrollIndicator={false}
           keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
+          automaticallyAdjustKeyboardInsets={true}
           contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + spacing[40] }]}
         >
         {/* Service Hero Card — tall poster */}
@@ -671,8 +735,231 @@ export default function UnifiedFormScreen() {
           )}
         </View>
 
+        {/* Split Bill Card */}
+        <View
+          style={styles.sectionCard}
+          onLayout={(e) => setSplitCardY(e.nativeEvent.layout.y)}
+        >
+          <View style={styles.cardRow}>
+            <AppText variant="subheadline" weight="600" color={colors.white}>Split bill / Share cost</AppText>
+            <View style={styles.switchSlot}>
+              <Toggle
+                value={splitEnabled}
+                onValueChange={setSplitEnabled}
+              />
+            </View>
+          </View>
+          {splitEnabled && (
+            <>
+              <View style={styles.rowDivider} />
+              <View style={styles.cardRow}>
+                <AppText variant="subheadline" weight="600" color={colors.white}>Split type</AppText>
+                <View style={{ flexDirection: "row", gap: 6 }}>
+                  <TouchableOpacity
+                    onPress={() => setSplitType("people")}
+                    style={[
+                      styles.pillOption,
+                      splitType === "people" ? styles.pillOptionActive : undefined,
+                    ]}
+                  >
+                    <AppText
+                      style={[
+                        styles.pillOptionText,
+                        splitType === "people" ? styles.pillOptionTextActive : undefined,
+                      ]}
+                    >
+                      People
+                    </AppText>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => setSplitType("percentage")}
+                    style={[
+                      styles.pillOption,
+                      splitType === "percentage" ? styles.pillOptionActive : undefined,
+                    ]}
+                  >
+                    <AppText
+                      style={[
+                        styles.pillOptionText,
+                        splitType === "percentage" ? styles.pillOptionTextActive : undefined,
+                      ]}
+                    >
+                      %
+                    </AppText>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => setSplitType("share")}
+                    style={[
+                      styles.pillOption,
+                      splitType === "share" ? styles.pillOptionActive : undefined,
+                    ]}
+                  >
+                    <AppText
+                      style={[
+                        styles.pillOptionText,
+                        splitType === "share" ? styles.pillOptionTextActive : undefined,
+                      ]}
+                    >
+                      Fixed
+                    </AppText>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={styles.rowDivider} />
+              <View style={styles.cardRow}>
+                <AppText variant="subheadline" weight="600" color={colors.white}>
+                  {splitType === "people"
+                    ? "Number of people"
+                    : splitType === "percentage"
+                    ? "Percentage share"
+                    : "Your share price"}
+                </AppText>
+                <TextInput
+                  style={styles.valueInput}
+                  placeholder={splitType === "people" ? "2" : splitType === "percentage" ? "50" : "50.00"}
+                  placeholderTextColor={colors.textMuted}
+                  keyboardType="numeric"
+                  value={splitValue}
+                  onChangeText={setSplitValue}
+                  onFocus={() => {
+                    setTimeout(() => {
+                      scrollRef.current?.scrollTo({ y: splitCardY - 20, animated: true });
+                    }, 150);
+                  }}
+                />
+              </View>
+
+              {Number(amount || 0) > 0 && (
+                <>
+                  <View style={styles.rowDivider} />
+                  <View style={[styles.cardRow, { height: 38 }]}>
+                    <AppText variant="caption1" color={colors.textSecondary}>
+                      Calculated share:
+                    </AppText>
+                    <AppText variant="callout" weight="700" color={colors.accent}>
+                      {getCurrencySymbol(currency)}
+                      {previewPrice.toFixed(2)} / cycle
+                    </AppText>
+                  </View>
+                </>
+              )}
+            </>
+          )}
+        </View>
+
+        {/* Promo / Introductory Price Card */}
+        <View
+          style={styles.sectionCard}
+          onLayout={(e) => setPromoCardY(e.nativeEvent.layout.y)}
+        >
+          <View style={styles.cardRow}>
+            <AppText variant="subheadline" weight="600" color={colors.white}>Introductory promo price</AppText>
+            <View style={styles.switchSlot}>
+              <Toggle
+                value={promoEnabled}
+                onValueChange={setPromoEnabled}
+              />
+            </View>
+          </View>
+          {promoEnabled && (
+            <>
+              <View style={styles.rowDivider} />
+              <View style={styles.cardRow}>
+                <AppText variant="subheadline" weight="600" color={colors.white}>Promo price</AppText>
+                <TextInput
+                  style={styles.valueInput}
+                  placeholder="149.00"
+                  placeholderTextColor={colors.textMuted}
+                  keyboardType="numeric"
+                  value={promoPrice}
+                  onChangeText={setPromoPrice}
+                  onFocus={() => {
+                    setTimeout(() => {
+                      scrollRef.current?.scrollTo({ y: promoCardY - 20, animated: true });
+                    }, 150);
+                  }}
+                />
+              </View>
+
+              <View style={styles.rowDivider} />
+              <View style={styles.cardRow}>
+                <AppText variant="subheadline" weight="600" color={colors.white}>Promo duration</AppText>
+                <View style={{ flexDirection: "row", alignItems: "center" }}>
+                  <TextInput
+                    style={styles.durationInput}
+                    placeholder="3"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="numeric"
+                    value={promoDurationValue}
+                    onChangeText={setPromoDurationValue}
+                    onFocus={() => {
+                      setTimeout(() => {
+                        scrollRef.current?.scrollTo({ y: promoCardY - 20, animated: true });
+                      }, 150);
+                    }}
+                  />
+                  <View style={{ flexDirection: "row", gap: 4 }}>
+                    <TouchableOpacity
+                      onPress={() => setPromoDurationUnit("weeks")}
+                      style={[
+                        styles.miniPill,
+                        promoDurationUnit === "weeks" ? styles.miniPillActive : undefined,
+                      ]}
+                    >
+                      <AppText
+                        style={[
+                          styles.miniPillText,
+                          promoDurationUnit === "weeks" ? styles.miniPillTextActive : undefined,
+                        ]}
+                      >
+                        Wk
+                      </AppText>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => setPromoDurationUnit("months")}
+                      style={[
+                        styles.miniPill,
+                        promoDurationUnit === "months" ? styles.miniPillActive : undefined,
+                      ]}
+                    >
+                      <AppText
+                        style={[
+                          styles.miniPillText,
+                          promoDurationUnit === "months" ? styles.miniPillTextActive : undefined,
+                        ]}
+                      >
+                        Mo
+                      </AppText>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => setPromoDurationUnit("years")}
+                      style={[
+                        styles.miniPill,
+                        promoDurationUnit === "years" ? styles.miniPillActive : undefined,
+                      ]}
+                    >
+                      <AppText
+                        style={[
+                          styles.miniPillText,
+                          promoDurationUnit === "years" ? styles.miniPillTextActive : undefined,
+                        ]}
+                      >
+                        Yr
+                      </AppText>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            </>
+          )}
+        </View>
+
         {/* Notes Input block */}
-        <View style={styles.sectionCard}>
+        <View
+          style={styles.sectionCard}
+          onLayout={(e) => setNotesCardY(e.nativeEvent.layout.y)}
+        >
           <View style={[styles.cardRow, { height: "auto", minHeight: 120, alignItems: "flex-start", paddingVertical: spacing[12] }]}>
             <TextInput
               ref={notesInputRef}
@@ -683,16 +970,18 @@ export default function UnifiedFormScreen() {
               onChangeText={setNotes}
               onFocus={() => {
                 setTimeout(() => {
-                  scrollRef.current?.scrollToEnd({ animated: true });
-                }, 100);
+                  scrollRef.current?.scrollTo({ y: notesCardY - 150, animated: true });
+                }, 150);
               }}
               multiline
               numberOfLines={5}
             />
           </View>
         </View>
+        {/* Spacer: only adds room when keyboard is open so inputs can scroll above it */}
+        {keyboardVisible && <View style={{ height: 300 }} />}
         </ScrollView>
-      </KeyboardAvoidingView>
+      </View>
 
       {/* Dynamic Slide-Up Bottom Customization Sheet — iOS swipe-down to dismiss */}
       <SwipeDownSheet
@@ -1405,7 +1694,7 @@ export default function UnifiedFormScreen() {
           style={{
             position: "absolute",
             bottom: animBottom,
-            right: spacing[20],
+            left: spacing[20],
             zIndex: 9999,
           }}
         >
@@ -1946,5 +2235,62 @@ const styles = StyleSheet.create({
   monthYearGridItemActive: {
     backgroundColor: "#3A3A3C",
     borderColor: "rgba(255, 255, 255, 0.2)",
+  },
+  pillOption: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    borderWidth: 0.5,
+    borderColor: "rgba(255, 255, 255, 0.1)",
+  },
+  pillOptionActive: {
+    backgroundColor: colors.accent,
+    borderColor: "transparent",
+  },
+  pillOptionText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "rgba(255, 255, 255, 0.6)",
+  },
+  pillOptionTextActive: {
+    color: colors.white,
+  },
+  miniPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    borderWidth: 0.5,
+    borderColor: "rgba(255, 255, 255, 0.1)",
+  },
+  miniPillActive: {
+    backgroundColor: colors.accent,
+    borderColor: "transparent",
+  },
+  miniPillText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "rgba(255, 255, 255, 0.6)",
+  },
+  miniPillTextActive: {
+    color: colors.white,
+  },
+  valueInput: {
+    color: colors.white,
+    textAlign: "right",
+    fontSize: 16,
+    fontWeight: "600",
+    width: 100,
+    paddingVertical: 4,
+  },
+  durationInput: {
+    color: colors.white,
+    textAlign: "right",
+    fontSize: 16,
+    fontWeight: "600",
+    width: 40,
+    marginRight: 8,
+    paddingVertical: 4,
   },
 });

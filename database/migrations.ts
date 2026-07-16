@@ -15,6 +15,15 @@ const REQUIRED_COLUMNS = [
   "reminderEnabled",
   "reminderDays",
   "website",
+  "splitEnabled",
+  "splitType",
+  "splitValue",
+  "promoEnabled",
+  "promoPrice",
+  "promoDurationValue",
+  "promoDurationUnit",
+  "promoStartDate",
+  "promoEndDate",
 ];
 
 /** SQLite ALTER TABLE column defaults by column name. */
@@ -29,6 +38,15 @@ const COLUMN_DEFAULTS: Record<string, string> = {
   reminderEnabled: "0",
   reminderDays: "0",
   website: "NULL",
+  splitEnabled: "0",
+  splitType: "NULL",
+  splitValue: "1.0",
+  promoEnabled: "0",
+  promoPrice: "NULL",
+  promoDurationValue: "NULL",
+  promoDurationUnit: "NULL",
+  promoStartDate: "NULL",
+  promoEndDate: "NULL",
 };
 
 export async function runMigrations(db: SQLiteDatabase): Promise<void> {
@@ -84,7 +102,11 @@ async function ensureColumns(db: SQLiteDatabase): Promise<void> {
     if (!existingColumns.has(col)) {
       const defaultVal = COLUMN_DEFAULTS[col] ?? "NULL";
       console.log(`Database: Adding missing column '${col}' (default: ${defaultVal})`);
-      await db.execAsync(`ALTER TABLE subscriptions ADD COLUMN ${col} ${defaultVal === "NULL" ? "" : `DEFAULT ${defaultVal}`} NOT NULL DEFAULT ${defaultVal};`);
+      if (defaultVal === "NULL") {
+        await db.execAsync(`ALTER TABLE subscriptions ADD COLUMN ${col};`);
+      } else {
+        await db.execAsync(`ALTER TABLE subscriptions ADD COLUMN ${col} NOT NULL DEFAULT ${defaultVal};`);
+      }
     }
   }
 }

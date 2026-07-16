@@ -5,7 +5,7 @@ import type {
   SubscriptionStats,
 } from "@/types/subscription";
 import * as db from "@/database/database";
-import { toMonthly, toYearly, daysUntil, advanceCycle } from "@/utils/date";
+import { toMonthly, toYearly, daysUntil, advanceCycle, getSubscriptionActivePrice } from "@/utils/date";
 import { scheduleReminder, cancelReminder } from "@/utils/notifications";
 import AsyncStorage from "@/utils/storage";
 
@@ -49,7 +49,8 @@ function computeStats(subscriptions: Subscription[]): SubscriptionStats {
     (sum, s) => {
       // Do not include free trials in current monthly spending totals
       if (s.isTrial) return sum;
-      return sum + toMonthly(s.price, s.billingCycle, s.customIntervalMonths);
+      const activePrice = getSubscriptionActivePrice(s);
+      return sum + toMonthly(activePrice, s.billingCycle, s.customIntervalMonths);
     },
     0
   );
@@ -57,7 +58,8 @@ function computeStats(subscriptions: Subscription[]): SubscriptionStats {
   const yearlyTotal = subscriptions.reduce(
     (sum, s) => {
       if (s.isTrial) return sum;
-      return sum + toYearly(s.price, s.billingCycle, s.customIntervalMonths);
+      const activePrice = getSubscriptionActivePrice(s);
+      return sum + toYearly(activePrice, s.billingCycle, s.customIntervalMonths);
     },
     0
   );

@@ -123,6 +123,19 @@ function mapDbToSubscription(dbSub: DbSubscription): Subscription {
     paymentMethod: dbSub.paymentMethod || undefined,
     website: dbSub.website || undefined,
 
+    // Splitting
+    splitEnabled: dbSub.splitEnabled === 1,
+    splitType: dbSub.splitType as any || undefined,
+    splitValue: dbSub.splitValue || undefined,
+
+    // Promo
+    promoEnabled: dbSub.promoEnabled === 1,
+    promoPrice: dbSub.promoPrice || undefined,
+    promoDurationValue: dbSub.promoDurationValue || undefined,
+    promoDurationUnit: dbSub.promoDurationUnit as any || undefined,
+    promoStartDate: dbSub.promoStartDate || undefined,
+    promoEndDate: dbSub.promoEndDate || undefined,
+
     createdAt: dbSub.createdAt,
     updatedAt: dbSub.updatedAt,
   };
@@ -154,6 +167,15 @@ function mapDomainToDb(id: string, input: NewSubscriptionInput): Omit<DbSubscrip
     notes: input.note || null,
     reminderEnabled: input.reminderEnabled ? 1 : 0,
     reminderDays: input.reminderDays,
+    splitEnabled: input.splitEnabled ? 1 : 0,
+    splitType: input.splitType || null,
+    splitValue: input.splitValue || null,
+    promoEnabled: input.promoEnabled ? 1 : 0,
+    promoPrice: input.promoPrice || null,
+    promoDurationValue: input.promoDurationValue || null,
+    promoDurationUnit: input.promoDurationUnit || null,
+    promoStartDate: input.promoStartDate || null,
+    promoEndDate: input.promoEndDate || null,
   };
 }
 
@@ -218,6 +240,16 @@ export async function updateSubscription(
   if (input.startDate !== undefined) dbUpdates.startDate = input.startDate;
   if (input.paymentMethod !== undefined) dbUpdates.paymentMethod = input.paymentMethod;
   if (input.website !== undefined) dbUpdates.website = input.website;
+  
+  if (input.splitEnabled !== undefined) dbUpdates.splitEnabled = input.splitEnabled ? 1 : 0;
+  if (input.splitType !== undefined) dbUpdates.splitType = input.splitType;
+  if (input.splitValue !== undefined) dbUpdates.splitValue = input.splitValue;
+  if (input.promoEnabled !== undefined) dbUpdates.promoEnabled = input.promoEnabled ? 1 : 0;
+  if (input.promoPrice !== undefined) dbUpdates.promoPrice = input.promoPrice;
+  if (input.promoDurationValue !== undefined) dbUpdates.promoDurationValue = input.promoDurationValue;
+  if (input.promoDurationUnit !== undefined) dbUpdates.promoDurationUnit = input.promoDurationUnit;
+  if (input.promoStartDate !== undefined) dbUpdates.promoStartDate = input.promoStartDate;
+  if (input.promoEndDate !== undefined) dbUpdates.promoEndDate = input.promoEndDate;
 
   await dbUpdateSubscription(id, dbUpdates);
 }

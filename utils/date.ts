@@ -127,3 +127,47 @@ export function toYearly(
 export function reminderTriggerDate(iso: string, reminderDays: number): string {
   return addDays(toDate(iso), -reminderDays).toISOString();
 }
+
+/** Calculate active price based on promo code and split details */
+export function getSubscriptionActivePrice(sub: {
+  price: number;
+  isTrial?: boolean;
+  promoEnabled?: boolean;
+  promoPrice?: number;
+  promoEndDate?: string;
+  splitEnabled?: boolean;
+  splitType?: "people" | "percentage" | "share";
+  splitValue?: number;
+}): number {
+  if (sub.isTrial) return 0;
+
+  let basePrice = sub.price;
+
+  // 1. Promo / Introductory Pricing
+  if (sub.promoEnabled && sub.promoPrice !== undefined && sub.promoEndDate) {
+    try {
+      const promoEnd = startOfDay(parseISO(sub.promoEndDate));
+      const current = startOfDay(new Date());
+      if (current <= promoEnd) {
+        basePrice = sub.promoPrice;
+      }
+    } catch (e) {
+      // Ignore parse errors, use regular price
+    }
+  }
+
+  // 2. Splitting / Shared bill
+  if (sub.splitEnabled && sub.splitType && sub.splitValue !== undefined) {
+    if (sub.splitType === "people") {
+      const count = Number(sub.splitValue) || 1;
+      basePrice = basePrice / count;
+    } else if (sub.splitType === "percentage") {
+      const pct = Number(sub.splitValue) || 100;
+      basePrice = basePrice * (pct / 100);
+    } else if (sub.splitType === "share") {
+      basePrice = Number(sub.splitValue) || basePrice;
+    }
+  }
+
+  return basePrice;
+}

@@ -10,7 +10,7 @@ import { useRouter } from "expo-router";
 import { differenceInCalendarDays, parseISO, startOfDay, format } from "date-fns";
 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Info, Calendar, User, Inbox, Repeat, ChevronRight } from "lucide-react-native";
+import { Info, Calendar, User, Inbox, Repeat, ChevronRight, Users } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import Animated, { FadeInUp, useSharedValue, useAnimatedStyle, withTiming } from "react-native-reanimated";
 
@@ -22,6 +22,7 @@ import {
   PressableScale,
 } from "@/components/ui";
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
+import { getSubscriptionActivePrice } from "@/utils/date";
 import { LinearGradient } from "expo-linear-gradient";
 
 const MONTH_NAMES = [
@@ -202,7 +203,7 @@ export default function HomeScreen() {
         const d = new Date(sub.nextBillingDate);
         return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
       })
-      .reduce((sum, sub) => sum + sub.price, 0);
+      .reduce((sum, sub) => sum + getSubscriptionActivePrice(sub), 0);
   }, [subscriptions]);
 
   const hasSubscriptions = subscriptions.length > 0;
@@ -342,7 +343,7 @@ export default function HomeScreen() {
                         </View>
                         <AppText style={styles.footerValueText} numberOfLines={1}>
                           {subscriptions.length === 1
-                            ? (nextRenewingSub ? `${currencySymbol}${nextRenewingSub.price.toFixed(2)}` : "-")
+                            ? (nextRenewingSub ? `${currencySymbol}${getSubscriptionActivePrice(nextRenewingSub).toFixed(2)}` : "-")
                             : `${currencySymbol}${dueThisMonthTotal.toFixed(2)}`}
                         </AppText>
                       </Animated.View>
@@ -503,9 +504,12 @@ export default function HomeScreen() {
                           <AppText style={styles.upNextTitle} numberOfLines={1}>
                             {sub.name}
                           </AppText>
-                          <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6 }}>
+                          <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6, gap: 4 }}>
                             {!sub.isTrial && (
-                              <Repeat size={11} color={colors.textMuted} style={{ marginRight: 4 }} />
+                              <Repeat size={11} color={colors.textMuted} />
+                            )}
+                            {sub.splitEnabled && (
+                              <Users size={11} color={colors.accent} />
                             )}
                             <AppText
                               style={[styles.upNextSubtitle, { marginTop: 0 }]}
@@ -513,7 +517,7 @@ export default function HomeScreen() {
                             >
                               {sub.isTrial
                                 ? "Free trial"
-                                : `${formatCycleLabel(sub.rawBillingCycle, sub.billingCycle)} for ${currencySymbol}${sub.price.toFixed(2)}`}
+                                : `${formatCycleLabel(sub.rawBillingCycle, sub.billingCycle)} for ${currencySymbol}${getSubscriptionActivePrice(sub).toFixed(2)}`}
                             </AppText>
                           </View>
                         </View>
@@ -603,9 +607,12 @@ export default function HomeScreen() {
                         <AppText style={styles.listItemPrice}>
                           {sub.isTrial
                             ? "Free"
-                            : `${currencySymbol}${sub.price.toFixed(2)}`}
+                            : `${currencySymbol}${getSubscriptionActivePrice(sub).toFixed(2)}`}
                         </AppText>
                         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 3, marginTop: 2 }}>
+                          {sub.splitEnabled && (
+                            <Users size={11} color={colors.accent} style={{ marginRight: 2 }} />
+                          )}
                           <AppText style={[styles.listItemCycle, { marginTop: 0 }]}>
                             {sub.isTrial
                               ? "Trial"
