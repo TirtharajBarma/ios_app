@@ -207,3 +207,44 @@ export async function getUpcomingRenewals(limit: number = 10): Promise<DbSubscri
     throw new Error(`Failed to get upcoming renewals: ${error instanceof Error ? error.message : "unknown error"}`);
   }
 }
+
+export async function createTransaction(tx: {
+  id: string;
+  subscriptionId: string;
+  amount: number;
+  currency: string;
+  date: string;
+}): Promise<void> {
+  try {
+    const db = getDatabase();
+    const now = new Date().toISOString();
+    const sql = `
+      INSERT INTO transactions (id, subscriptionId, amount, currency, date, createdAt)
+      VALUES (?, ?, ?, ?, ?, ?);
+    `;
+    await db.runAsync(sql, tx.id, tx.subscriptionId, tx.amount, tx.currency, tx.date, now);
+  } catch (error) {
+    console.error("Database: Failed to write transaction record", error);
+  }
+}
+
+export async function getTransactionsBySubscriptionId(subscriptionId: string): Promise<any[]> {
+  try {
+    const db = getDatabase();
+    const sql = "SELECT * FROM transactions WHERE subscriptionId = ? ORDER BY date DESC;";
+    return await db.getAllAsync<any>(sql, subscriptionId);
+  } catch (error) {
+    console.error("Database: Failed to fetch transactions", error);
+    return [];
+  }
+}
+
+export async function deleteTransactionsBySubscriptionId(subscriptionId: string): Promise<void> {
+  try {
+    const db = getDatabase();
+    const sql = "DELETE FROM transactions WHERE subscriptionId = ?;";
+    await db.runAsync(sql, subscriptionId);
+  } catch (error) {
+    console.error("Database: Failed to delete transactions", error);
+  }
+}

@@ -45,9 +45,8 @@ const UpcomingCard = memo(function UpcomingCard({
 }) {
   const { name, nextBillingDate, color, logoUrl, website } = subscription;
   const daysText = getRelativeDays(nextBillingDate);
-  const currencyCode = useSettingsStore((s) => s.currencyCode);
   const activePrice = getSubscriptionActivePrice(subscription);
-  const symbol = getCurrencySymbol(currencyCode);
+  const symbol = getCurrencySymbol(subscription.currency);
 
   // Custom transparent-accent border + background look
   const customBg = hexToRGBA(color, 0.06);

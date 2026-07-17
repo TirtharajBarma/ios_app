@@ -47,11 +47,11 @@ export default function NotificationsScreen() {
         const expoNotifications = require("expo-notifications");
         const { status } = await expoNotifications.getPermissionsAsync();
         const isGranted = status === "granted";
-        if (isGranted !== notificationsEnabled) {
-          await setNotificationsEnabled(isGranted);
-          if (!isGranted) {
-            await cancelAllReminders();
-          }
+        
+        // Revoke state only if system permission is denied but app thinks they are enabled
+        if (!isGranted && notificationsEnabled) {
+          await setNotificationsEnabled(false);
+          await cancelAllReminders();
         }
       } catch (e) {
         console.warn("Failed to check notifications permission:", e);
@@ -113,16 +113,11 @@ export default function NotificationsScreen() {
     const daysOption = TIMING_OPTIONS.find((o) => o.value === timing);
     const daysAhead = daysOption?.days ?? 1;
 
-    // Only update subscriptions whose reminderDays matches the previous global default
-    const enriched = subscriptions.map((s) => {
-      const isCustom = s.reminderDays !== prevDays;
-      return {
-        ...s,
-        reminderEnabled: s.reminderEnabled !== false,
-        reminderDays: isCustom ? s.reminderDays : daysAhead,
-      };
-    });
-    await scheduleAllReminders(enriched);
+    // Persist changes to database & state first
+    await useSubscriptionStore.getState().updateReminderDaysForDefaultTiming(prevDays, daysAhead);
+    
+    // Reschedule notifications using the updated store values
+    await scheduleAllReminders(useSubscriptionStore.getState().subscriptions);
   };
 
   return (

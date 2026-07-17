@@ -18,37 +18,27 @@ export default function TabsLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: colors.accent,
-        tabBarInactiveTintColor: colors.textMuted,
-        tabBarStyle: styles.tabBar,
-        tabBarLabelStyle: styles.tabBarLabel,
+        tabBarStyle: { display: "none" },
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
           title: "Overview",
-          tabBarIcon: ({ focused, color }) => (
-            <TabIcon icon={Home} focused={focused} color={color} />
-          ),
         }}
       />
       <Tabs.Screen
         name="analytics"
         options={{
           title: "Analytics",
-          tabBarIcon: ({ focused, color }) => (
-            <TabIcon icon={BarChart3} focused={focused} color={color} />
-          ),
+          href: null,
         }}
       />
       <Tabs.Screen
         name="settings"
         options={{
           title: "Settings",
-          tabBarIcon: ({ focused, color }) => (
-            <TabIcon icon={Settings} focused={focused} color={color} />
-          ),
+          href: null,
         }}
       />
     </Tabs>

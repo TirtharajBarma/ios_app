@@ -54,6 +54,7 @@ const SegmentedControl = forwardRef<View, SegmentedControlProps>(function Segmen
   const { width: windowWidth } = useWindowDimensions();
   const containerWidth = useRef(windowWidth);
   const segmentWidth = useRef(0);
+  const segmentWidthSV = useSharedValue(0);
   const [measured, setMeasured] = useState(false);
 
   // Animated indicator position (0..segments.length-1)
@@ -66,13 +67,17 @@ const SegmentedControl = forwardRef<View, SegmentedControlProps>(function Segmen
   const handleContainerLayout = useCallback((e: LayoutChangeEvent) => {
     containerWidth.current = e.nativeEvent.layout.width;
     segmentWidth.current = containerWidth.current / segments.length;
+    segmentWidthSV.value = segmentWidth.current;
     setMeasured(true);
-  }, [segments.length]);
+  }, [segments.length, segmentWidthSV]);
 
   const indicatorStyle = useAnimatedStyle(() => ({
     transform: [
-      { translateX: activeSV.value * segmentWidth.current },
+      { translateX: activeSV.value * segmentWidthSV.value },
     ],
+    width: segmentWidthSV.value
+      ? segmentWidthSV.value - spacing[4] * 2
+      : 0,
     opacity: measured ? 1 : 0,
   }));
 
@@ -108,9 +113,6 @@ const SegmentedControl = forwardRef<View, SegmentedControlProps>(function Segmen
             top: spacing[4],
             bottom: spacing[4],
             left: spacing[4],
-            width: segmentWidth.current
-              ? segmentWidth.current - spacing[4] * 2
-              : 0,
             backgroundColor: colors.surfaceSecondary,
             borderRadius: radius[8],
             shadowColor: colors.black,

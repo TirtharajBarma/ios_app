@@ -37,6 +37,7 @@ import {
 } from "@/components/common/OverviewHeader";
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
 import { cancelAllReminders, getScheduledReminders } from "@/utils/notifications";
+import { subscriptionsToCSV, parseCSVToSubscriptions } from "@/utils/csv";
 
 export default function SettingsScreen() {
   const scrollY = useSharedValue(0);
@@ -88,6 +89,29 @@ export default function SettingsScreen() {
     }
   };
 
+  const handleExportCSV = async () => {
+    Haptics.selectionAsync();
+    try {
+      const csv = subscriptionsToCSV(subscriptions);
+      const fileName = `subtracker-export-${new Date().toISOString().split("T")[0]}.csv`;
+      const cacheDir = (FileSystem as any).cacheDirectory ?? (FileSystem as any).documentDirectory ?? "";
+      const filePath = `${cacheDir}${fileName}`;
+      await FileSystem.writeAsStringAsync(filePath, csv);
+
+      if (Sharing && isSharingAvailable && (await Sharing.isAvailableAsync())) {
+        await Sharing.shareAsync(filePath, {
+          mimeType: "text/csv",
+          dialogTitle: "Export Subscriptions (CSV)",
+          UTI: "public.comma-separated-values-text",
+        });
+      } else {
+        Alert.alert("Export Successful", `Backup CSV saved locally to: ${filePath}`);
+      }
+    } catch (error) {
+      Alert.alert("Export Failed", "Could not export your data as CSV.");
+    }
+  };
+
   const [showImportModal, setShowImportModal] = useState(false);
   const [importText, setImportText] = useState("");
   const [isImporting, setIsImporting] = useState(false);
@@ -103,49 +127,61 @@ export default function SettingsScreen() {
     if (isImporting) return;
     setIsImporting(true);
     try {
-      const data = JSON.parse(importText);
-      if (data && Array.isArray(data.subscriptions)) {
-        // Clear existing — take snapshot to avoid mutating while iterating
-        const existingSubs = [...subscriptions];
-        for (const sub of existingSubs) {
-          await removeSubscription(sub.id);
+      const trimmed = importText.trim();
+      let importInputs: any[] = [];
+
+      if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+        const data = JSON.parse(trimmed);
+        if (data && Array.isArray(data.subscriptions)) {
+          importInputs = data.subscriptions;
+        } else {
+          Alert.alert("Invalid Data", "The pasted JSON does not match the backup format.");
+          setIsImporting(false);
+          return;
         }
-        // Import new
-        const { addSubscription } = useSubscriptionStore.getState();
-        for (const sub of data.subscriptions) {
-          await addSubscription({
-            name: sub.name,
-            color: sub.color || sub.brandColor || "#007AFF",
-            logoUrl: sub.logoUrl || sub.logo || undefined,
-            price: sub.price,
-            currency: sub.currency,
-            billingCycle: sub.billingCycle,
-            rawBillingCycle: sub.rawBillingCycle,
-            customIntervalMonths: sub.customIntervalMonths,
-            nextBillingDate: sub.nextBillingDate,
-            category: sub.category,
-            reminderEnabled: sub.reminderEnabled,
-            reminderDays: sub.reminderDays,
-            note: sub.note || sub.notes || undefined,
-            isTrial: sub.isTrial || false,
-            trialStartDate: sub.trialStartDate,
-            trialEndDate: sub.trialEndDate,
-            startDate: sub.startDate,
-            paymentMethod: sub.paymentMethod,
-            website: sub.website,
-          });
-        }
-        Alert.alert("Success", `Successfully imported ${data.subscriptions.length} subscriptions!`);
-        await loadSubscriptions();
-        loadReminderCount();
       } else {
-        Alert.alert("Invalid Data", "The pasted JSON does not match the backup format.");
+        const parsed = parseCSVToSubscriptions(trimmed);
+        if (parsed.length > 0) {
+          importInputs = parsed;
+        } else {
+          Alert.alert("Invalid Data", "The pasted text is not a valid CSV or JSON format.");
+          setIsImporting(false);
+          return;
+        }
       }
+
+      const normalizedInputs = importInputs.map((sub: any) => ({
+        name: sub.name || "Unnamed",
+        color: sub.color || sub.brandColor || "#007AFF",
+        logoUrl: sub.logoUrl || sub.logo || undefined,
+        price: Number(sub.price) || 0,
+        currency: sub.currency || "USD",
+        billingCycle: sub.billingCycle || "monthly",
+        rawBillingCycle: sub.rawBillingCycle || sub.billingCycle || "monthly",
+        customIntervalMonths: sub.customIntervalMonths,
+        nextBillingDate: sub.nextBillingDate || new Date().toISOString(),
+        category: sub.category || "other",
+        reminderEnabled: sub.reminderEnabled !== false,
+        reminderDays: sub.reminderDays !== undefined && sub.reminderDays !== null ? Number(sub.reminderDays) : 1,
+        note: sub.note || sub.notes || undefined,
+        isTrial: sub.isTrial === true || String(sub.isTrial).toLowerCase() === "true",
+        trialStartDate: sub.trialStartDate,
+        trialEndDate: sub.trialEndDate,
+        startDate: sub.startDate || sub.nextBillingDate || new Date().toISOString(),
+        paymentMethod: sub.paymentMethod || "None",
+        website: sub.website,
+      }));
+
+      const { importSubscriptions } = useSubscriptionStore.getState();
+      await importSubscriptions(normalizedInputs);
+
+      Alert.alert("Success", `Successfully imported ${normalizedInputs.length} subscriptions!`);
+      loadReminderCount();
+      setShowImportModal(false);
     } catch (error) {
-      Alert.alert("Import Failed", "Invalid JSON format.");
+      Alert.alert("Import Failed", "Failed to parse import data. Please check your file format.");
     } finally {
       setIsImporting(false);
-      setShowImportModal(false);
     }
   };
 
@@ -208,15 +244,22 @@ export default function SettingsScreen() {
             <Card padding="none" shadow="small" style={styles.sectionCard}>
               <SettingsRow
                 icon={<Download size={18} color={colors.accent} />}
-                label="Export Data"
-                subtitle="Save subscriptions as JSON"
+                label="Export JSON"
+                subtitle="Save backup file as JSON"
                 onPress={handleExportData}
               />
               <RowDivider />
               <SettingsRow
+                icon={<Download size={18} color={colors.accent} />}
+                label="Export CSV"
+                subtitle="Open in Excel or Google Sheets"
+                onPress={handleExportCSV}
+              />
+              <RowDivider />
+              <SettingsRow
                 icon={<Upload size={18} color={colors.success} />}
-                label="Import Data"
-                subtitle="Restore from a backup file"
+                label="Import JSON/CSV"
+                subtitle="Paste backup data directly"
                 onPress={handleImportData}
               />
             </Card>

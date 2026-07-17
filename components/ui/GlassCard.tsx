@@ -11,7 +11,7 @@
  *   </GlassCard>
  */
 import React, { memo, forwardRef } from "react";
-import { View, type StyleProp, type ViewStyle } from "react-native";
+import { View, type StyleProp, type ViewStyle, Platform } from "react-native";
 import { BlurView } from "expo-blur";
 import { colors, spacing, radius } from "@/constants";
 
@@ -54,6 +54,12 @@ const GlassCard = forwardRef<View, GlassCardProps>(function GlassCard(
           overflow: "hidden",
           borderWidth: bordered ? 1 : 0,
           borderColor: colors.border,
+          ...Platform.select({
+            android: {
+              backgroundColor: tint === "dark" ? "rgba(20, 20, 22, 0.85)" : "rgba(255, 255, 255, 0.15)",
+            },
+            default: {},
+          }),
         },
         style,
       ]}

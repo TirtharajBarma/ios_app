@@ -20,36 +20,41 @@ export default function RootLayout() {
   const router = useRouter();
   const { loadSettings } = useSettingsStore();
   const [isLocked, setIsLocked] = useState(false);
+  const [isReady, setIsReady] = useState(false);
   const [biometricLabel, setBiometricLabel] = useState("Unlock");
   const appState = useRef(AppState.currentState);
 
   // Initial setup: load db, check onboarding, and lock the app on start if faceId is enabled in storage
   useEffect(() => {
-    initDatabase().catch((e) => console.error("DB init failed:", e));
-    requestNotificationPermissions().catch((e) => console.warn("Notification permissions failed:", e));
-    loadSettings();
+    async function initialize() {
+      try {
+        await initDatabase();
+        await requestNotificationPermissions();
+        await loadSettings();
 
-    // Check onboarding, then conditionally apply Face ID lock
-    AsyncStorage.getItem(ONBOARDING_KEY).then((value: string | null) => {
-      if (!value) {
-        router.replace("/onboarding");
-        return; // Skip Face ID lock during onboarding
-      }
-      // Only check Face ID after confirming onboarding is done
-      AsyncStorage.getItem("@subo_settings_v2").then((val: string | null) => {
-        if (val) {
-          try {
-            const parsed = JSON.parse(val);
-            if (parsed.faceIdEnabled) {
-              setIsLocked(true);
-              setTimeout(() => authenticate(), 150);
-            }
-          } catch (e) {
-            console.warn("Failed to parse settings for startup lock:", e);
+        const onboardingDone = await AsyncStorage.getItem(ONBOARDING_KEY);
+        if (!onboardingDone) {
+          router.replace("/onboarding");
+          setIsReady(true);
+          return;
+        }
+
+        const settingsStr = await AsyncStorage.getItem("@subo_settings_v2");
+        if (settingsStr) {
+          const parsed = JSON.parse(settingsStr);
+          if (parsed.faceIdEnabled) {
+            setIsLocked(true);
+            setIsReady(true);
+            setTimeout(() => authenticate(), 150);
+            return;
           }
         }
-      });
-    });
+      } catch (e) {
+        console.warn("Startup initialization failed:", e);
+      }
+      setIsReady(true);
+    }
+    initialize();
   }, [router, loadSettings]);
 
   const authenticate = async () => {
@@ -114,6 +119,10 @@ export default function RootLayout() {
       subscription.remove();
     };
   }, []);
+
+  if (!isReady) {
+    return <View style={{ flex: 1, backgroundColor: "#111113" }} />;
+  }
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

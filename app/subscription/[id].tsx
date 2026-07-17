@@ -16,15 +16,18 @@ import {
   ChevronLeft,
   Users,
   Percent,
+  Pause,
 } from "lucide-react-native";
-import { format, parseISO } from "date-fns";
+import { format, parseISO, addDays, addWeeks, addMonths, addYears, startOfDay } from "date-fns";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 
-import { colors, spacing, getCurrencySymbol } from "@/constants";
+import { colors, spacing, radius, getCurrencySymbol } from "@/constants";
 import { AppText, LogoCircle, Toggle, PressableScale } from "@/components/ui";
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
 import { getSubscriptionActivePrice } from "@/utils/date";
+
+import * as db from "@/database/database";
 
 export default function SubscriptionDetailScreen() {
   const router = useRouter();
@@ -34,6 +37,28 @@ export default function SubscriptionDetailScreen() {
   // Fetch subscription from Zustand store
   const { subscriptions, isLoaded, removeSubscription, updateSubscription } = useSubscriptionStore();
   const subscription = subscriptions.find((s) => s.id === id);
+
+  const [pastPayments, setPastPayments] = React.useState<{ date: Date; amount: number }[]>([]);
+  const [totalSpent, setTotalSpent] = React.useState<number>(0);
+
+  React.useEffect(() => {
+    if (!subscription) return;
+    let isMounted = true;
+    db.getTransactionsBySubscriptionId(id).then((rows) => {
+      if (!isMounted) return;
+      const parsed = rows.map((r) => ({
+        date: new Date(r.date),
+        amount: r.amount,
+      }));
+      setPastPayments(parsed);
+      setTotalSpent(parsed.reduce((sum, p) => sum + p.amount, 0));
+    }).catch((err) => {
+      console.error("Failed to load transactions:", err);
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [subscription, id]);
 
   if (!isLoaded || !subscription) {
     return (
@@ -130,6 +155,25 @@ export default function SubscriptionDetailScreen() {
     }
   };
 
+  const handleTogglePause = async (value: boolean) => {
+    Haptics.selectionAsync();
+    try {
+      if (!value) {
+        await updateSubscription(id, {
+          isPaused: false,
+        });
+        Alert.alert("Subscription Resumed", `Billing cycle has reset starting from today.`);
+      } else {
+        await updateSubscription(id, {
+          isPaused: true,
+        });
+        Alert.alert("Subscription Paused", `${name} is now paused. Its cost is excluded from active budgets and reminders are disabled.`);
+      }
+    } catch (e) {
+      console.error("Failed to toggle pause:", e);
+    }
+  };
+
   const parseDate = (d: string | Date | undefined | null): Date => {
     if (!d) return new Date();
     if (d instanceof Date) return d;
@@ -153,6 +197,8 @@ export default function SubscriptionDetailScreen() {
 
   const formattedStartDate = safeFormat(parseDate(subscription.startDate || subscription.createdAt), "MMM d, yyyy");
   const formattedNextDate = safeFormat(parseDate(nextBillingDate), "MMM d, yyyy");
+
+
 
   return (
     <View style={[styles.container, { backgroundColor: brandColor || colors.accent }]}>
@@ -228,118 +274,224 @@ export default function SubscriptionDetailScreen() {
           </View>
           <View style={styles.verticalDivider} />
           <View style={styles.statColumn}>
-            <AppText weight="700" color={colors.white} style={styles.statValue}>
-              {isTrial ? "Scheduled" : "Active"}
+            <AppText
+              weight="700"
+              color={subscription.isPaused ? "#FF9500" : colors.white}
+              style={styles.statValue}
+            >
+              {subscription.isPaused
+                ? "Paused"
+                : isTrial
+                ? "Scheduled"
+                : "Active"}
             </AppText>
             <AppText style={styles.statLabel}>Status</AppText>
           </View>
         </View>
 
-        {/* Rows sections */}
-        <View style={styles.rowsContainer}>
-          {/* Row 1: Next Bill */}
-          <View style={styles.detailRow}>
-            <View style={styles.rowLeft}>
-              <View style={styles.iconWrapper}>
-                <Calendar size={18} color={colors.white} />
-              </View>
-              <AppText weight="600" color={colors.white} style={styles.rowLabel}>
-                {isTrial ? "Trial ends" : "Next bill"}
-              </AppText>
-            </View>
-            <AppText weight="600" color={colors.white} style={styles.rowValue}>
-              on {formattedNextDate}
+        {/* Paused Banner */}
+        {subscription.isPaused && (
+          <View style={styles.pausedBanner}>
+            <Pause size={16} color="#FF9500" />
+            <AppText weight="600" color="#FF9500" style={styles.pausedBannerText}>
+              Subscription is currently paused. Reminders and budget calculations are suspended.
             </AppText>
           </View>
+        )}
 
-          {/* Splitting Details Row */}
-          {subscription.splitEnabled && (
-            <View style={styles.detailRow}>
+        {/* DETAILS SECTION */}
+        <View style={styles.sectionContainer}>
+          <AppText weight="800" color="rgba(255, 255, 255, 0.4)" style={styles.sectionTitleHeader}>
+            DETAILS
+          </AppText>
+          
+          <View style={styles.glassCard}>
+            {/* Row 1: Next Bill */}
+            <View style={styles.cardRow}>
               <View style={styles.rowLeft}>
                 <View style={styles.iconWrapper}>
-                  <Users size={18} color={colors.white} />
+                  <Calendar size={18} color={colors.white} />
                 </View>
                 <AppText weight="600" color={colors.white} style={styles.rowLabel}>
-                  Bill split
+                  {isTrial ? "Trial ends" : "Next bill"}
                 </AppText>
               </View>
-              <AppText weight="600" color={colors.white} style={styles.rowValue} numberOfLines={1} adjustsFontSizeToFit>
-                {subscription.splitType === "people"
-                  ? `1/${subscription.splitValue} share of ${getCurrencySymbol(currency)}${price.toFixed(2)}`
-                  : subscription.splitType === "percentage"
-                  ? `${subscription.splitValue}% share of ${getCurrencySymbol(currency)}${price.toFixed(2)}`
-                  : `Your share: ${getCurrencySymbol(currency)}${subscription.splitValue?.toFixed(2)} / ${getCurrencySymbol(currency)}${price.toFixed(2)}`}
+              <AppText weight="600" color="rgba(255, 255, 255, 0.9)" style={styles.rowValue}>
+                {formattedNextDate}
               </AppText>
             </View>
-          )}
 
-          {/* Promo Details Row */}
-          {subscription.promoEnabled && (
-            <View style={styles.detailRow}>
+            {/* Splitting Details Row */}
+            {subscription.splitEnabled && (
+              <>
+                <View style={styles.rowDivider} />
+                <View style={styles.cardRow}>
+                  <View style={styles.rowLeft}>
+                    <View style={styles.iconWrapper}>
+                      <Users size={18} color={colors.white} />
+                    </View>
+                    <AppText weight="600" color={colors.white} style={styles.rowLabel}>
+                      Bill split
+                    </AppText>
+                  </View>
+                  <AppText weight="600" color="rgba(255, 255, 255, 0.9)" style={styles.rowValue} numberOfLines={1} adjustsFontSizeToFit>
+                    {subscription.splitType === "people"
+                      ? `1/${subscription.splitValue} share of ${getCurrencySymbol(currency)}${price.toFixed(2)}`
+                      : subscription.splitType === "percentage"
+                      ? `${subscription.splitValue}% share of ${getCurrencySymbol(currency)}${price.toFixed(2)}`
+                      : `Your share: ${getCurrencySymbol(currency)}${subscription.splitValue?.toFixed(2)} / ${getCurrencySymbol(currency)}${price.toFixed(2)}`}
+                  </AppText>
+                </View>
+              </>
+            )}
+
+            {/* Promo Details Row */}
+            {subscription.promoEnabled && (
+              <>
+                <View style={styles.rowDivider} />
+                <View style={styles.cardRow}>
+                  <View style={styles.rowLeft}>
+                    <View style={styles.iconWrapper}>
+                      <Percent size={17} color={colors.white} />
+                    </View>
+                    <AppText weight="600" color={colors.white} style={styles.rowLabel}>
+                      Promo price
+                    </AppText>
+                  </View>
+                  <AppText weight="600" color="rgba(255, 255, 255, 0.9)" style={styles.rowValue} numberOfLines={1} adjustsFontSizeToFit>
+                    {subscription.promoEndDate && new Date() <= new Date(subscription.promoEndDate)
+                      ? `${getCurrencySymbol(currency)}${subscription.promoPrice?.toFixed(2)} until ${safeFormat(parseDate(subscription.promoEndDate), "MMM d, yyyy")}`
+                      : `Expired on ${subscription.promoEndDate ? safeFormat(parseDate(subscription.promoEndDate), "MMM d, yyyy") : "-"}`}
+                  </AppText>
+                </View>
+              </>
+            )}
+
+            {/* Row 2: Category */}
+            <View style={styles.rowDivider} />
+            <View style={styles.cardRow}>
               <View style={styles.rowLeft}>
                 <View style={styles.iconWrapper}>
-                  <Percent size={17} color={colors.white} />
+                  <Folder size={18} color={colors.white} />
                 </View>
                 <AppText weight="600" color={colors.white} style={styles.rowLabel}>
-                  Promo price
+                  Category
                 </AppText>
               </View>
-              <AppText weight="600" color={colors.white} style={styles.rowValue} numberOfLines={1} adjustsFontSizeToFit>
-                {subscription.promoEndDate && new Date() <= new Date(subscription.promoEndDate)
-                  ? `${getCurrencySymbol(currency)}${subscription.promoPrice?.toFixed(2)} until ${safeFormat(parseDate(subscription.promoEndDate), "MMM d, yyyy")}`
-                  : `Expired on ${subscription.promoEndDate ? safeFormat(parseDate(subscription.promoEndDate), "MMM d, yyyy") : "-"}`}
+              <AppText weight="600" color="rgba(255, 255, 255, 0.9)" style={styles.rowValue}>
+                {(category || "Other").charAt(0).toUpperCase() + (category || "Other").slice(1)}
               </AppText>
             </View>
-          )}
 
-          {/* Row 2: Category */}
-          <View style={styles.detailRow}>
-            <View style={styles.rowLeft}>
-              <View style={styles.iconWrapper}>
-                <Folder size={18} color={colors.white} />
+            {/* Row 4: Notes */}
+            <View style={styles.rowDivider} />
+            <View style={[styles.cardRow, note ? { height: undefined, minHeight: 56, paddingVertical: 14 } : {}]}>
+              <View style={styles.rowLeft}>
+                <View style={styles.iconWrapper}>
+                  <FileText size={18} color={colors.white} />
+                </View>
+                <AppText weight="600" color={colors.white} style={styles.rowLabel}>
+                  Notes
+                </AppText>
               </View>
-              <AppText weight="600" color={colors.white} style={styles.rowLabel}>
-                Category
+              <AppText weight="500" color="rgba(255, 255, 255, 0.7)" style={[styles.rowValue, { textAlign: 'right', flex: 1 }]}>
+                {note || "No notes"}
               </AppText>
             </View>
-            <AppText weight="600" color={colors.white} style={styles.rowValue}>
-              {(category || "Other").charAt(0).toUpperCase() + (category || "Other").slice(1)}
-            </AppText>
-          </View>
-
-          {/* Row 3: Reminders toggle */}
-          <View style={styles.detailRow}>
-            <View style={styles.rowLeft}>
-              <View style={styles.iconWrapper}>
-                <Bell size={18} color={colors.white} />
-              </View>
-              <AppText weight="600" color={colors.white} style={styles.rowLabel}>
-                Payment reminder
-              </AppText>
-            </View>
-            <View style={styles.switchSlot}>
-              <Toggle
-                value={reminderEnabled}
-                onValueChange={handleToggleReminder}
-              />
-            </View>
-          </View>
-
-          {/* Row 4: Notes */}
-          <View style={[styles.detailRow, note ? { height: undefined, minHeight: 56, paddingVertical: 12 } : {}]}>
-            <View style={styles.rowLeft}>
-              <View style={styles.iconWrapper}>
-                <FileText size={18} color={colors.white} />
-              </View>
-              <AppText weight="600" color={colors.white} style={styles.rowLabel}>
-                Notes
-              </AppText>
-            </View>
-            <AppText weight="600" color={colors.white} style={[styles.rowValue, { textAlign: 'right', flex: 1 }]}>
-              {note || "No notes"}
-            </AppText>
           </View>
         </View>
+
+        {/* PREFERENCES SECTION */}
+        <View style={styles.sectionContainer}>
+          <AppText weight="800" color="rgba(255, 255, 255, 0.4)" style={styles.sectionTitleHeader}>
+            PREFERENCES
+          </AppText>
+          
+          <View style={styles.glassCard}>
+            {/* Row 3: Reminders toggle */}
+            <View style={styles.cardRow}>
+              <View style={styles.rowLeft}>
+                <View style={styles.iconWrapper}>
+                  <Bell size={18} color={colors.white} />
+                </View>
+                <AppText weight="600" color={colors.white} style={styles.rowLabel}>
+                  Payment reminder
+                </AppText>
+              </View>
+              <View style={styles.switchSlot}>
+                <Toggle
+                  value={reminderEnabled}
+                  onValueChange={handleToggleReminder}
+                />
+              </View>
+            </View>
+
+            {/* Row 3.5: Pause toggle */}
+            <View style={styles.rowDivider} />
+            <View style={styles.cardRow}>
+              <View style={styles.rowLeft}>
+                <View style={styles.iconWrapper}>
+                  <Pause size={18} color={colors.white} />
+                </View>
+                <AppText weight="600" color={colors.white} style={styles.rowLabel}>
+                  Pause subscription
+                </AppText>
+              </View>
+              <View style={styles.switchSlot}>
+                <Toggle
+                  value={subscription.isPaused || false}
+                  onValueChange={handleTogglePause}
+                />
+              </View>
+            </View>
+          </View>
+        </View>
+
+        {/* PAYMENT HISTORY TIMELINE */}
+        {!isTrial && pastPayments.length > 0 && (
+          <View style={styles.sectionContainer}>
+            <View style={styles.ledgerHeader}>
+              <AppText weight="800" color="rgba(255, 255, 255, 0.4)" style={styles.sectionTitleHeader}>
+                PAYMENT HISTORY
+              </AppText>
+              <AppText weight="700" color={colors.white} style={styles.ledgerLtv}>
+                LTV: {getCurrencySymbol(currency)}{totalSpent.toFixed(2)}
+              </AppText>
+            </View>
+            
+            <View style={styles.timelineCard}>
+              {pastPayments.slice(0, 5).map((pay, idx) => {
+                const isLast = idx === Math.min(pastPayments.length, 5) - 1;
+                return (
+                  <View key={pay.date.toISOString()} style={styles.timelineNodeRow}>
+                    {/* Left Track & Circle */}
+                    <View style={styles.timelineLeftColumn}>
+                      <View style={styles.timelineCircle} />
+                      {!isLast && <View style={styles.timelineLine} />}
+                    </View>
+                    
+                    {/* Content */}
+                    <View style={styles.timelineContentRight}>
+                      <AppText weight="600" color="rgba(255, 255, 255, 0.9)">
+                        {safeFormat(pay.date, "MMM d, yyyy")}
+                      </AppText>
+                      <AppText weight="700" color={colors.success} style={styles.timelineAmountText}>
+                        +{getCurrencySymbol(currency)}{pay.amount.toFixed(2)}
+                      </AppText>
+                    </View>
+                  </View>
+                );
+              })}
+              {pastPayments.length > 5 && (
+                <View style={styles.timelineFooter}>
+                  <AppText variant="footnote" color={colors.textMuted}>
+                    Showing last 5 payments
+                  </AppText>
+                </View>
+              )}
+            </View>
+          </View>
+        )}
 
         {/* Floating Cancel Scheduled Start / Delete Button */}
         <PressableScale
@@ -449,26 +601,109 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255, 255, 255, 0.15)",
     height: 24,
   },
-  rowsContainer: {
-    marginTop: spacing[20],
-    gap: 10,
+  sectionContainer: {
+    marginTop: spacing[24],
   },
-  detailRow: {
+  sectionTitleHeader: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "rgba(255, 255, 255, 0.35)",
+    letterSpacing: 1.2,
+    marginHorizontal: spacing[20],
+    marginBottom: spacing[8],
+  },
+  glassCard: {
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.07)",
+    borderRadius: 20,
+    marginHorizontal: spacing[16],
+    paddingHorizontal: spacing[16],
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  cardRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    backgroundColor: "rgba(0, 0, 0, 0.25)",
-    borderWidth: 0.5,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    marginHorizontal: spacing[16],
     height: 56,
-    shadowColor: "#000000",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
+  },
+  rowDivider: {
+    height: 1,
+    backgroundColor: "rgba(255, 255, 255, 0.06)",
+  },
+  pausedBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255, 149, 0, 0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 149, 0, 0.25)",
+    borderRadius: 14,
+    padding: spacing[12],
+    marginHorizontal: spacing[16],
+    marginTop: spacing[20],
+    gap: spacing[8],
+  },
+  pausedBannerText: {
+    fontSize: 12,
+    flex: 1,
+    lineHeight: 16,
+  },
+  timelineCard: {
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.07)",
+    borderRadius: 20,
+    marginHorizontal: spacing[16],
+    paddingHorizontal: spacing[20],
+    paddingVertical: spacing[16],
+  },
+  timelineNodeRow: {
+    flexDirection: "row",
+    minHeight: 52,
+  },
+  timelineLeftColumn: {
+    width: 24,
+    alignItems: "center",
+    marginRight: spacing[12],
+  },
+  timelineCircle: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: colors.success,
+    marginTop: 6,
+    shadowColor: colors.success,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 6,
+  },
+  timelineLine: {
+    width: 2,
+    flex: 1,
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
+    marginVertical: 4,
+  },
+  timelineContentRight: {
+    flex: 1,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    paddingTop: 1,
+  },
+  timelineAmountText: {
+    fontSize: 15,
+  },
+  timelineFooter: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingTop: spacing[12],
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255, 255, 255, 0.06)",
+    marginTop: spacing[4],
   },
   switchAlign: {
     alignSelf: "center",
@@ -530,5 +765,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     marginTop: spacing[20],
+  },
+  ledgerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing[20],
+    marginBottom: spacing[8],
+  },
+  ledgerLtv: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: colors.white,
   },
 });

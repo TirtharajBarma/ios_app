@@ -42,8 +42,7 @@ function DetailsHero({
   splitType,
   splitValue,
 }: DetailsHeroProps) {
-  const currencyCode = useSettingsStore((s) => s.currencyCode);
-  const symbol = getCurrencySymbol(currencyCode);
+  const symbol = getCurrencySymbol(currency);
   const activePrice = getSubscriptionActivePrice({
     price,
     isTrial,

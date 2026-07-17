@@ -31,8 +31,19 @@ export interface DbSubscription {
   promoStartDate?: string | null;
   promoEndDate?: string | null;
 
+  isPaused?: number; // 0 or 1
+
   createdAt: string;       // ISO Date String
   updatedAt: string;       // ISO Date String
+}
+
+export interface DbTransaction {
+  id: string;
+  subscriptionId: string;
+  amount: number;
+  currency: string;
+  date: string;
+  createdAt: string;
 }
 
 export const CREATE_TABLES_SQL = `
@@ -64,8 +75,19 @@ export const CREATE_TABLES_SQL = `
     promoDurationUnit TEXT,
     promoStartDate TEXT,
     promoEndDate TEXT,
+    isPaused INTEGER DEFAULT 0,
     createdAt TEXT NOT NULL,
     updatedAt TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS transactions (
+    id TEXT PRIMARY KEY,
+    subscriptionId TEXT NOT NULL,
+    amount REAL NOT NULL,
+    currency TEXT NOT NULL,
+    date TEXT NOT NULL,
+    createdAt TEXT NOT NULL,
+    FOREIGN KEY(subscriptionId) REFERENCES subscriptions(id) ON DELETE CASCADE
   );
 `;
 
@@ -73,4 +95,5 @@ export const CREATE_INDEXES_SQL = `
   CREATE INDEX IF NOT EXISTS idx_subscriptions_is_trial ON subscriptions(isTrial);
   CREATE INDEX IF NOT EXISTS idx_subscriptions_renew_date ON subscriptions(renewDate);
   CREATE INDEX IF NOT EXISTS idx_subscriptions_trial_end_date ON subscriptions(trialEndDate);
+  CREATE INDEX IF NOT EXISTS idx_transactions_sub_id ON transactions(subscriptionId);
 `;

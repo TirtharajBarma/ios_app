@@ -13,6 +13,7 @@ import {
   parseISO,
   startOfDay,
   format,
+  differenceInCalendarMonths,
 } from "date-fns";
 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -23,12 +24,14 @@ import {
   Inbox,
   Repeat,
   ChevronRight,
+  ChevronDown,
   Users,
   Plus,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import Animated, {
   FadeInUp,
+  FadeOutUp,
   useSharedValue,
   useAnimatedStyle,
   withTiming,
@@ -40,7 +43,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
-import { colors, spacing, radius, getCurrencySymbol } from "@/constants";
+import { colors, spacing, radius, getCurrencySymbol, textStyleFor, hexToRGBA } from "@/constants";
 import {
   EmptyState,
   AppText,
@@ -110,6 +113,19 @@ function getRenewalStatus(dateStr: string) {
   } catch {
     return { text: "-", color: colors.textMuted };
   }
+}
+
+function formatRenewalSubtitle(isTrial: boolean, statusText: string) {
+  if (statusText === "Overdue") {
+    return isTrial ? "Trial Overdue" : "Payment Overdue";
+  }
+  if (statusText === "Today") {
+    return isTrial ? "Trial ends today" : "Renews today";
+  }
+  if (statusText === "Tomorrow") {
+    return isTrial ? "Trial ends tomorrow" : "Renews tomorrow";
+  }
+  return isTrial ? `Trial ends on ${statusText}` : `Renews on ${statusText}`;
 }
 
 function FloatingActiveLogo({
@@ -259,6 +275,20 @@ export default function HomeScreen() {
   const [sortBy, setSortBy] = useState<"date" | "price" | "name">("date");
   const [cardPage, setCardPage] = useState(0);
   const [explanationType, setExplanationType] = useState<ExplanationType | null>(null);
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
+    "Due This Month": true,
+    "Due Next Month": true,
+    "Due Later": false,
+    "Paused": false,
+  });
+
+  const toggleSection = (title: string) => {
+    Haptics.selectionAsync();
+    setExpandedSections((prev) => ({
+      ...prev,
+      [title]: !prev[title],
+    }));
+  };
   const footerProgress = useSharedValue(0);
 
   useEffect(() => {
@@ -380,9 +410,49 @@ export default function HomeScreen() {
     }
   }, [subscriptions, sortBy]);
 
+  const groupedSections = React.useMemo(() => {
+    const thisMonth: typeof subscriptions = [];
+    const nextMonth: typeof subscriptions = [];
+    const later: typeof subscriptions = [];
+    const pausedList: typeof subscriptions = [];
+    const today = new Date();
+
+    for (const sub of sortedSubscriptions) {
+      if (sub.isPaused) {
+        pausedList.push(sub);
+        continue;
+      }
+      if (!sub.nextBillingDate) {
+        later.push(sub);
+        continue;
+      }
+      try {
+        const nextDate = parseISO(sub.nextBillingDate);
+        const diffMonths = differenceInCalendarMonths(nextDate, today);
+        if (diffMonths <= 0) {
+          thisMonth.push(sub);
+        } else if (diffMonths === 1) {
+          nextMonth.push(sub);
+        } else {
+          later.push(sub);
+        }
+      } catch {
+        later.push(sub);
+      }
+    }
+
+    return [
+      { title: "Due This Month", data: thisMonth },
+      { title: "Due Next Month", data: nextMonth },
+      { title: "Due Later", data: later },
+      { title: "Paused", data: pausedList },
+    ].filter((section) => section.data.length > 0);
+  }, [sortedSubscriptions]);
+
   // "Up next" always shows the soonest-renewing subscriptions regardless of sort
   const upNextSubscriptions = React.useMemo(() => {
     return [...subscriptions]
+      .filter((s) => !s.isPaused)
       .sort(
         (a, b) =>
           new Date(a.nextBillingDate).getTime() -
@@ -397,6 +467,7 @@ export default function HomeScreen() {
     const currentYear = now.getFullYear();
     return subscriptions
       .filter((sub) => {
+        if (sub.isPaused) return false;
         if (sub.isTrial) return false;
         const d = new Date(sub.nextBillingDate);
         return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
@@ -876,96 +947,139 @@ export default function HomeScreen() {
                 </PressableScale>
               </View>
 
-              {/* Single Grouped List Container */}
-              <LinearGradient
-                colors={["rgba(35, 35, 37, 0.98)", "rgba(22, 22, 24, 1)"]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.groupedListContainer}
-              >
-                {sortedSubscriptions.map((sub, idx) => {
-                  const subStatus = getRenewalStatus(sub.nextBillingDate);
-                  const isLast = idx === sortedSubscriptions.length - 1;
-
-                  return (
-                    <PressableScale
-                      key={sub.id}
-                      onPress={() => handleCardPress(sub)}
-                      onLongPress={() => handleLongPress(sub)}
-                      scale={0.98}
-                      style={[
-                        styles.listItemRow,
-                        !isLast && styles.listItemBorder,
-                      ]}
+              {/* Grouped Lists by Due Month */}
+              {groupedSections.map((section, secIdx) => {
+                const isExpanded = !!expandedSections[section.title];
+                return (
+                  <View key={section.title} style={{ marginTop: secIdx > 0 ? spacing[20] : spacing[12] }}>
+                    <TouchableOpacity
+                      activeOpacity={0.7}
+                      onPress={() => toggleSection(section.title)}
+                      style={styles.sectionHeaderRow}
                     >
-                      <View style={styles.listItemLeft}>
-                        <LogoCircle
-                          source={sub.logoUrl}
-                          name={sub.name}
-                          color={sub.color}
-                          size={40}
-                          bordered
-                          website={sub.website}
+                      <AppText style={styles.sectionSubtitleHeader}>
+                        {section.title} ({section.data.length})
+                      </AppText>
+                      {isExpanded ? (
+                        <ChevronDown
+                          size={14}
+                          color="rgba(255, 255, 255, 0.5)"
+                          style={{ marginRight: spacing[4] }}
                         />
-                        <View style={styles.listItemTextContainer}>
-                          <AppText
-                            style={styles.listItemTitle}
-                            numberOfLines={1}
-                          >
-                            {sub.name}
-                          </AppText>
-                          <AppText
-                            style={styles.listItemSubtitle}
-                            numberOfLines={1}
-                          >
-                            {sub.isTrial
-                              ? `Trial ends on ${subStatus.text}`
-                              : `Renews on ${subStatus.text}`}
-                          </AppText>
-                        </View>
-                      </View>
+                      ) : (
+                        <ChevronRight
+                          size={14}
+                          color="rgba(255, 255, 255, 0.5)"
+                          style={{ marginRight: spacing[4] }}
+                        />
+                      )}
+                    </TouchableOpacity>
 
-                      <View style={styles.listItemRight}>
-                        <AppText style={styles.listItemPrice}>
-                          {sub.isTrial
-                            ? "Free"
-                            : `${currencySymbol}${getSubscriptionActivePrice(sub).toFixed(2)}`}
-                        </AppText>
-                        <View
-                          style={{
-                            flexDirection: "row",
-                            alignItems: "center",
-                            justifyContent: "flex-end",
-                            gap: 3,
-                            marginTop: 2,
-                          }}
+                    {isExpanded && (
+                      <Animated.View
+                        entering={FadeInUp.duration(220)}
+                        exiting={FadeOutUp.duration(180)}
+                      >
+                        <LinearGradient
+                          colors={["rgba(35, 35, 37, 0.98)", "rgba(22, 22, 24, 1)"]}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 1, y: 1 }}
+                          style={styles.groupedListContainer}
                         >
-                          {sub.splitEnabled && (
-                            <Users
-                              size={11}
-                              color={colors.accent}
-                              style={{ marginRight: 2 }}
-                            />
-                          )}
-                          <AppText
-                            style={[styles.listItemCycle, { marginTop: 0 }]}
-                          >
-                            {sub.isTrial
-                              ? "Trial"
-                              : formatCycleLabel(
-                                  sub.rawBillingCycle,
-                                  sub.billingCycle,
-                                )}
-                          </AppText>
-                          {!sub.isTrial && (
-                            <Repeat size={11} color={colors.textMuted} />
-                          )}
-                        </View>
-                      </View>
-                    </PressableScale>
-                  );
-                })}
-              </LinearGradient>
+                        {section.data.map((sub, idx) => {
+                          const subStatus = getRenewalStatus(sub.nextBillingDate);
+                          const isLast = idx === section.data.length - 1;
+
+                          return (
+                            <PressableScale
+                              key={sub.id}
+                              onPress={() => handleCardPress(sub)}
+                              onLongPress={() => handleLongPress(sub)}
+                              scale={0.98}
+                              style={[
+                                styles.listItemRow,
+                                !isLast && styles.listItemBorder,
+                                sub.isPaused && { opacity: 0.55 },
+                              ]}
+                            >
+                              <View style={styles.listItemLeft}>
+                                <LogoCircle
+                                  source={sub.logoUrl}
+                                  name={sub.name}
+                                  color={sub.color}
+                                  size={40}
+                                  bordered
+                                  website={sub.website}
+                                />
+                                <View style={styles.listItemTextContainer}>
+                                  <View style={{ flexDirection: "row", alignItems: "center", gap: spacing[8] }}>
+                                    <AppText
+                                      style={styles.listItemTitle}
+                                      numberOfLines={1}
+                                    >
+                                      {sub.name}
+                                    </AppText>
+                                    {sub.isPaused && (
+                                      <View style={styles.pausedPill}>
+                                        <AppText style={styles.pausedPillText}>PAUSED</AppText>
+                                      </View>
+                                    )}
+                                  </View>
+                                  <AppText
+                                    style={styles.listItemSubtitle}
+                                    numberOfLines={1}
+                                  >
+                                    {sub.isPaused ? "Billing paused" : formatRenewalSubtitle(sub.isTrial, subStatus.text)}
+                                  </AppText>
+                                </View>
+                              </View>
+
+                              <View style={styles.listItemRight}>
+                                <AppText style={styles.listItemPrice}>
+                                  {sub.isTrial
+                                    ? "Free"
+                                    : `${currencySymbol}${getSubscriptionActivePrice(sub).toFixed(2)}`}
+                                </AppText>
+                                <View
+                                  style={{
+                                    flexDirection: "row",
+                                    alignItems: "center",
+                                    justifyContent: "flex-end",
+                                    gap: 3,
+                                    marginTop: 2,
+                                  }}
+                                >
+                                  {sub.splitEnabled && (
+                                    <Users
+                                      size={11}
+                                      color={colors.accent}
+                                      style={{ marginRight: 2 }}
+                                    />
+                                  )}
+                                  <AppText
+                                    style={[styles.listItemCycle, { marginTop: 0 }]}
+                                  >
+                                    {sub.isTrial
+                                      ? "Trial"
+                                      : formatCycleLabel(
+                                          sub.rawBillingCycle,
+                                          sub.billingCycle,
+                                        )}
+                                  </AppText>
+                                  {!sub.isTrial && (
+                                    <Repeat size={11} color={colors.textMuted} />
+                                  )}
+                                </View>
+                              </View>
+                            </PressableScale>
+                          );
+                        })}
+                        </LinearGradient>
+                      </Animated.View>
+                    )}
+                  </View>
+                );
+              })}
             </Animated.View>
           </View>
         )}
@@ -994,9 +1108,7 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
   },
   headerTitle: {
-    fontSize: 40,
-    lineHeight: 46,
-    letterSpacing: 0,
+    ...textStyleFor("largeTitle"),
   },
   headerRight: {
     flexDirection: "row",
@@ -1421,5 +1533,35 @@ const styles = StyleSheet.create({
     color: colors.white,
     marginLeft: 26,
     marginTop: 1,
+  },
+  sectionSubtitleHeader: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: colors.textMuted,
+    textTransform: "uppercase",
+    letterSpacing: 1,
+    paddingLeft: spacing[4],
+    marginBottom: spacing[8],
+  },
+  sectionHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingRight: spacing[12],
+    paddingVertical: spacing[4],
+  },
+  pausedPill: {
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.15)",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  pausedPillText: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: "rgba(255, 255, 255, 0.5)",
+    letterSpacing: 0.5,
   },
 });

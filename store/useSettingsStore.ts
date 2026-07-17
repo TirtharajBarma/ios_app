@@ -33,6 +33,10 @@ interface SettingsState {
   crashReportsEnabled: boolean;
   setCrashReportsEnabled: (enabled: boolean) => Promise<void>;
 
+  // Custom Categories
+  customCategories: string[];
+  addCustomCategory: (cat: string) => Promise<void>;
+
   // Load from storage
   loadSettings: () => Promise<void>;
 }
@@ -49,7 +53,7 @@ async function save(patch: Record<string, unknown>) {
   }
 }
 
-export const useSettingsStore = create<SettingsState>((set) => ({
+export const useSettingsStore = create<SettingsState>((set, get) => ({
   userName: "",
   userTagline: "",
   currencyCode: "INR",
@@ -59,6 +63,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   faceIdEnabled: false,
   analyticsEnabled: false,
   crashReportsEnabled: true,
+  customCategories: [],
 
   setUserName: async (userName) => { set({ userName }); await save({ userName }); },
   setUserTagline: async (userTagline) => { set({ userTagline }); await save({ userTagline }); },
@@ -69,6 +74,17 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setFaceIdEnabled: async (faceIdEnabled) => { set({ faceIdEnabled }); await save({ faceIdEnabled }); },
   setAnalyticsEnabled: async (analyticsEnabled) => { set({ analyticsEnabled }); await save({ analyticsEnabled }); },
   setCrashReportsEnabled: async (crashReportsEnabled) => { set({ crashReportsEnabled }); await save({ crashReportsEnabled }); },
+
+  addCustomCategory: async (category) => {
+    const trimmed = category.trim();
+    if (!trimmed) return;
+    const current = get().customCategories || [];
+    const alreadyExists = current.some((c) => c.toLowerCase() === trimmed.toLowerCase());
+    if (alreadyExists) return;
+    const updated = [...current, trimmed];
+    set({ customCategories: updated });
+    await save({ customCategories: updated });
+  },
 
   loadSettings: async () => {
     try {
@@ -85,6 +101,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
           faceIdEnabled: p.faceIdEnabled ?? false,
           analyticsEnabled: p.analyticsEnabled ?? false,
           crashReportsEnabled: p.crashReportsEnabled ?? true,
+          customCategories: p.customCategories ?? [],
         });
       }
     } catch (e) {

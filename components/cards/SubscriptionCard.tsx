@@ -1,5 +1,5 @@
 import React, { memo, useCallback } from "react";
-import { View, StyleSheet, Alert, type StyleProp, type ViewStyle } from "react-native";
+import { View, StyleSheet, Alert, type StyleProp, type ViewStyle, TouchableOpacity } from "react-native";
 import Animated, { FadeInUp } from "react-native-reanimated";
 import { Swipeable } from "react-native-gesture-handler";
 import { ChevronRight, Trash2, Repeat } from "lucide-react-native";
@@ -76,18 +76,27 @@ function SubscriptionCard({
     ]);
   }, [name, onPress, onEdit, onDelete]);
 
+  const handleSwipeDelete = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    onDelete?.();
+  }, [onDelete]);
+
   const renderRightActions = useCallback(
     () => (
       <View style={styles.swipeActions}>
-        <View style={styles.deleteAction}>
+        <TouchableOpacity
+          activeOpacity={0.7}
+          onPress={handleSwipeDelete}
+          style={styles.deleteAction}
+        >
           <Trash2 size={20} color={colors.white} />
           <AppText variant="caption2" weight="700" color={colors.white}>
             Delete
           </AppText>
-        </View>
+        </TouchableOpacity>
       </View>
     ),
-    []
+    [handleSwipeDelete]
   );
 
   const cardContent = (
@@ -200,12 +209,8 @@ function SubscriptionCard({
   const wrapped = onDelete ? (
     <Swipeable
       renderRightActions={renderRightActions}
-      onSwipeableRightOpen={() => {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-        onDelete();
-      }}
       overshootRight={false}
-      friction={2}
+      friction={1.5}
       rightThreshold={40}
     >
       {cardContent}
@@ -235,8 +240,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.danger,
     justifyContent: "center",
     alignItems: "center",
-    width: 72,
-    borderRadius: radius[16],
+    width: 80,
+    height: "100%",
+    borderRadius: radius[24],
     marginLeft: spacing[8],
     gap: 4,
   },

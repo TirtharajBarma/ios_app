@@ -28,7 +28,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
 import * as ImagePicker from "expo-image-picker";
 
-import { colors, spacing, hexToRGBA, CURRENCIES, getCurrencySymbol } from "@/constants";
+import { colors, spacing, radius, hexToRGBA, CURRENCIES, getCurrencySymbol } from "@/constants";
 import {
   AppText,
   LogoCircle,
@@ -167,11 +167,11 @@ const DateRow = ({ label, value, onPress }: DateRowProps) => (
 
 const sectionStyles = StyleSheet.create({
   card: {
-    backgroundColor: "#1C1C1E",
+    backgroundColor: colors.surface,
     borderWidth: 0.5,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-    borderRadius: 16,
-    paddingHorizontal: 20,
+    borderColor: colors.border,
+    borderRadius: radius[16],
+    paddingHorizontal: spacing[20],
   },
   row: {
     flexDirection: "row",
@@ -180,7 +180,7 @@ const sectionStyles = StyleSheet.create({
   },
   divider: {
     height: 0.5,
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    backgroundColor: colors.border,
   },
   switchSlot: {
     width: 52,
@@ -413,6 +413,22 @@ export default function UnifiedFormScreen() {
         existingSub.category.slice(1)
       : initialCategory || "Entertainment",
   );
+  const [isCustomCategory, setIsCustomCategory] = useState(() => {
+    if (existingSub?.category) {
+      const formatted = existingSub.category.charAt(0).toUpperCase() + existingSub.category.slice(1);
+      const presets = ["Entertainment", "Music", "Productivity", "Health", "Education", "Gaming", "AI", "News", "Cloud", "Shopping", "Finance", "Other"];
+      return !presets.includes(formatted);
+    }
+    return false;
+  });
+  const [customCategoryName, setCustomCategoryName] = useState(() => {
+    if (existingSub?.category) {
+      const formatted = existingSub.category.charAt(0).toUpperCase() + existingSub.category.slice(1);
+      const presets = ["Entertainment", "Music", "Productivity", "Health", "Education", "Gaming", "AI", "News", "Cloud", "Shopping", "Finance", "Other"];
+      return !presets.includes(formatted) ? formatted : "";
+    }
+    return "";
+  });
   const [reminderEnabled, setReminderEnabled] = useState(() =>
     existingSub ? existingSub.reminderEnabled : true,
   );
@@ -678,6 +694,12 @@ export default function UnifiedFormScreen() {
       calculatedPromoEndDate = pEnd.toISOString();
     }
 
+    if (isCustomCategory && !customCategoryName.trim()) {
+      Alert.alert("Validation Error", "Please enter a name for your custom category.");
+      setIsSaving(false);
+      return;
+    }
+
     const input = {
       name: customName,
       color: selectedColor,
@@ -696,7 +718,7 @@ export default function UnifiedFormScreen() {
       nextBillingDate: nextDate
         ? nextDate.toISOString()
         : startDate.toISOString(),
-      category: category.toLowerCase() as any,
+      category: (isCustomCategory ? customCategoryName.trim() : category).toLowerCase() as any,
       reminderEnabled: reminderEnabled,
       reminderDays: reminderDays,
       note: notes || undefined,
@@ -1052,9 +1074,34 @@ export default function UnifiedFormScreen() {
             )}
             <ArrowRow
               label="Category"
-              value={category}
+              value={isCustomCategory ? (customCategoryName || "Custom...") : category}
               onPress={handleCategoryPress}
             />
+            {isCustomCategory && (
+              <>
+                <RowDivider />
+                <View style={{
+                  paddingVertical: spacing[12],
+                  flexDirection: "row",
+                  alignItems: "center",
+                }}>
+                  <TextInput
+                    style={{
+                      color: colors.white,
+                      fontSize: 17,
+                      fontWeight: "500",
+                      flex: 1,
+                      padding: 0,
+                    }}
+                    placeholder="Enter custom category..."
+                    placeholderTextColor={colors.textMuted}
+                    value={customCategoryName}
+                    onChangeText={setCustomCategoryName}
+                    autoCorrect={false}
+                  />
+                </View>
+              </>
+            )}
           </SectionCard>
 
           {/* ── Reminder ───────────────────────────────────────────── */}
@@ -1664,8 +1711,15 @@ export default function UnifiedFormScreen() {
                   case "category":
                     return {
                       title: "Category",
-                      selectedValue: category,
-                      onSelect: (val: string) => setCategory(val),
+                      selectedValue: isCustomCategory ? "Custom..." : category,
+                      onSelect: (val: string) => {
+                        if (val === "Custom...") {
+                          setIsCustomCategory(true);
+                        } else {
+                          setIsCustomCategory(false);
+                          setCategory(val);
+                        }
+                      },
                       options: [
                         { label: "Entertainment", value: "Entertainment" },
                         { label: "Music", value: "Music" },
@@ -1679,6 +1733,7 @@ export default function UnifiedFormScreen() {
                         { label: "Shopping", value: "Shopping" },
                         { label: "Finance", value: "Finance" },
                         { label: "Other", value: "Other" },
+                        { label: "Custom...", value: "Custom..." },
                       ],
                     };
                   case "reminder":

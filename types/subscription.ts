@@ -84,6 +84,8 @@ export interface Subscription {
   promoStartDate?: string;
   promoEndDate?: string;
 
+  isPaused?: boolean;
+
   createdAt: string;
   updatedAt: string;
 }

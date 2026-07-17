@@ -8,6 +8,9 @@ import {
   updateSubscription as dbUpdateSubscription,
   deleteSubscription as dbDeleteSubscription,
   deleteAllSubscriptions as dbDeleteAllSubscriptions,
+  createTransaction,
+  getTransactionsBySubscriptionId,
+  deleteTransactionsBySubscriptionId,
 } from "./queries";
 import type { DbSubscription } from "./schema";
 import type { Subscription, NewSubscriptionInput } from "@/types/subscription";
@@ -137,6 +140,8 @@ function mapDbToSubscription(dbSub: DbSubscription): Subscription {
     promoStartDate: dbSub.promoStartDate ?? undefined,
     promoEndDate: dbSub.promoEndDate ?? undefined,
 
+    isPaused: dbSub.isPaused === 1,
+
     createdAt: dbSub.createdAt,
     updatedAt: dbSub.updatedAt,
   };
@@ -177,6 +182,7 @@ function mapDomainToDb(id: string, input: NewSubscriptionInput): Omit<DbSubscrip
     promoDurationUnit: input.promoDurationUnit || null,
     promoStartDate: input.promoStartDate || null,
     promoEndDate: input.promoEndDate || null,
+    isPaused: input.isPaused ? 1 : 0,
   };
 }
 
@@ -260,6 +266,7 @@ export async function updateSubscription(
   if (input.promoDurationUnit !== undefined) dbUpdates.promoDurationUnit = input.promoDurationUnit;
   if (input.promoStartDate !== undefined) dbUpdates.promoStartDate = input.promoStartDate;
   if (input.promoEndDate !== undefined) dbUpdates.promoEndDate = input.promoEndDate;
+  if (input.isPaused !== undefined) dbUpdates.isPaused = input.isPaused ? 1 : 0;
 
   await dbUpdateSubscription(id, dbUpdates);
 }
@@ -277,3 +284,5 @@ export async function deleteSubscription(id: string): Promise<void> {
 export async function deleteAllSubscriptions(): Promise<void> {
   await dbDeleteAllSubscriptions();
 }
+
+export { createTransaction, getTransactionsBySubscriptionId, deleteTransactionsBySubscriptionId };

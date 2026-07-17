@@ -17,7 +17,7 @@
  *   </SwipeDownSheet>
  */
 import React, { useEffect, useState } from "react";
-import { StyleSheet, View, ViewStyle, StyleProp } from "react-native";
+import { StyleSheet, View, ViewStyle, StyleProp, useWindowDimensions } from "react-native";
 import {
   GestureDetector,
   Gesture,
@@ -64,6 +64,8 @@ export default function SwipeDownSheet({
   const translateY = useSharedValue(0);
   const backdropOpacity = useSharedValue(0);
 
+  const { height: SCREEN_HEIGHT } = useWindowDimensions();
+
   // ── Open / Close lifecycle ──────────────────────────────────────────
   const prevVisible = React.useRef(visible);
   useEffect(() => {
@@ -71,20 +73,21 @@ export default function SwipeDownSheet({
       // Opening: show the sheet immediately, then spring into position.
       isClosingRef.current = false;
       setShowing(true);
-      translateY.value = 0;
+      translateY.value = SCREEN_HEIGHT;
+      translateY.value = withSpring(0, SPRING_OPEN);
       backdropOpacity.value = withTiming(1, { duration: 240 });
     } else if (!visible && prevVisible.current) {
       // Programmatic close (Done button, etc.) — animate off-screen.
       if (!isClosingRef.current) {
         isClosingRef.current = true;
         backdropOpacity.value = withTiming(0, { duration: 200 });
-        translateY.value = withSpring(999, SPRING_CLOSE, () => {
+        translateY.value = withSpring(SCREEN_HEIGHT, SPRING_CLOSE, () => {
           runOnJS(handleAnimationEnd)();
         });
       }
     }
     prevVisible.current = visible;
-  }, [visible, backdropOpacity, translateY]);
+  }, [visible, backdropOpacity, translateY, SCREEN_HEIGHT]);
 
   const handleAnimationEnd = () => {
     setShowing(false);

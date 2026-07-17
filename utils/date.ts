@@ -110,7 +110,10 @@ export function advanceCycleDate(
   return addMonths(base, customMonths);
 }
 
-/** Next renewal after the reference date, preserving the original billing day. */
+/**
+ * Next renewal after the reference date, preserving the original billing day
+ * and avoiding mid-month compression drift.
+ */
 export function getNextRenewalDate(
   startDate: Date,
   cycle: BillingCycle | string,
@@ -119,21 +122,63 @@ export function getNextRenewalDate(
 ): Date {
   const reference = startOfDay(referenceDate);
   const start = startOfDay(startDate);
+  
   if (start > reference) {
     return start;
   }
-  const safeCustomMonths = customMonths > 0 ? customMonths : 1;
-  let next = advanceCycleDate(start, cycle, safeCustomMonths);
-  let safety = 0;
-  while (next <= reference && safety < 366) {
-    next = advanceCycleDate(next, cycle, safeCustomMonths);
-    safety++;
+
+  let next = start;
+  let periods = 0;
+  const maxIterations = 5000; // Safe for daily cycles over ~13 years
+
+  while (next <= reference && periods < maxIterations) {
+    periods++;
+    if (cycle === "weekly") {
+      next = addWeeks(start, periods);
+    } else if (cycle === "bi-weekly") {
+      next = addWeeks(start, periods * 2);
+    } else if (cycle === "monthly") {
+      next = addMonths(start, periods);
+    } else if (cycle === "quarterly") {
+      next = addMonths(start, periods * 3);
+    } else if (cycle === "semi-yearly") {
+      next = addMonths(start, periods * 6);
+    } else if (cycle === "yearly") {
+      next = addYears(start, periods);
+    } else if (typeof cycle === "string" && cycle.startsWith("custom:")) {
+      const [, rawValue, rawUnit] = cycle.split(":");
+      const value = Number(rawValue) || 1;
+      const unit = rawUnit || "months";
+      if (unit === "days") {
+        next = addDays(start, periods * value);
+      } else if (unit === "weeks") {
+        next = addWeeks(start, periods * value);
+      } else if (unit === "years") {
+        next = addYears(start, periods * value);
+      } else {
+        next = addMonths(start, periods * value);
+      }
+    } else {
+      const safeMonths = customMonths > 0 ? customMonths : 1;
+      next = addMonths(start, periods * safeMonths);
+    }
   }
+
   return next;
 }
 
 /** Number of billing periods per year (used to normalize costs). */
 export function periodsPerYear(cycle: BillingCycle | string, customMonths = 1): number {
+  if (typeof cycle === "string" && cycle.startsWith("custom:")) {
+    const [, rawValue, rawUnit] = cycle.split(":");
+    const value = Number(rawValue) || 1;
+    const unit = rawUnit || "months";
+    if (unit === "days") return 365 / value;
+    if (unit === "weeks") return 52 / value;
+    if (unit === "years") return 1 / value;
+    return 12 / value;
+  }
+
   switch (cycle) {
     case "weekly":
       return 52;
@@ -148,17 +193,7 @@ export function periodsPerYear(cycle: BillingCycle | string, customMonths = 1): 
     case "yearly":
       return 1;
     case "custom":
-      return customMonths > 0 ? 12 / customMonths : 12;
     default:
-      if (cycle.startsWith("custom:")) {
-        const [, rawValue, rawUnit] = cycle.split(":");
-        const value = Number(rawValue) || 1;
-        const unit = rawUnit || "months";
-        if (unit === "days") return 365 / value;
-        if (unit === "weeks") return 52 / value;
-        if (unit === "years") return 1 / value;
-        return 12 / value;
-      }
       return customMonths > 0 ? 12 / customMonths : 12;
   }
 }
@@ -166,7 +201,7 @@ export function periodsPerYear(cycle: BillingCycle | string, customMonths = 1): 
 /** Convert a price-per-cycle into a monthly cost. */
 export function toMonthly(
   price: number,
-  cycle: BillingCycle,
+  cycle: BillingCycle | string,
   customMonths = 1
 ): number {
   const perYear = price * periodsPerYear(cycle, customMonths);
@@ -176,7 +211,7 @@ export function toMonthly(
 /** Convert a price-per-cycle into a yearly cost. */
 export function toYearly(
   price: number,
-  cycle: BillingCycle,
+  cycle: BillingCycle | string,
   customMonths = 1
 ): number {
   return price * periodsPerYear(cycle, customMonths);

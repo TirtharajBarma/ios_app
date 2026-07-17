@@ -143,19 +143,21 @@ export default function SubscriptionsListScreen() {
     );
   };
 
-  const getRenewalStatus = (dateStr: string) => {
+  const getRenewalStatusText = (sub: any) => {
+    if (sub.isPaused) return "Paused";
+    const dateStr = sub.nextBillingDate;
     try {
       const renewalDate = startOfDay(parseISO(dateStr));
       const today = startOfDay(new Date());
       const diff = differenceInCalendarDays(renewalDate, today);
 
-      if (diff === 0) return { text: "Today", color: "#FF5A00" };
-      if (diff === 1) return { text: "Tomorrow", color: "#FF9500" };
-      if (diff < 0) return { text: "Overdue", color: "#FF3B30" };
-      if (diff <= 7) return { text: `In ${diff} days`, color: "#FFCC00" };
-      return { text: format(renewalDate, "MMM d"), color: "rgba(255, 255, 255, 0.4)" };
+      if (diff < 0) return sub.isTrial ? "Trial Overdue" : "Payment Overdue";
+      if (diff === 0) return sub.isTrial ? "Trial ends today" : "Renews today";
+      if (diff === 1) return sub.isTrial ? "Trial ends tomorrow" : "Renews tomorrow";
+      const formatted = format(renewalDate, "MMM d");
+      return sub.isTrial ? `Trial ends on ${formatted}` : `Renews on ${formatted}`;
     } catch {
-      return { text: "-", color: "rgba(255, 255, 255, 0.4)" };
+      return "-";
     }
   };
 
@@ -351,6 +353,7 @@ export default function SubscriptionsListScreen() {
                         style={[
                           styles.listItemRow,
                           !isLast && styles.listItemBorder,
+                          sub.isPaused && { opacity: 0.55 },
                         ]}
                         accessibilityLabel={`Subscription ${sub.name}`}
                         accessibilityRole="button"
@@ -366,13 +369,18 @@ export default function SubscriptionsListScreen() {
                             website={sub.website}
                           />
                           <View style={styles.listItemTextContainer}>
-                            <AppText style={styles.listItemTitle} numberOfLines={1}>
-                              {sub.name}
-                            </AppText>
+                            <View style={{ flexDirection: "row", alignItems: "center", gap: spacing[8] }}>
+                              <AppText style={styles.listItemTitle} numberOfLines={1}>
+                                {sub.name}
+                              </AppText>
+                              {sub.isPaused && (
+                                <View style={styles.pausedPill}>
+                                  <AppText style={styles.pausedPillText}>PAUSED</AppText>
+                                </View>
+                              )}
+                            </View>
                             <AppText style={styles.listItemSubtitle} numberOfLines={1}>
-                              {sub.isTrial
-                                ? `Trial ends on ${format(parseISO(sub.trialEndDate || sub.nextBillingDate), "MMM d")}`
-                                : `Renews on ${getRenewalStatus(sub.nextBillingDate).text}`}
+                              {sub.isPaused ? "Billing paused" : getRenewalStatusText(sub)}
                             </AppText>
                           </View>
                         </View>
@@ -915,5 +923,19 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "700",
     color: colors.accent,
+  },
+  pausedPill: {
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.15)",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  pausedPillText: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: "rgba(255, 255, 255, 0.5)",
+    letterSpacing: 0.5,
   },
 });

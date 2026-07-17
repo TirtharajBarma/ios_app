@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { X, Search, Plus } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
+import Animated, { useAnimatedKeyboard, useAnimatedStyle } from "react-native-reanimated";
 
 import { colors, spacing } from "@/constants";
 import { AppText, LogoCircle, PressableScale } from "@/components/ui";
@@ -152,10 +153,17 @@ export default function AddSearchScreen() {
   const essentialColumns = useMemo(() => chunk(essentialServices, 3), [essentialServices]);
   const appSubColumns = useMemo(() => chunk(appSubscriptions, 3), [appSubscriptions]);
 
-  // Compute live absolute position of the search bar above the keyboard
-  const searchBarBottomOffset = keyboardHeight > 0
-    ? (Platform.OS === "ios" ? keyboardHeight + 12 : 12)
-    : insets.bottom + 12;
+  const keyboard = useAnimatedKeyboard();
+  const animatedSearchStyle = useAnimatedStyle(() => {
+    if (Platform.OS !== "ios") {
+      return { transform: [{ translateY: 0 }] };
+    }
+    const kHeight = keyboard.height.value;
+    const translation = kHeight > 0 ? -(kHeight - insets.bottom) : 0;
+    return {
+      transform: [{ translateY: translation }],
+    };
+  });
 
   return (
     <View style={styles.container}>
@@ -412,7 +420,7 @@ export default function AddSearchScreen() {
         )}
 
         {/* Floating bottom search bar */}
-        <View style={[styles.floatingSearchWrapper, { bottom: searchBarBottomOffset }]}>
+        <Animated.View style={[styles.floatingSearchWrapper, { bottom: insets.bottom + 12 }, animatedSearchStyle]}>
           <View style={styles.floatingSearchBar}>
             <Search size={18} color={colors.textMuted} style={{ marginRight: spacing[8] }} />
             <TextInput
@@ -425,7 +433,7 @@ export default function AddSearchScreen() {
               clearButtonMode="while-editing"
             />
           </View>
-        </View>
+        </Animated.View>
       </View>
     </View>
   );
