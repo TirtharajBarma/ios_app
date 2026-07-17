@@ -27,6 +27,7 @@ import {
   ChevronDown,
   Users,
   Plus,
+  PiggyBank,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import Animated, {
@@ -52,6 +53,7 @@ import {
   OverviewExplanationSheet,
   ExplanationType,
   Loading,
+  SavingsBottomSheet,
 } from "@/components/ui";
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
@@ -270,18 +272,18 @@ export default function HomeScreen() {
   const childLogoHandledPress = React.useRef(false);
 
   // Load store state
-  const { subscriptions, stats, loadSubscriptions, removeSubscription, isLoaded } =
+  const { subscriptions, stats, loadSubscriptions, removeSubscription, isLoaded, vault } =
     useSubscriptionStore();
   const [sortBy, setSortBy] = useState<"date" | "price" | "name">("date");
   const [cardPage, setCardPage] = useState(0);
   const [explanationType, setExplanationType] = useState<ExplanationType | null>(null);
+  const [showSavingsSheet, setShowSavingsSheet] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     "Due This Month": true,
     "Due Next Month": true,
     "Due Later": false,
     "Paused": false,
   });
-
   const toggleSection = (title: string) => {
     Haptics.selectionAsync();
     setExpandedSections((prev) => ({
@@ -310,8 +312,6 @@ export default function HomeScreen() {
       pointerEvents: footerProgress.value < 0.5 ? "none" : "auto",
     };
   });
-
-
 
   useFocusEffect(
     React.useCallback(() => {
@@ -515,12 +515,36 @@ export default function HomeScreen() {
           Overview
         </AppText>
         <View style={styles.headerRight}>
-          {/* 2/6 Progress Circle */}
-          <View style={styles.progressCircle}>
-            <AppText style={styles.progressText}>
-              {stats.activeCount}/{subscriptions.length}
-            </AppText>
-          </View>
+          {/* Savings Vault Button */}
+          <TouchableOpacity
+            style={[
+              styles.vaultHeaderBtn,
+              vault.vaultMode === "saved" && vault.totalSavings > 0
+                ? styles.vaultHeaderBtnGreen
+                : styles.vaultHeaderBtnBlue,
+            ]}
+            activeOpacity={0.75}
+            onPress={() => {
+              Haptics.selectionAsync();
+              setShowSavingsSheet(true);
+            }}
+            accessibilityLabel="Open Savings Vault"
+            accessibilityRole="button"
+            accessibilityHint="Shows your savings breakdown"
+          >
+            {vault.vaultMode === "saved" && vault.totalSavings > 0 ? (
+              <>
+                <PiggyBank size={15} color="#30D158" strokeWidth={2.4} />
+                <AppText style={styles.vaultHeaderText}>
+                  {currencySymbol}{vault.totalSavings >= 1000
+                    ? `${(vault.totalSavings / 1000).toFixed(1)}k`
+                    : vault.totalSavings.toFixed(0)}
+                </AppText>
+              </>
+            ) : (
+              <PiggyBank size={16} color="rgba(255,255,255,0.5)" strokeWidth={2} />
+            )}
+          </TouchableOpacity>
           {/* Profile Button */}
           <TouchableOpacity
             style={styles.profileBtn}
@@ -626,7 +650,7 @@ export default function HomeScreen() {
                       </AppText>
                     </View>
 
-                    {/* 2. Divider line with explicit gap above & below */}
+                    {/* 2. Divider line */}
                     <View style={styles.cardHairline} />
 
                     {/* 3. Lower Part */}
@@ -715,16 +739,7 @@ export default function HomeScreen() {
                     Haptics.selectionAsync();
                     setExplanationType("annual");
                   }}
-                  style={[
-                    styles.infoButton,
-                    {
-                      position: "absolute",
-                      bottom: 16,
-                      right: 16,
-                      zIndex: 100,
-                      elevation: 10,
-                    },
-                  ]}
+                  style={[styles.infoButton, { position: "absolute", bottom: 16, right: 16, zIndex: 100, elevation: 10 }]}
                   accessibilityLabel="Annual explanation info"
                   accessibilityRole="button"
                   accessibilityHint="Shows information about the annual cost estimation"
@@ -1091,6 +1106,13 @@ export default function HomeScreen() {
         type={explanationType}
         currencySymbol={currencySymbol}
       />
+
+      <SavingsBottomSheet
+        visible={showSavingsSheet}
+        onClose={() => setShowSavingsSheet(false)}
+        vault={vault}
+        currencySymbol={currencySymbol}
+      />
     </View>
   );
 }
@@ -1114,22 +1136,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
   },
-  progressCircle: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    borderWidth: 3,
-    borderColor: "rgba(255, 255, 255, 0.15)",
-    borderTopColor: colors.accent,
-    borderLeftColor: colors.accent,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  progressText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: colors.white,
-  },
   profileBtn: {
     width: 46,
     height: 46,
@@ -1140,6 +1146,30 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     marginLeft: spacing[12],
+  },
+  vaultHeaderBtn: {
+    height: 46,
+    borderRadius: 23,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.07)",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+  },
+  vaultHeaderBtnGreen: {
+    backgroundColor: "rgba(48, 209, 88, 0.12)",
+    borderColor: "rgba(48, 209, 88, 0.15)",
+    paddingHorizontal: 14,
+  },
+  vaultHeaderBtnBlue: {
+    backgroundColor: "rgba(255, 255, 255, 0.11)",
+    width: 46,
+  },
+  vaultHeaderText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#30D158",
   },
   profileInitials: {
     fontSize: 15,

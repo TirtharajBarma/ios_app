@@ -72,3 +72,6 @@ export type { SwipeDownSheetProps } from "./SwipeDownSheet";
 
 export { default as OverviewExplanationSheet } from "./OverviewExplanationSheet";
 export type { OverviewExplanationSheetProps, ExplanationType } from "./OverviewExplanationSheet";
+
+export { default as SavingsBottomSheet } from "./SavingsBottomSheet";
+export type { SavingsBottomSheetProps } from "./SavingsBottomSheet";

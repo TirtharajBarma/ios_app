@@ -11,6 +11,17 @@ import { scheduleReminder, cancelReminder, cancelAllReminders, scheduleAllRemind
 import AsyncStorage from "@/utils/storage";
 import { getExchangeRates } from "@/utils/currency";
 import { triggerAutoBackup } from "@/utils/backup";
+import { computeSavings, type SavingsResult } from "@/utils/savings";
+
+export interface VaultState {
+  totalSavings: number;
+  savingsBreakdown: SavingsResult["savingsBreakdown"];
+  vaultMode: "saved" | "advisor";
+  advisorType: "trials" | "splits" | "suggestions" | null;
+  trialWarnings: SavingsResult["trialWarnings"];
+  splitSavings: SavingsResult["splitSavings"];
+  advisorMessage: string;
+}
 
 interface SubscriptionState {
   /** In-memory list, sorted by next billing date (ascending). */
@@ -19,6 +30,9 @@ interface SubscriptionState {
   stats: SubscriptionStats;
   /** Whether the initial load from SQLite has completed. */
   isLoaded: boolean;
+
+  /** Savings vault state */
+  vault: VaultState;
 
   // ─── async actions ───────────────────────────────────────────────
   loadSubscriptions: () => Promise<void>;
@@ -156,12 +170,41 @@ function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 }
 
+const initialVault: VaultState = {
+  totalSavings: 0,
+  savingsBreakdown: [],
+  vaultMode: "advisor",
+  advisorType: "suggestions",
+  trialWarnings: [],
+  splitSavings: [],
+  advisorMessage: "",
+};
+
+async function refreshVault(subscriptions: Subscription[]): Promise<VaultState> {
+  try {
+    const result = await computeSavings(subscriptions);
+    return {
+      totalSavings: result.totalSavings,
+      savingsBreakdown: result.savingsBreakdown,
+      vaultMode: result.vaultMode,
+      advisorType: result.advisorType,
+      trialWarnings: result.trialWarnings,
+      splitSavings: result.splitSavings,
+      advisorMessage: result.advisorMessage,
+    };
+  } catch (e) {
+    console.error("Failed to compute savings:", e);
+    return initialVault;
+  }
+}
+
 let loadPromise: Promise<void> | null = null;
 
 export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
   subscriptions: [],
   stats: { count: 0, monthlyTotal: 0, yearlyTotal: 0, nextRenewalDate: null, activeCount: 0, trialCount: 0 },
   isLoaded: false,
+  vault: initialVault,
 
   loadSubscriptions: async () => {
     if (loadPromise) return loadPromise;
@@ -246,7 +289,8 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
           ? new Date(b.nextBillingDate).getTime() : Infinity;
         return timeA - timeB;
       });
-      set({ subscriptions, stats: computeStats(subscriptions), isLoaded: true });
+      const vault = await refreshVault(subscriptions);
+      set({ subscriptions, stats: computeStats(subscriptions), isLoaded: true, vault });
     })();
 
     try {
@@ -275,6 +319,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     });
     scheduleReminder(sub).catch(() => {});
     triggerAutoBackup(currentSubscriptions).catch(() => {});
+    refreshVault(currentSubscriptions).then((vault) => set({ vault }));
     return sub;
   },
 
@@ -352,6 +397,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
           }
           return state;
         });
+        currentSubscriptions = get().subscriptions;
 
         // Reschedule reminders for the new renewal date
         const subForReminder = { ...updatedSub, nextBillingDate: nextDate };
@@ -361,6 +407,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
       }
     }
     triggerAutoBackup(currentSubscriptions).catch(() => {});
+    refreshVault(currentSubscriptions).then((vault) => set({ vault }));
   },
 
   removeSubscription: async (id) => {
@@ -374,6 +421,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
       return { subscriptions, stats: computeStats(subscriptions) };
     });
     triggerAutoBackup(currentSubscriptions).catch(() => {});
+    refreshVault(currentSubscriptions).then((vault) => set({ vault }));
   },
 
   convertAllCurrencies: async (oldCurrency, newCurrency) => {
@@ -445,6 +493,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     
     set({ subscriptions: updatedSubs, stats: computeStats(updatedSubs) });
     triggerAutoBackup(updatedSubs).catch(() => {});
+    refreshVault(updatedSubs).then((vault) => set({ vault }));
   },
 
   updateReminderDaysForDefaultTiming: async (prevDays: number, newDays: number) => {
@@ -509,9 +558,11 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
       return timeA - timeB;
     });
     
+    const vault = await refreshVault(createdSubs);
     set({
       subscriptions: createdSubs,
       stats: computeStats(createdSubs),
+      vault,
     });
     
     await scheduleAllReminders(createdSubs).catch(() => {});

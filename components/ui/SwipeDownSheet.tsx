@@ -2,21 +2,20 @@
  * SwipeDownSheet
  *
  * A gesture-driven bottom sheet that closes with an iOS-style swipe-down.
- * Built on `react-native-gesture-handler` + `react-native-reanimated` so it
- * works smoothly with the existing GestureHandlerRootView in `_layout.tsx`.
+ * Built on `react-native-gesture-handler` + `react-native-reanimated`.
  *
  * - Drag down anywhere on the sheet to dismiss.
  * - Flick = instant dismiss; small drag snaps back.
  * - Backdrop fades proportionally as the sheet is pulled.
- * - **Smooth close**: the sheet animates off-screen *before* unmounting, so
- *   you never see a snap-to-gone.
+ * - Always stays mounted so gesture handlers never unmount/remount.
+ *   Hidden via translateY + pointerEvents when not visible.
  *
  * Usage:
  *   <SwipeDownSheet visible={open} onClose={() => setOpen(false)}>
  *     {content}
  *   </SwipeDownSheet>
  */
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef } from "react";
 import { StyleSheet, View, ViewStyle, StyleProp, useWindowDimensions } from "react-native";
 import {
   GestureDetector,
@@ -36,7 +35,6 @@ export interface SwipeDownSheetProps {
   visible: boolean;
   onClose: () => void;
   children: React.ReactNode;
-  /** Style applied to the sheet container (the dark panel). */
   containerStyle?: StyleProp<ViewStyle>;
   /** Height as a fraction of screen. Default 0.84. */
   heightRatio?: number;
@@ -44,9 +42,8 @@ export interface SwipeDownSheetProps {
 
 const SPRING_OPEN = { damping: 45, stiffness: 320, mass: 0.8 };
 const SPRING_CLOSE = { damping: 38, stiffness: 380, mass: 0.6 };
-const CLOSE_THRESHOLD = 80; // px dragged before dismiss
-const CLOSE_VELOCITY = 600; // px/s flick dismisses regardless of distance
-const ANIM_CLOSE_MS = 240; // time to animate off-screen before unmount
+const CLOSE_THRESHOLD = 80;
+const CLOSE_VELOCITY = 600;
 
 export default function SwipeDownSheet({
   visible,
@@ -55,54 +52,54 @@ export default function SwipeDownSheet({
   containerStyle,
   heightRatio = 0.84,
 }: SwipeDownSheetProps) {
-  // Internal "showing" state: true while `visible` is true AND during the
-  // close animation.  Set to false only after the close animation finishes,
-  // so React doesn't unmount the sheet mid-animation.
-  const [showing, setShowing] = useState(false);
-  const isClosingRef = React.useRef(false);
-
-  const translateY = useSharedValue(0);
-  const backdropOpacity = useSharedValue(0);
-
   const { height: SCREEN_HEIGHT } = useWindowDimensions();
 
-  // ── Open / Close lifecycle ──────────────────────────────────────────
-  const prevVisible = React.useRef(visible);
+  // Start off-screen so the sheet is invisible on mount.
+  const translateY = useSharedValue(SCREEN_HEIGHT);
+  const backdropOpacity = useSharedValue(0);
+
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  const prevVisible = useRef(visible);
+  const gestureClosing = useRef(false);
+
+  // ── Animated helpers ────────────────────────────────────────────────
+  const animateOpen = useCallback(() => {
+    translateY.value = SCREEN_HEIGHT;
+    translateY.value = withSpring(0, SPRING_OPEN);
+    backdropOpacity.value = withTiming(1, { duration: 240 });
+  }, [backdropOpacity, translateY, SCREEN_HEIGHT]);
+
+  const animateClose = useCallback(() => {
+    backdropOpacity.value = withTiming(0, { duration: 200 });
+    translateY.value = withSpring(SCREEN_HEIGHT, SPRING_CLOSE);
+  }, [backdropOpacity, translateY, SCREEN_HEIGHT]);
+
+  // ── Prop-driven open / close ────────────────────────────────────────
   useEffect(() => {
     if (visible && !prevVisible.current) {
-      // Opening: show the sheet immediately, then spring into position.
-      isClosingRef.current = false;
-      setShowing(true);
-      translateY.value = SCREEN_HEIGHT;
-      translateY.value = withSpring(0, SPRING_OPEN);
-      backdropOpacity.value = withTiming(1, { duration: 240 });
+      gestureClosing.current = false;
+      animateOpen();
     } else if (!visible && prevVisible.current) {
-      // Programmatic close (Done button, etc.) — animate off-screen.
-      if (!isClosingRef.current) {
-        isClosingRef.current = true;
-        backdropOpacity.value = withTiming(0, { duration: 200 });
-        translateY.value = withSpring(SCREEN_HEIGHT, SPRING_CLOSE, () => {
-          runOnJS(handleAnimationEnd)();
-        });
+      if (!gestureClosing.current) {
+        animateClose();
       }
     }
     prevVisible.current = visible;
-  }, [visible, backdropOpacity, translateY, SCREEN_HEIGHT]);
+  }, [visible, animateOpen, animateClose]);
 
-  const handleAnimationEnd = () => {
-    setShowing(false);
-  };
+  // ── Gesture dismiss ────────────────────────────────────────────────
+  const dismiss = useCallback(() => {
+    gestureClosing.current = true;
+    animateClose();
+    onCloseRef.current();
+  }, [animateClose]);
 
-  // Called from worklet to fire after close animation finishes.
-  const finishClose = () => {
-    isClosingRef.current = true;
-    runOnJS(onClose)();
-  };
-
-  // ── Gesture ─────────────────────────────────────────────────────────
   const pan = Gesture.Pan()
     .activeOffsetY(6)
     .onUpdate((e) => {
+      "worklet";
       translateY.value = Math.max(0, e.translationY);
       backdropOpacity.value = interpolate(
         translateY.value,
@@ -112,29 +109,21 @@ export default function SwipeDownSheet({
       );
     })
     .onEnd((e) => {
+      "worklet";
       if (translateY.value > CLOSE_THRESHOLD || e.velocityY > CLOSE_VELOCITY) {
-        // Animate fully off-screen
-        backdropOpacity.value = withTiming(0, { duration: 200 });
-        translateY.value = withSpring(999, SPRING_CLOSE, () => {
-          runOnJS(handleAnimationEnd)();
-        });
-        runOnJS(finishClose)();
+        runOnJS(dismiss)();
       } else {
-        // Snap back
         translateY.value = withSpring(0, SPRING_OPEN);
         backdropOpacity.value = withTiming(1, { duration: 160 });
       }
     });
 
   const backdropTap = Gesture.Tap().onEnd(() => {
-    backdropOpacity.value = withTiming(0, { duration: 200 });
-    translateY.value = withSpring(999, SPRING_CLOSE, () => {
-      runOnJS(handleAnimationEnd)();
-    });
-    runOnJS(finishClose)();
+    "worklet";
+    runOnJS(dismiss)();
   });
 
-  // ── Animated styles ─────────────────────────────────────────────────
+  // ── Animated styles ────────────────────────────────────────────────
   const sheetStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: translateY.value }],
   }));
@@ -143,17 +132,15 @@ export default function SwipeDownSheet({
     opacity: backdropOpacity.value,
   }));
 
-  // Don't render at all when fully hidden.
-  if (!showing) return null;
-
   return (
-    <View style={styles.overlay}>
-      {/* Backdrop */}
+    <View
+      style={styles.overlay}
+      pointerEvents={visible ? "auto" : "none"}
+    >
       <GestureDetector gesture={backdropTap}>
         <Animated.View style={[styles.backdrop, backdropStyle]} />
       </GestureDetector>
 
-      {/* Sheet */}
       <GestureDetector gesture={pan}>
         <Animated.View
           style={[
@@ -163,7 +150,6 @@ export default function SwipeDownSheet({
             containerStyle,
           ]}
         >
-          {/* Drag handle */}
           <Animated.View style={styles.handle} />
           {children}
         </Animated.View>
