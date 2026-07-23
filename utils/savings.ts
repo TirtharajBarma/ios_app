@@ -1,4 +1,4 @@
-import { parseISO, startOfDay, differenceInCalendarDays } from "date-fns";
+import { parseISO, startOfDay, differenceInCalendarDays, differenceInCalendarMonths } from "date-fns";
 import type { Subscription } from "@/types/subscription";
 import { getSubscriptionActivePrice } from "@/utils/date";
 import * as db from "@/database/database";
@@ -67,13 +67,13 @@ function computeExpectedCycles(
   } else if (cycleLower === "bi-weekly") {
     periodsPerCycle = diffDays / 14;
   } else if (cycleLower === "monthly") {
-    periodsPerCycle = diffDays / 30.44;
+    periodsPerCycle = differenceInCalendarMonths(today, start);
   } else if (cycleLower === "quarterly") {
-    periodsPerCycle = diffDays / 91.31;
+    periodsPerCycle = Math.floor(differenceInCalendarMonths(today, start) / 3);
   } else if (cycleLower === "semi-yearly") {
-    periodsPerCycle = diffDays / 182.62;
+    periodsPerCycle = Math.floor(differenceInCalendarMonths(today, start) / 6);
   } else if (cycleLower === "yearly") {
-    periodsPerCycle = diffDays / 365.25;
+    periodsPerCycle = Math.floor(differenceInCalendarMonths(today, start) / 12);
   } else if (cycleLower.startsWith("custom:")) {
     const parts = cycleLower.split(":");
     const val = Number(parts[1]) || 1;
@@ -125,14 +125,14 @@ export async function computeSavings(
       }
 
       const skippedCycles = Math.max(0, expectedCycles - actualTransactions);
-      const saved = skippedCycles * sub.price;
+      const saved = skippedCycles * activePrice;
 
       if (skippedCycles > 0 && saved > 0) {
         savingsBreakdown.push({
           subscriptionId: sub.id,
           name: sub.name,
           status: "paused",
-          monthlyPrice: sub.price,
+          monthlyPrice: activePrice,
           monthsSkipped: skippedCycles,
           totalSaved: saved,
           logoUrl: sub.logoUrl,

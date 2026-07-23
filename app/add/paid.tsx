@@ -633,7 +633,7 @@ export default function UnifiedFormScreen() {
       Alert.alert("Error", "Please enter subscription name");
       return;
     }
-    if (!isTrial && renewing && (!amount || Number(amount) <= 0)) {
+    if (!isTrial && renewing && (!amount || isNaN(Number(amount)) || Number(amount) <= 0)) {
       Alert.alert("Error", "Please enter a valid subscription amount");
       return;
     }
@@ -745,7 +745,11 @@ export default function UnifiedFormScreen() {
       if (isEditMode && editId) await updateSubscription(editId, input);
       else await addSubscription(input);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      router.dismissAll();
+      if (router.canGoBack()) {
+        router.back();
+      } else {
+        router.replace("/(tabs)");
+      }
     } catch (e) {
       console.error("Save subscription failed:", e);
       Alert.alert(

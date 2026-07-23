@@ -13,6 +13,7 @@
 import React, { memo, useEffect } from "react";
 import { View, type StyleProp, type ViewStyle } from "react-native";
 import Animated, {
+  cancelAnimation,
   useSharedValue,
   useAnimatedStyle,
   withRepeat,
@@ -44,6 +45,7 @@ function SkeletonBox({
       -1,
       true,
     );
+    return () => cancelAnimation(opacity);
   }, [opacity]);
 
   const anim = useAnimatedStyle(() => ({

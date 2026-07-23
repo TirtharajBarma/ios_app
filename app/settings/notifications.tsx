@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import {
   View,
   StyleSheet,
@@ -40,6 +40,11 @@ export default function NotificationsScreen() {
   const { subscriptions } = useSubscriptionStore();
 
   // Automatically synchronize state with iOS Notification Center status when screen mounts or app resumes
+  const notificationsEnabledRef = useRef(notificationsEnabled);
+  useEffect(() => {
+    notificationsEnabledRef.current = notificationsEnabled;
+  });
+
   useEffect(() => {
     async function syncSystemPermission() {
       if (!isNotificationsAvailable) return;
@@ -49,7 +54,7 @@ export default function NotificationsScreen() {
         const isGranted = status === "granted";
         
         // Revoke state only if system permission is denied but app thinks they are enabled
-        if (!isGranted && notificationsEnabled) {
+        if (!isGranted && notificationsEnabledRef.current) {
           await setNotificationsEnabled(false);
           await cancelAllReminders();
         }
@@ -69,7 +74,7 @@ export default function NotificationsScreen() {
     return () => {
       appStateSub.remove();
     };
-  }, [notificationsEnabled]);
+  }, []);
 
   // Toggle notifications on/off — request permission if enabling, cancel all if disabling
   const handleToggle = async (val: boolean) => {

@@ -18,11 +18,11 @@ import {
   Percent,
   Pause,
 } from "lucide-react-native";
-import { format, parseISO, addDays, addWeeks, addMonths, addYears, startOfDay } from "date-fns";
+import { format, parseISO } from "date-fns";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 
-import { colors, spacing, radius, getCurrencySymbol } from "@/constants";
+import { colors, spacing, getCurrencySymbol } from "@/constants";
 import { AppText, LogoCircle, Toggle, PressableScale } from "@/components/ui";
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
 import { getSubscriptionActivePrice } from "@/utils/date";
@@ -42,7 +42,7 @@ export default function SubscriptionDetailScreen() {
   const [totalSpent, setTotalSpent] = React.useState<number>(0);
 
   React.useEffect(() => {
-    if (!subscription) return;
+    if (!subscription || !id) return;
     let isMounted = true;
     db.getTransactionsBySubscriptionId(id).then((rows) => {
       if (!isMounted) return;
