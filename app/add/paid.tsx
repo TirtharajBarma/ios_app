@@ -22,6 +22,9 @@ import {
   ChevronRight,
   ArrowUpDown,
   RotateCcw,
+  Palette,
+  Smile,
+  ImagePlus,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { format, addMonths, addYears } from "date-fns";
@@ -1583,7 +1586,7 @@ export default function UnifiedFormScreen() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.sheetScroll}
         >
-          {/* Card Preview */}
+          {/* Large Live Preview */}
           <Animated.View
             style={[
               styles.previewCard,
@@ -1605,23 +1608,79 @@ export default function UnifiedFormScreen() {
             </View>
           </Animated.View>
 
-          {/* Brand Logo (bundled catalog variants) */}
-          <View style={styles.pickerSection}>
-            <AppText
-              variant="subheadline"
-              weight="600"
-              color={colors.textSecondary}
-            >
-              Brand Logo
+          {/* Card Background */}
+          <View style={styles.sheetSection}>
+            <AppText variant="caption2" weight="600" color={colors.textMuted} style={styles.sheetSectionCaption}>
+              CARD COLORS
             </AppText>
-            {brandService?.logoVariants?.length ? (
-              <>
-                <View style={styles.logoVariationRow}>
+            <View style={styles.customizeContainer}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.colorRow}
+              >
+                <TouchableOpacity
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    setColorEditValue(selectedColor);
+                    setShowColorEditModal(true);
+                  }}
+                  accessibilityLabel="Custom color"
+                  accessibilityRole="button"
+                  style={[
+                    styles.colorBubble,
+                    styles.colorBubbleCustom,
+                    !PRESET_COLORS.some(
+                      (c) => c.toLowerCase() === selectedColor.toLowerCase(),
+                    ) && styles.colorBubbleSelected,
+                  ]}
+                >
+                  <Palette size={16} color={colors.accent} />
+                </TouchableOpacity>
+                {PRESET_COLORS.map((c) => {
+                  const isActive =
+                    selectedColor.toLowerCase() === c.toLowerCase();
+                  return (
+                    <TouchableOpacity
+                      key={c}
+                      onPress={() => {
+                        Haptics.selectionAsync();
+                        setSelectedColor(c);
+                      }}
+                      accessibilityLabel={`Color ${c}`}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: isActive }}
+                      style={[
+                        styles.colorBubble,
+                        { backgroundColor: c },
+                        isActive && styles.colorBubbleSelected,
+                      ]}
+                    >
+                      {isActive && <View style={styles.colorBubbleActiveInner} />}
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          </View>
+
+          {/* Brand Logo Variants */}
+          <View style={styles.sheetSection}>
+            <AppText variant="caption2" weight="600" color={colors.textMuted} style={styles.sheetSectionCaption}>
+              BRAND LOGOS
+            </AppText>
+            <View style={styles.customizeContainer}>
+              {brandService?.logoVariants?.length ? (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.logoVariationRow}
+                >
                   {brandService.logoVariants.map((v) => (
                     <TouchableOpacity
                       key={v.key}
                       onPress={() => handleSelectBrandVariant(v.key)}
-                      accessibilityLabel={`${v.label} brand logo`}
+                      accessibilityLabel={`${brandService.name} brand logo`}
                       accessibilityRole="radio"
                       accessibilityState={{ selected: brandVariant === v.key }}
                       style={[
@@ -1637,46 +1696,23 @@ export default function UnifiedFormScreen() {
                         size={56}
                         website={brandService.website}
                       />
-                      <AppText
-                        variant="caption1"
-                        color={
-                          brandVariant === v.key
-                            ? colors.accent
-                            : colors.textSecondary
-                        }
-                        style={{ marginTop: 6 }}
-                      >
-                        {v.label}
-                      </AppText>
                     </TouchableOpacity>
                   ))}
-                </View>
-                {hasCustomLogo && (
-                  <AppText
-                    variant="caption1"
-                    color={colors.textMuted}
-                    style={{ marginTop: 4 }}
-                  >
-                    Selecting a brand logo clears the custom logo below.
-                  </AppText>
-                )}
-              </>
-            ) : (
-              <AppText variant="caption1" color={colors.textMuted}>
-                No bundled brand logos for this service.
-              </AppText>
-            )}
+                </ScrollView>
+              ) : (
+                <AppText
+                  variant="caption1"
+                  color={colors.textMuted}
+                  style={styles.emptyVariantText}
+                >
+                  No brand logos for this service
+                </AppText>
+              )}
+            </View>
           </View>
 
-          {/* Custom Logo (user override) */}
-          <View style={styles.pickerSection}>
-            <AppText
-              variant="subheadline"
-              weight="600"
-              color={colors.textSecondary}
-            >
-              Custom Logo
-            </AppText>
+          {/* Custom Logo */}
+          <View style={styles.sheetSection}>
             <View style={styles.sheetButtonsRow}>
               <TouchableOpacity
                 onPress={() => {
@@ -1691,9 +1727,7 @@ export default function UnifiedFormScreen() {
                   Boolean(logoIcon) && styles.sheetActionButtonActive,
                 ]}
               >
-                <AppText variant="title3" style={styles.sheetActionIcon}>
-                  🍿
-                </AppText>
+                <Smile size={26} color={colors.accent} />
                 <AppText variant="subheadline" weight="700" color={colors.white}>
                   Pick icon
                 </AppText>
@@ -1708,9 +1742,7 @@ export default function UnifiedFormScreen() {
                   Boolean(logoImageUri) && styles.sheetActionButtonActive,
                 ]}
               >
-                <AppText variant="title3" style={styles.sheetActionIcon}>
-                  🖼️
-                </AppText>
+                <ImagePlus size={26} color={colors.accent} />
                 <AppText variant="subheadline" weight="700" color={colors.white}>
                   Choose image
                 </AppText>
@@ -1729,53 +1761,6 @@ export default function UnifiedFormScreen() {
                 </AppText>
               </TouchableOpacity>
             )}
-          </View>
-
-          {/* Color Picker */}
-          <View style={styles.pickerSection}>
-            <AppText
-              variant="subheadline"
-              weight="600"
-              color={colors.textSecondary}
-            >
-              Card Background
-            </AppText>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.colorRow}
-            >
-              {PRESET_COLORS.map((c) => {
-                const isActive =
-                  selectedColor.toLowerCase() === c.toLowerCase();
-                return (
-                  <TouchableOpacity
-                    key={c}
-                    onPress={() => {
-                      Haptics.selectionAsync();
-                      setSelectedColor(c);
-                    }}
-                    accessibilityLabel={`Color ${c}`}
-                    accessibilityRole="radio"
-                    style={[styles.colorBubble, { backgroundColor: c }]}
-                  >
-                    {isActive && <View style={styles.colorBubbleActiveInner} />}
-                  </TouchableOpacity>
-                );
-              })}
-              <TouchableOpacity
-                onPress={() => {
-                  Haptics.selectionAsync();
-                  setColorEditValue(selectedColor);
-                  setShowColorEditModal(true);
-                }}
-                accessibilityLabel="Custom color"
-                accessibilityRole="button"
-                style={[styles.colorBubble, styles.colorBubbleCustom]}
-              >
-                <ArrowUpDown size={14} color={colors.textSecondary} />
-              </TouchableOpacity>
-            </ScrollView>
           </View>
         </ScrollView>
       </SwipeDownSheet>
@@ -2664,9 +2649,27 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: 20,
   },
-  sheetScroll: { gap: 24, paddingBottom: 40 },
+  sheetScroll: { gap: 20, paddingBottom: 40 },
+  sheetSection: { gap: 10 },
+  sheetSectionCaption: {
+    marginLeft: 4,
+    letterSpacing: 0.5,
+  },
+  customizeContainer: {
+    backgroundColor: "#2C2C2E",
+    borderRadius: 20,
+    borderWidth: 0.5,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    paddingVertical: 14,
+    paddingLeft: 14,
+  },
+  emptyVariantText: {
+    paddingVertical: spacing[4],
+    paddingHorizontal: spacing[4],
+  },
   previewCard: {
-    height: 260,
+    width: "100%",
+    aspectRatio: 1.5,
     borderRadius: 24,
     justifyContent: "center",
     alignItems: "center",
@@ -2683,14 +2686,17 @@ const styles = StyleSheet.create({
     paddingVertical: spacing[8],
     borderRadius: 999,
   },
-  pickerSection: { gap: 10 },
-  colorRow: { gap: 12, paddingVertical: 4 },
+  colorRow: { gap: 12, paddingVertical: 2, paddingRight: 14 },
   colorBubble: {
     width: 38,
     height: 38,
     borderRadius: 19,
     alignItems: "center",
     justifyContent: "center",
+  },
+  colorBubbleSelected: {
+    borderWidth: 2,
+    borderColor: colors.accent,
   },
   colorBubbleActiveInner: {
     width: 10,
@@ -2699,35 +2705,40 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
   },
   colorBubbleCustom: {
-    backgroundColor: "#2C2C2E",
+    backgroundColor: "rgba(255,255,255,0.08)",
     borderWidth: 1,
-    borderColor: "#3A3A3C",
+    borderColor: "rgba(255,255,255,0.15)",
   },
-  logoVariationRow: { flexDirection: "row", gap: 16, paddingVertical: 4 },
+  logoVariationRow: {
+    flexDirection: "row",
+    gap: 14,
+    paddingVertical: 2,
+    paddingRight: 14,
+  },
   logoVarItem: {
     borderWidth: 2,
     borderColor: "transparent",
     borderRadius: 999,
-    padding: 2,
+    padding: 3,
   },
   logoVarItemActive: { borderColor: colors.accent },
-  sheetButtonsRow: { flexDirection: "row", gap: 12, marginTop: spacing[8] },
+  sheetButtonsRow: { flexDirection: "row", gap: 12 },
   sheetActionButton: {
     flex: 1,
     backgroundColor: "#2C2C2E",
     borderWidth: 0.5,
     borderColor: "rgba(255, 255, 255, 0.08)",
-    borderRadius: 16,
-    padding: 16,
+    borderRadius: 20,
+    paddingVertical: 20,
+    paddingHorizontal: 16,
     alignItems: "center",
-    gap: spacing[8],
+    gap: spacing[12],
   },
   sheetActionButtonActive: {
     borderWidth: 1.5,
     borderColor: colors.accent,
     backgroundColor: "rgba(10, 132, 255, 0.12)",
   },
-  sheetActionIcon: { fontSize: 28 },
   useBrandLogoButton: {
     flexDirection: "row",
     alignItems: "center",
