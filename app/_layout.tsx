@@ -140,7 +140,7 @@ export default function RootLayout() {
           name="add/paid"
           options={{
             headerShown: false,
-            animation: "slide_from_right",
+            animation: "simple_push",
             gestureEnabled: true,
           }}
         />
@@ -148,7 +148,7 @@ export default function RootLayout() {
           name="subscription/[id]"
           options={{
             headerShown: false,
-            animation: "slide_from_right",
+            animation: "simple_push",
             gestureEnabled: true,
           }}
         />
@@ -156,7 +156,7 @@ export default function RootLayout() {
           name="subscriptions"
           options={{
             headerShown: false,
-            animation: "slide_from_right",
+            animation: "simple_push",
             gestureEnabled: true,
           }}
         />

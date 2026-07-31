@@ -128,10 +128,10 @@ const ListItem = forwardRef<View, ListItemProps>(function ListItem(
         accessibilityRole={onPress ? "button" : undefined}
         {...rest}
       >
-        {leading && <View style={{ marginRight: spacing[12] }}>{leading}</View>}
+        {leading && <View style={{ marginRight: spacing[8] }}>{leading}</View>}
 
         <View style={{ flex: 1 }}>
-          <AppText variant="body" weight="500" numberOfLines={1}>
+          <AppText variant="body" weight="500" numberOfLines={1} style={{ paddingLeft: spacing[2] }}>
             {title}
           </AppText>
           {subtitle && (

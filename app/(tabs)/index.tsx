@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
   View,
   StyleSheet,
@@ -6,6 +6,8 @@ import {
   TouchableOpacity,
   Pressable,
   Alert,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
 } from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
 import {
@@ -48,7 +50,7 @@ import { colors, spacing, radius, getCurrencySymbol, textStyleFor, hexToRGBA } f
 import {
   EmptyState,
   AppText,
-  LogoCircle,
+  SubscriptionLogo,
   PressableScale,
   OverviewExplanationSheet,
   ExplanationType,
@@ -59,6 +61,7 @@ import { useSubscriptionStore } from "@/store/useSubscriptionStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { getSubscriptionActivePrice, toMonthly } from "@/utils/date";
 import { LinearGradient } from "expo-linear-gradient";
+import { BlurView } from "expo-blur";
 
 const MONTH_NAMES = [
   "Jan",
@@ -250,13 +253,11 @@ function FloatingActiveLogo({
         accessibilityRole="button"
         accessibilityHint="Tap to view subscription details"
       >
-        <LogoCircle
-          source={sub.logoUrl}
+        <SubscriptionLogo
+          fields={sub}
           name={sub.name}
           color={sub.color}
           size={config.size}
-          bordered
-          website={sub.website}
         />
       </Animated.View>
     </GestureDetector>
@@ -292,10 +293,20 @@ export default function HomeScreen() {
     }));
   };
   const footerProgress = useSharedValue(0);
+  const navbarProgress = useSharedValue(0);
+  const NAVBAR_TRIGGER = 60;
 
   useEffect(() => {
-    footerProgress.value = withTiming(cardPage, { duration: 250 });
+    footerProgress.value = withTiming(cardPage, { duration: 300 });
   }, [cardPage]);
+
+  const animatedNavbarStyle = useAnimatedStyle(() => {
+    const progress = navbarProgress.value;
+    return {
+      opacity: progress,
+      transform: [{ translateY: (progress - 1) * 52 }],
+    };
+  });
 
   const page0Style = useAnimatedStyle(() => {
     return {
@@ -341,6 +352,10 @@ export default function HomeScreen() {
         brandColor: sub.color || "",
         website: sub.website || "",
         logo: sub.logoUrl || "",
+        serviceId: sub.serviceId || "",
+        brandVariant: sub.brandVariant || "",
+        logoIcon: sub.logoIcon || "",
+        logoImageUri: sub.logoImageUri || "",
       },
     });
   };
@@ -496,85 +511,176 @@ export default function HomeScreen() {
 
   return (
     <View style={styles.container}>
-      <LinearGradient
-        colors={["rgba(180, 50, 15, 0.8)", "rgba(0, 0, 0, 0)"]}
-        style={StyleSheet.absoluteFill}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 0.65 }}
-      />
-      {/* Top Header Row */}
-      <View
-        style={[styles.headerRow, { paddingTop: insets.top + spacing[12] }]}
-      >
-        <AppText
-          variant="largeTitle"
-          weight="800"
-          color={colors.white}
-          style={styles.headerTitle}
-        >
-          Overview
-        </AppText>
-        <View style={styles.headerRight}>
-          {/* Savings Vault Button */}
-          <TouchableOpacity
-            style={[
-              styles.vaultHeaderBtn,
-              vault.vaultMode === "saved" && vault.totalSavings > 0
-                ? styles.vaultHeaderBtnGreen
-                : styles.vaultHeaderBtnBlue,
-            ]}
-            activeOpacity={0.75}
-            onPress={() => {
-              Haptics.selectionAsync();
-              setShowSavingsSheet(true);
-            }}
-            accessibilityLabel="Open Savings Vault"
-            accessibilityRole="button"
-            accessibilityHint="Shows your savings breakdown"
-          >
-            {vault.vaultMode === "saved" && vault.totalSavings > 0 ? (
-              <>
-                <PiggyBank size={15} color="#30D158" strokeWidth={2.4} />
-                <AppText style={styles.vaultHeaderText}>
-                  {currencySymbol}{vault.totalSavings >= 1000
-                    ? `${(vault.totalSavings / 1000).toFixed(1)}k`
-                    : vault.totalSavings.toFixed(0)}
-                </AppText>
-              </>
-            ) : (
-              <PiggyBank size={16} color="rgba(255,255,255,0.5)" strokeWidth={2} />
-            )}
-          </TouchableOpacity>
-          {/* Profile Button */}
-          <TouchableOpacity
-            style={styles.profileBtn}
-            activeOpacity={0.75}
-            onPress={() => {
-              Haptics.selectionAsync();
-              router.push("/settings");
-            }}
-            accessibilityLabel="Open Settings"
-            accessibilityRole="button"
-            accessibilityHint="Navigates to the Settings screen"
-          >
-            {userName ? (
-              <AppText style={styles.profileInitials}>
-                {userName.trim().split(" ").filter(Boolean).map((w: string) => w[0]).join("").toUpperCase().slice(0, 2)}
-              </AppText>
-            ) : (
-              <User size={18} color={colors.white} />
-            )}
-          </TouchableOpacity>
-        </View>
+      {/* ── Base blur: full screen, masked to fade smoothly ── */}
+      <View style={styles.baseBlurContainer}>
+        <BlurView intensity={55} tint="dark" style={{ flex: 1 }} />
       </View>
+      {/* Gradient mask: solid black at bottom hides the blur edge completely */}
+      <LinearGradient
+        colors={[
+          "rgba(0,0,0,0)",
+          "rgba(0,0,0,0)",
+          "rgba(0,0,0,0.4)",
+          "rgba(0,0,0,0.85)",
+          "#000000",
+        ]}
+        locations={[0, 0.12, 0.32, 0.52, 0.7]}
+        style={styles.blurMask}
+        pointerEvents="none"
+      />
+
+      {/* ── Warm glow on top ─────────────────────────── */}
+      <LinearGradient
+        colors={["rgba(180, 50, 15, 0.5)", "rgba(180, 50, 15, 0.1)", "transparent"]}
+        locations={[0, 0.25, 0.6]}
+        style={styles.blurMask}
+        pointerEvents="none"
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 0.6 }}
+      />
+
+      {/* ── Sticky Blur Navbar (appears on scroll) ─────────────────── */}
+      <Animated.View
+        style={[
+          styles.stickyNavbar,
+          animatedNavbarStyle,
+        ]}
+      >
+        <BlurView intensity={90} tint="dark" style={[styles.stickyNavbarBlur, { paddingTop: insets.top }]}>
+          <View style={styles.stickyNavbarHairline} />
+          <View style={styles.stickyNavLeft} />
+          <AppText style={styles.stickyNavTitle}>
+            Overview
+          </AppText>
+          <View style={styles.stickyNavRight}>
+            <TouchableOpacity
+              style={[
+                styles.stickyNavBtn,
+                vault.vaultMode === "saved" && vault.totalSavings > 0
+                  ? styles.stickyNavBtnGreen
+                  : styles.stickyNavBtnDefault,
+              ]}
+              activeOpacity={0.75}
+              onPress={() => { Haptics.selectionAsync(); setShowSavingsSheet(true); }}
+              accessibilityLabel="Open Savings Vault"
+              accessibilityRole="button"
+            >
+              {vault.vaultMode === "saved" && vault.totalSavings > 0 ? (
+                <>
+                  <PiggyBank size={14} color="#30D158" strokeWidth={2.5} />
+                  <AppText style={styles.stickyNavVaultText}>
+                    {currencySymbol}{vault.totalSavings >= 1000
+                      ? `${(vault.totalSavings / 1000).toFixed(1)}k`
+                      : vault.totalSavings.toFixed(0)}
+                  </AppText>
+                </>
+              ) : (
+                <PiggyBank size={16} color="rgba(255,255,255,0.55)" strokeWidth={2} />
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.stickyNavBtn, styles.stickyNavBtnDefault]}
+              activeOpacity={0.75}
+              onPress={() => { Haptics.selectionAsync(); router.push("/settings"); }}
+              accessibilityLabel="Open Settings"
+              accessibilityRole="button"
+            >
+              {userName ? (
+                <AppText style={styles.profileInitials}>
+                  {userName.trim().split(" ").filter(Boolean).map((w: string) => w[0]).join("").toUpperCase().slice(0, 2)}
+                </AppText>
+              ) : (
+                <User size={17} color={colors.white} />
+              )}
+            </TouchableOpacity>
+          </View>
+        </BlurView>
+      </Animated.View>
 
       <ScrollView
         showsVerticalScrollIndicator={false}
+        scrollEventThrottle={16}
+        onScroll={(e: NativeSyntheticEvent<NativeScrollEvent>) => {
+          const y = e.nativeEvent.contentOffset.y;
+          const progress = Math.min(Math.max((y - NAVBAR_TRIGGER) / 40, 0), 1);
+          navbarProgress.value = withTiming(progress, { duration: 150 });
+        }}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingBottom: insets.bottom + spacing[40] },
+          { paddingBottom: insets.bottom + spacing[40], paddingTop: insets.top + spacing[12] },
         ]}
+        style={{ zIndex: 1 }}
       >
+        {/* ── Big Scrollable Header ─────────────────────────────────── */}
+        <View style={styles.headerRow}>
+          <View>
+            <AppText
+              variant="largeTitle"
+              weight="800"
+              color={colors.white}
+              style={styles.headerTitle}
+            >
+              Overview
+            </AppText>
+            {subscriptions.length > 0 && (
+              <AppText style={{ fontSize: 13, color: colors.textSecondary, fontWeight: "500", marginTop: 2 }}>
+                {subscriptions.length} tracked subscription{subscriptions.length !== 1 ? "s" : ""}
+              </AppText>
+            )}
+          </View>
+          <View style={styles.headerRight}>
+            {/* Savings Vault Button */}
+            <TouchableOpacity
+              style={[
+                styles.vaultHeaderBtn,
+                vault.vaultMode === "saved" && vault.totalSavings > 0
+                  ? styles.vaultHeaderBtnGreen
+                  : styles.vaultHeaderBtnBlue,
+              ]}
+              activeOpacity={0.75}
+              onPress={() => {
+                Haptics.selectionAsync();
+                setShowSavingsSheet(true);
+              }}
+              accessibilityLabel="Open Savings Vault"
+              accessibilityRole="button"
+              accessibilityHint="Shows your savings breakdown"
+            >
+              {vault.vaultMode === "saved" && vault.totalSavings > 0 ? (
+                <>
+                  <PiggyBank size={15} color="#30D158" strokeWidth={2.4} />
+                  <AppText style={styles.vaultHeaderText}>
+                    {currencySymbol}{vault.totalSavings >= 1000
+                      ? `${(vault.totalSavings / 1000).toFixed(1)}k`
+                      : vault.totalSavings.toFixed(0)}
+                  </AppText>
+                </>
+              ) : (
+                <PiggyBank size={16} color="rgba(255,255,255,0.5)" strokeWidth={2} />
+              )}
+            </TouchableOpacity>
+            {/* Profile Button */}
+            <TouchableOpacity
+              style={styles.profileBtn}
+              activeOpacity={0.75}
+              onPress={() => {
+                Haptics.selectionAsync();
+                router.push("/settings");
+              }}
+              accessibilityLabel="Open Settings"
+              accessibilityRole="button"
+              accessibilityHint="Navigates to the Settings screen"
+            >
+              {userName ? (
+                <AppText style={styles.profileInitials}>
+                  {userName.trim().split(" ").filter(Boolean).map((w: string) => w[0]).join("").toUpperCase().slice(0, 2)}
+                </AppText>
+              ) : (
+                <User size={18} color={colors.white} />
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
         {!isLoaded ? (
           <View style={{ gap: spacing[16], paddingTop: spacing[16] }}>
             <View style={{ flexDirection: "row", gap: spacing[12] }}>
@@ -872,13 +978,11 @@ export default function HomeScreen() {
                         style={styles.upNextGradientFill}
                       >
                         <View style={styles.upNextTop}>
-                          <LogoCircle
-                            source={sub.logoUrl}
+                          <SubscriptionLogo
+                            fields={sub}
                             name={sub.name}
                             color={sub.color}
                             size={44}
-                            bordered
-                            website={sub.website}
                           />
                           <View style={styles.dateBadge}>
                             <View
@@ -946,7 +1050,7 @@ export default function HomeScreen() {
                   }}
                   style={styles.titleChevronRow}
                 >
-                  <AppText style={styles.sectionTitle}>Subscriptions</AppText>
+                  <AppText style={styles.sectionTitle}>Subscriptions ({subscriptions.length})</AppText>
                   <ChevronRight
                     size={22}
                     color="rgba(255, 255, 255, 0.4)"
@@ -1018,13 +1122,11 @@ export default function HomeScreen() {
                               ]}
                             >
                               <View style={styles.listItemLeft}>
-                                <LogoCircle
-                                  source={sub.logoUrl}
+                                <SubscriptionLogo
+                                  fields={sub}
                                   name={sub.name}
                                   color={sub.color}
                                   size={40}
-                                  bordered
-                                  website={sub.website}
                                 />
                                 <View style={styles.listItemTextContainer}>
                                   <View style={{ flexDirection: "row", alignItems: "center", gap: spacing[8] }}>
@@ -1122,11 +1224,88 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#000000",
   },
-  headerRow: {
+  baseBlurContainer: {
+    ...StyleSheet.absoluteFill,
+    zIndex: 0,
+  },
+  blurMask: {
+    ...StyleSheet.absoluteFill,
+    zIndex: 1,
+  },
+  stickyNavbar: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 100,
+    elevation: 20,
+  },
+  stickyNavbarHairline: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 0.5,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+  },
+  stickyNavbarBlur: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: spacing[16],
+    paddingVertical: 10,
+    overflow: "hidden",
+  },
+  stickyNavBtnDefault: {
+    backgroundColor: "rgba(255, 255, 255, 0.11)",
+  },
+  stickyNavBtnGreen: {
+    backgroundColor: "rgba(48, 209, 88, 0.12)",
+    borderColor: "rgba(48, 209, 88, 0.15)",
+    paddingHorizontal: 14,
+  },
+  stickyNavVaultText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#30D158",
+  },
+  stickyNavLeft: {
+    // Mirror of the right icons group width so title centers perfectly
+    width: 100,
+  },
+  stickyNavTitle: {
+    flex: 1,
+    textAlign: "center",
+    fontSize: 17,
+    fontWeight: "700",
+    color: colors.white,
+    letterSpacing: -0.2,
+  },
+  stickyNavRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[8],
+    width: 100,
+    justifyContent: "flex-end",
+  },
+  stickyNavBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255, 255, 255, 0.11)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.07)",
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 4,
+  },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 0,
+    marginBottom: spacing[16],
     backgroundColor: "transparent",
   },
   headerTitle: {

@@ -4,8 +4,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Pause, CheckCircle, AlertTriangle, Users, Lightbulb, Sparkles } from "lucide-react-native";
 import SwipeDownSheet from "./SwipeDownSheet";
 import AppText from "./AppText";
-import LogoCircle from "./LogoCircle";
-import { colors, spacing } from "@/constants";
+import SubscriptionLogo from "./SubscriptionLogo";
+import { colors, spacing, getCurrencySymbol } from "@/constants";
 import type { VaultState } from "@/store/useSubscriptionStore";
 
 export interface SavingsBottomSheetProps {
@@ -40,13 +40,11 @@ export default function SavingsBottomSheet({
               style={[styles.savingRow, !isLast && styles.savingRowBorder]}
             >
               <View style={styles.savingLeft}>
-                <LogoCircle
-                  source={item.logoUrl}
+                <SubscriptionLogo
+                  fields={item}
                   name={item.name}
                   color={item.color}
                   size={40}
-                  bordered
-                  website={item.website}
                 />
                 <View style={styles.savingTextContainer}>
                   <AppText
@@ -112,21 +110,21 @@ export default function SavingsBottomSheet({
             </View>
             {vault.trialWarnings.map((trial, idx) => {
               const isLast = idx === vault.trialWarnings.length - 1;
+              const sym = getCurrencySymbol(trial.currency || currencySymbol);
+              const formattedPrice = trial.price !== undefined ? `${sym}${trial.price.toFixed(2)}` : null;
               return (
                 <View
-                  key={trial.subscriptionId}
+                  key={`${trial.subscriptionId}-${idx}`}
                   style={[styles.advisorRow, !isLast && styles.advisorRowBorder]}
                 >
                   <View style={styles.advisorRowLeft}>
-                    <LogoCircle
-                      source={trial.logoUrl}
+                    <SubscriptionLogo
+                      fields={trial}
                       name={trial.name}
                       color={trial.color}
-                      size={36}
-                      bordered
-                      website={trial.website}
+                      size={40}
                     />
-                    <View>
+                    <View style={styles.advisorTextContainer}>
                       <AppText style={styles.advisorRowName} numberOfLines={1}>
                         {trial.name}
                       </AppText>
@@ -135,7 +133,13 @@ export default function SavingsBottomSheet({
                       </AppText>
                     </View>
                   </View>
-                  <AlertTriangle size={14} color="#FFD60A" />
+                  <View style={styles.advisorRowRight}>
+                    {formattedPrice && (
+                      <AppText style={styles.advisorRowPrice}>
+                        {formattedPrice}
+                      </AppText>
+                    )}
+                  </View>
                 </View>
               );
             })}
@@ -161,19 +165,17 @@ export default function SavingsBottomSheet({
               const isLast = idx === vault.splitSavings.length - 1;
               return (
                 <View
-                  key={split.subscriptionId}
+                  key={`${split.subscriptionId}-${idx}`}
                   style={[styles.advisorRow, !isLast && styles.advisorRowBorder]}
                 >
                   <View style={styles.advisorRowLeft}>
-                    <LogoCircle
-                      source={split.logoUrl}
+                    <SubscriptionLogo
+                      fields={split}
                       name={split.name}
                       color={split.color}
-                      size={36}
-                      bordered
-                      website={split.website}
+                      size={40}
                     />
-                    <View>
+                    <View style={styles.advisorTextContainer}>
                       <AppText style={styles.advisorRowName} numberOfLines={1}>
                         {split.name}
                       </AppText>
@@ -366,6 +368,21 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     flex: 1,
+    marginRight: spacing[12],
+  },
+  advisorTextContainer: {
+    marginLeft: spacing[12],
+    flex: 1,
+  },
+  advisorRowRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  advisorRowPrice: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: colors.white,
   },
   advisorRowName: {
     fontSize: 16,

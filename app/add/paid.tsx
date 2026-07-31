@@ -21,6 +21,7 @@ import {
   Pencil,
   ChevronRight,
   ArrowUpDown,
+  RotateCcw,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { format, addMonths, addYears } from "date-fns";
@@ -35,10 +36,17 @@ import {
   SwipeDownSheet,
   Toggle,
   PressableScale,
+  IconPicker,
 } from "@/components/ui";
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { getNextRenewalDate } from "@/utils/date";
+import { persistLogoImage, deleteLogoImage } from "@/utils/logoImage";
+import { resolveLogoSrc } from "@/utils/logo";
+import {
+  getServiceById,
+  type BrandLogoVariantKey,
+} from "@/assets/data/services";
 
 /* ── Constants ──────────────────────────────────────────────────────── */
 
@@ -223,6 +231,8 @@ export default function UnifiedFormScreen() {
     brandColor,
     website,
     logo,
+    id: paramsId,
+    serviceId: paramsServiceId,
     editId,
     trial,
   } = useLocalSearchParams<{
@@ -231,6 +241,8 @@ export default function UnifiedFormScreen() {
     brandColor: string;
     website: string;
     logo: string;
+    id?: string;
+    serviceId?: string;
     editId?: string;
     trial?: string;
   }>();
@@ -247,16 +259,52 @@ export default function UnifiedFormScreen() {
   const [selectedColor, setSelectedColor] = useState(
     () => existingSub?.color || brandColor || colors.accent,
   );
-  const [customLogoUrl, setCustomLogoUrl] = useState(
-    () => existingSub?.logoUrl || logo || "",
+
+  // --- Logo state: BRAND vs CUSTOM are fully independent ---------------
+  // Brand  = the catalog service's own logo variant (bundled assets).
+  // Custom = the user's override (Lucide icon or picked image).
+  // Changing a custom override never touches the selected brand variant;
+  // "Use Brand Logo" clears the override and the brand variant re-emerges.
+  const [serviceId] = useState(
+    () => existingSub?.serviceId || paramsServiceId || paramsId || "",
   );
-  const [logoStyle, setLogoStyle] = useState<"default" | "badge" | "initial">(
-    "default",
+  const [brandVariant, setBrandVariant] = useState<BrandLogoVariantKey>(() => {
+    const v = existingSub?.brandVariant || "";
+    return v === "primary" || v === "alternate" || v === "mark" ? v : "primary";
+  });
+  const [logoIcon, setLogoIcon] = useState(() => existingSub?.logoIcon || "");
+  const [logoImageUri, setLogoImageUri] = useState(
+    () => existingSub?.logoImageUri || "",
   );
   const [customizeVisible, setCustomizeVisible] = useState(false);
+  const [iconPickerVisible, setIconPickerVisible] = useState(false);
   const [activePicker, setActivePicker] = useState<
     "currency" | "cycle" | "payment" | "category" | "reminder" | null
   >(null);
+
+  // Catalog service associated with this subscription (if any).
+  const brandService = useMemo(() => getServiceById(serviceId), [serviceId]);
+
+  // Favicon fallback: previously persisted source for legacy subscriptions,
+  // or the catalog's favicon URL for brand associations.
+  const faviconUrl =
+    existingSub?.logoUrl || brandService?.iconUrl || logo || "";
+
+  const hasCustomLogo = Boolean(logoIcon || logoImageUri);
+
+  // Effective source shown in every preview — computed with the single shared
+  // resolver so preview == saved == home screen.
+  const effectiveLogoSrc = useMemo(
+    () =>
+      resolveLogoSrc({
+        serviceId: serviceId || undefined,
+        brandVariant,
+        logoIcon: logoIcon || undefined,
+        logoImageUri: logoImageUri || undefined,
+        logoUrl: faviconUrl || undefined,
+      }),
+    [serviceId, brandVariant, logoIcon, logoImageUri, faviconUrl],
+  );
 
   // --- Form Input States ---
   const [isTrial, setIsTrial] = useState(
@@ -342,6 +390,21 @@ export default function UnifiedFormScreen() {
   );
 
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [previewAnim] = useState(() => new Animated.Value(1));
+  const prevColorRef = useRef(selectedColor);
+  useEffect(() => {
+    if (prevColorRef.current !== selectedColor) {
+      prevColorRef.current = selectedColor;
+      previewAnim.setValue(0.92);
+      Animated.spring(previewAnim, {
+        toValue: 1,
+        useNativeDriver: true,
+        damping: 14,
+        stiffness: 200,
+      }).start();
+    }
+  }, [selectedColor, previewAnim]);
+
   const [animBottom] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
@@ -448,7 +511,10 @@ export default function UnifiedFormScreen() {
   const notesInputRef = useRef<TextInput>(null);
   const [initialFormState] = useState(() => ({
     selectedColor,
-    customLogoUrl,
+    serviceId,
+    brandVariant,
+    logoIcon,
+    logoImageUri,
     customName,
     amount,
     currency,
@@ -477,7 +543,10 @@ export default function UnifiedFormScreen() {
   const hasUnsavedChanges = useMemo(() => {
     return (
       initialFormState.selectedColor !== selectedColor ||
-      initialFormState.customLogoUrl !== customLogoUrl ||
+      initialFormState.serviceId !== serviceId ||
+      initialFormState.brandVariant !== brandVariant ||
+      initialFormState.logoIcon !== logoIcon ||
+      initialFormState.logoImageUri !== logoImageUri ||
       initialFormState.customName !== customName ||
       initialFormState.amount !== amount ||
       initialFormState.currency !== currency ||
@@ -509,7 +578,10 @@ export default function UnifiedFormScreen() {
     currency,
     customCycleUnit,
     customCycleVal,
-    customLogoUrl,
+    serviceId,
+    brandVariant,
+    logoIcon,
+    logoImageUri,
     customName,
     notes,
     paymentMethod,
@@ -624,6 +696,64 @@ export default function UnifiedFormScreen() {
     setActivePicker("reminder");
   };
 
+  // Selecting a brand variant never touches the custom override data — the
+  // override is simply not rendered in the brand gallery. Per the approved
+  // interaction, picking a brand logo clears any active custom override.
+  const handleSelectBrandVariant = (key: BrandLogoVariantKey) => {
+    Haptics.selectionAsync();
+    setBrandVariant(key);
+    setLogoIcon("");
+    setLogoImageUri("");
+  };
+
+  const handleUseBrandLogo = () => {
+    Haptics.selectionAsync();
+    setLogoIcon("");
+    setLogoImageUri("");
+  };
+
+  const handlePickIcon = (iconName: string) => {
+    Haptics.selectionAsync();
+    setLogoIcon(iconName);
+  };
+
+  const handlePickImage = async () => {
+    Haptics.selectionAsync();
+    try {
+      const { status } =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert(
+          "Permission Required",
+          "Please grant photo library access to choose an image.",
+        );
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+      if (!result.canceled && result.assets[0]) {
+        // Copy into app-controlled storage so the URI survives restarts.
+        const persisted = await persistLogoImage(result.assets[0].uri);
+        // Replace the old persisted copy (if any) so files don't accumulate.
+        const previous = logoImageUri;
+        setLogoImageUri(persisted);
+        if (previous && previous !== persisted) {
+          deleteLogoImage(previous).catch(() => {});
+        }
+      }
+    } catch (error) {
+      console.error("Image picker failed:", error);
+      Alert.alert(
+        "Could Not Open Image Picker",
+        "Please try again or choose an icon instead.",
+      );
+    }
+  };
+
   const [isSaving, setIsSaving] = useState(false);
 
   const handleSave = async () => {
@@ -703,7 +833,13 @@ export default function UnifiedFormScreen() {
     const input = {
       name: customName,
       color: selectedColor,
-      logoUrl: logoStyle === "initial" ? undefined : customLogoUrl || undefined,
+      // Brand + custom overrides are stored independently. The favicon
+      // fallback (logoUrl) is always persisted as a safety net.
+      logoUrl: faviconUrl || undefined,
+      serviceId: serviceId || undefined,
+      brandVariant: brandService ? brandVariant : undefined,
+      logoIcon: logoIcon || undefined,
+      logoImageUri: logoImageUri || undefined,
       price: isTrial
         ? autoRenew
           ? Number(amount || 0)
@@ -744,10 +880,23 @@ export default function UnifiedFormScreen() {
     try {
       if (isEditMode && editId) await updateSubscription(editId, input);
       else await addSubscription(input);
+      // Clean up an overridden/removed persisted custom image so abandoned
+      // copies don't accumulate in app-controlled storage.
+      const previousImage = existingSub?.logoImageUri;
+      if (previousImage && previousImage !== logoImageUri) {
+        deleteLogoImage(previousImage).catch(() => {});
+      }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      if (router.canGoBack()) {
-        router.back();
+      if (isEditMode) {
+        if (router.canGoBack()) {
+          router.back();
+        } else {
+          router.replace("/(tabs)");
+        }
       } else {
+        if (typeof router.dismissAll === "function" && router.canDismiss?.()) {
+          router.dismissAll();
+        }
         router.replace("/(tabs)");
       }
     } catch (e) {
@@ -887,16 +1036,11 @@ export default function UnifiedFormScreen() {
                 <Pencil size={16} color={colors.white} />
               </PressableScale>
               <LogoCircle
-                source={
-                  logoStyle === "initial"
-                    ? undefined
-                    : customLogoUrl || undefined
-                }
-                name={logoStyle === "initial" ? "" : customName}
-                color={logoStyle === "badge" ? "#FFFFFF" : selectedColor}
+                source={effectiveLogoSrc}
+                name={customName}
+                color={selectedColor}
                 size={96}
-                bordered={logoStyle === "default"}
-                website={website}
+                website={brandService?.website || website}
               />
               {isEditingName ? (
                 <View style={styles.heroNamePill}>
@@ -1015,20 +1159,74 @@ export default function UnifiedFormScreen() {
           <SectionCard>
             {isTrial ? (
               <>
+                {/* Start Date */}
                 <DateRow
                   label="Start date"
                   value={format(startDate, "MMMM d, yyyy")}
                   onPress={() => openDatePicker("startDate")}
                 />
                 <RowDivider />
+                {/* Trial End Date */}
                 <DateRow
                   label="Trial ends"
                   value={format(trialEndDate, "MMMM d, yyyy")}
                   onPress={() => openDatePicker("trialEnd")}
                 />
+                {/* Duration Presets */}
+                <View style={styles.presetSection}>
+                  <AppText style={styles.presetSectionLabel}>QUICK DURATION</AppText>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.presetScroll}
+                  >
+                    {[
+                      { label: "7 Days", value: 7, unit: "days" },
+                      { label: "14 Days", value: 14, unit: "days" },
+                      { label: "1 Month", value: 1, unit: "months" },
+                      { label: "3 Months", value: 3, unit: "months" },
+                      { label: "6 Months", value: 6, unit: "months" },
+                      { label: "1 Year", value: 1, unit: "years" },
+                    ].map((preset) => {
+                      let targetDate = new Date(startDate);
+                      if (preset.unit === "days") {
+                        targetDate.setDate(targetDate.getDate() + preset.value);
+                      } else if (preset.unit === "months") {
+                        targetDate.setMonth(targetDate.getMonth() + preset.value);
+                      } else if (preset.unit === "years") {
+                        targetDate.setFullYear(targetDate.getFullYear() + preset.value);
+                      }
+                      const isSelected = isSameCalendarDay(trialEndDate, targetDate);
+                      return (
+                        <TouchableOpacity
+                          key={preset.label}
+                          activeOpacity={0.7}
+                          style={[
+                            styles.presetChip,
+                            isSelected && styles.presetChipSelected,
+                          ]}
+                          onPress={() => {
+                            Haptics.selectionAsync();
+                            setTrialEndDate(targetDate);
+                          }}
+                        >
+                          <AppText
+                            style={[
+                              styles.presetChipText,
+                              isSelected && styles.presetChipTextSelected,
+                            ]}
+                          >
+                            {preset.label}
+                          </AppText>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
                 <RowDivider />
+                {/* Auto-renew after trial */}
                 <SwitchRow
-                  label="Auto renew"
+                  label="Auto renew after trial"
                   value={autoRenew}
                   onValueChange={setAutoRenew}
                 />
@@ -1366,11 +1564,19 @@ export default function UnifiedFormScreen() {
         }}
       >
         <View style={styles.sheetHeader}>
-          <View style={{ width: 24 }} />
           <AppText variant="title3" weight="700" color={colors.white}>
             Customize
           </AppText>
-          <View style={{ width: 24 }} />
+          <TouchableOpacity
+            onPress={() => setCustomizeVisible(false)}
+            accessibilityLabel="Done customizing"
+            accessibilityRole="button"
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            <AppText variant="callout" weight="700" color={colors.accent}>
+              Done
+            </AppText>
+          </TouchableOpacity>
         </View>
 
         <ScrollView
@@ -1378,50 +1584,148 @@ export default function UnifiedFormScreen() {
           contentContainerStyle={styles.sheetScroll}
         >
           {/* Card Preview */}
-          <View
-            style={[styles.previewCard, { backgroundColor: selectedColor }]}
+          <Animated.View
+            style={[
+              styles.previewCard,
+              { backgroundColor: selectedColor },
+              { transform: [{ scale: previewAnim }] },
+            ]}
           >
             <LogoCircle
-              source={
-                logoStyle === "initial" ? undefined : customLogoUrl || undefined
-              }
-              name={logoStyle === "initial" ? "" : customName}
-              color={logoStyle === "badge" ? "#FFFFFF" : selectedColor}
+              source={effectiveLogoSrc}
+              name={customName}
+              color={selectedColor}
               size={112}
-              bordered={logoStyle === "default"}
-              website={website}
+              website={brandService?.website || website}
             />
-            {isEditingName ? (
-              <View style={styles.previewNamePill}>
-                <TextInput
-                  style={{
-                    color: colors.white,
-                    fontSize: 15,
-                    fontWeight: "700",
-                    letterSpacing: -0.24,
-                    padding: 0,
-                    margin: 0,
-                    minWidth: 100,
-                    textAlign: "center",
-                  }}
-                  value={customName}
-                  onChangeText={setCustomName}
-                  autoFocus
-                  selectTextOnFocus
-                  onBlur={handleSaveName}
-                  onSubmitEditing={handleSaveName}
-                  returnKeyType="done"
-                  placeholder="Subscription name"
-                  placeholderTextColor="rgba(255, 255, 255, 0.5)"
-                />
-              </View>
+            <View style={styles.previewNamePill}>
+              <AppText variant="subheadline" weight="700" color={colors.white}>
+                {customName}
+              </AppText>
+            </View>
+          </Animated.View>
+
+          {/* Brand Logo (bundled catalog variants) */}
+          <View style={styles.pickerSection}>
+            <AppText
+              variant="subheadline"
+              weight="600"
+              color={colors.textSecondary}
+            >
+              Brand Logo
+            </AppText>
+            {brandService?.logoVariants?.length ? (
+              <>
+                <View style={styles.logoVariationRow}>
+                  {brandService.logoVariants.map((v) => (
+                    <TouchableOpacity
+                      key={v.key}
+                      onPress={() => handleSelectBrandVariant(v.key)}
+                      accessibilityLabel={`${v.label} brand logo`}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: brandVariant === v.key }}
+                      style={[
+                        styles.logoVarItem,
+                        brandVariant === v.key && styles.logoVarItemActive,
+                      ]}
+                    >
+                      <LogoCircle
+                        source={v.source}
+                        name={brandService.name}
+                        color={brandService.brandColor}
+                        whiteBackground={brandService.whiteBackground}
+                        size={56}
+                        website={brandService.website}
+                      />
+                      <AppText
+                        variant="caption1"
+                        color={
+                          brandVariant === v.key
+                            ? colors.accent
+                            : colors.textSecondary
+                        }
+                        style={{ marginTop: 6 }}
+                      >
+                        {v.label}
+                      </AppText>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                {hasCustomLogo && (
+                  <AppText
+                    variant="caption1"
+                    color={colors.textMuted}
+                    style={{ marginTop: 4 }}
+                  >
+                    Selecting a brand logo clears the custom logo below.
+                  </AppText>
+                )}
+              </>
             ) : (
+              <AppText variant="caption1" color={colors.textMuted}>
+                No bundled brand logos for this service.
+              </AppText>
+            )}
+          </View>
+
+          {/* Custom Logo (user override) */}
+          <View style={styles.pickerSection}>
+            <AppText
+              variant="subheadline"
+              weight="600"
+              color={colors.textSecondary}
+            >
+              Custom Logo
+            </AppText>
+            <View style={styles.sheetButtonsRow}>
               <TouchableOpacity
-                onPress={handleEditName}
-                style={styles.previewNamePill}
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  setIconPickerVisible(true);
+                }}
+                accessibilityLabel="Pick an icon for the subscription"
+                accessibilityRole="button"
+                accessibilityState={{ selected: Boolean(logoIcon) }}
+                style={[
+                  styles.sheetActionButton,
+                  Boolean(logoIcon) && styles.sheetActionButtonActive,
+                ]}
               >
+                <AppText variant="title3" style={styles.sheetActionIcon}>
+                  🍿
+                </AppText>
                 <AppText variant="subheadline" weight="700" color={colors.white}>
-                  {customName}
+                  Pick icon
+                </AppText>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handlePickImage}
+                accessibilityLabel="Choose an image from your photo library"
+                accessibilityRole="button"
+                accessibilityState={{ selected: Boolean(logoImageUri) }}
+                style={[
+                  styles.sheetActionButton,
+                  Boolean(logoImageUri) && styles.sheetActionButtonActive,
+                ]}
+              >
+                <AppText variant="title3" style={styles.sheetActionIcon}>
+                  🖼️
+                </AppText>
+                <AppText variant="subheadline" weight="700" color={colors.white}>
+                  Choose image
+                </AppText>
+              </TouchableOpacity>
+            </View>
+            {hasCustomLogo && (
+              <TouchableOpacity
+                onPress={handleUseBrandLogo}
+                accessibilityLabel="Use the brand logo instead of the custom logo"
+                accessibilityRole="button"
+                style={styles.useBrandLogoButton}
+              >
+                <RotateCcw size={16} color={colors.accent} />
+                <AppText variant="subheadline" weight="700" color={colors.accent}>
+                  Use Brand Logo
                 </AppText>
               </TouchableOpacity>
             )}
@@ -1451,6 +1755,8 @@ export default function UnifiedFormScreen() {
                       Haptics.selectionAsync();
                       setSelectedColor(c);
                     }}
+                    accessibilityLabel={`Color ${c}`}
+                    accessibilityRole="radio"
                     style={[styles.colorBubble, { backgroundColor: c }]}
                   >
                     {isActive && <View style={styles.colorBubbleActiveInner} />}
@@ -1463,188 +1769,23 @@ export default function UnifiedFormScreen() {
                   setColorEditValue(selectedColor);
                   setShowColorEditModal(true);
                 }}
+                accessibilityLabel="Custom color"
+                accessibilityRole="button"
                 style={[styles.colorBubble, styles.colorBubbleCustom]}
               >
                 <ArrowUpDown size={14} color={colors.textSecondary} />
               </TouchableOpacity>
             </ScrollView>
           </View>
-
-          {/* Logo Style */}
-          <View style={styles.pickerSection}>
-            <AppText
-              variant="subheadline"
-              weight="600"
-              color={colors.textSecondary}
-            >
-              Logo Style
-            </AppText>
-            <View style={styles.logoVariationRow}>
-              <TouchableOpacity
-                onPress={() => {
-                  Haptics.selectionAsync();
-                  setLogoStyle("default");
-                }}
-                style={[
-                  styles.logoVarItem,
-                  logoStyle === "default" && styles.logoVarItemActive,
-                ]}
-              >
-                <LogoCircle
-                  source={customLogoUrl || undefined}
-                  name={customName}
-                  color={selectedColor}
-                  size={48}
-                  bordered
-                  website={website}
-                />
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => {
-                  Haptics.selectionAsync();
-                  setLogoStyle("badge");
-                }}
-                style={[
-                  styles.logoVarItem,
-                  logoStyle === "badge" && styles.logoVarItemActive,
-                ]}
-              >
-                <View style={styles.badgeLogoWrapper}>
-                  <LogoCircle
-                    source={customLogoUrl || undefined}
-                    name={customName}
-                    color="#FFFFFF"
-                    size={48}
-                    website={website}
-                  />
-                </View>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => {
-                  Haptics.selectionAsync();
-                  setLogoStyle("initial");
-                }}
-                style={[
-                  styles.logoVarItem,
-                  logoStyle === "initial" && styles.logoVarItemActive,
-                ]}
-              >
-                <LogoCircle
-                  name={customName}
-                  color={selectedColor}
-                  size={48}
-                  website={website}
-                />
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* Icon / Image buttons */}
-          <View style={styles.sheetButtonsRow}>
-            <TouchableOpacity
-              onPress={() => {
-                Haptics.selectionAsync();
-                Alert.alert(
-                  "Pick Icon",
-                  "Choose an emoji to represent this service:",
-                  [
-                    {
-                      text: "🍿 Popcorn",
-                      onPress: () => {
-                        setCustomLogoUrl("🍿");
-                        setLogoStyle("default");
-                      },
-                    },
-                    {
-                      text: "🎵 Music",
-                      onPress: () => {
-                        setCustomLogoUrl("🎵");
-                        setLogoStyle("default");
-                      },
-                    },
-                    {
-                      text: "🎮 Gaming",
-                      onPress: () => {
-                        setCustomLogoUrl("🎮");
-                        setLogoStyle("default");
-                      },
-                    },
-                    {
-                      text: "🤖 Tech/AI",
-                      onPress: () => {
-                        setCustomLogoUrl("🤖");
-                        setLogoStyle("default");
-                      },
-                    },
-                    {
-                      text: "📚 Study",
-                      onPress: () => {
-                        setCustomLogoUrl("📚");
-                        setLogoStyle("default");
-                      },
-                    },
-                    { text: "Cancel", style: "cancel" },
-                  ],
-                );
-              }}
-              style={styles.sheetActionButton}
-            >
-              <AppText variant="title3" style={styles.sheetActionIcon}>
-                🍿
-              </AppText>
-              <AppText variant="subheadline" weight="700" color={colors.white}>
-                Pick icon
-              </AppText>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={async () => {
-                Haptics.selectionAsync();
-                const { status } =
-                  await ImagePicker.requestMediaLibraryPermissionsAsync();
-                if (status !== "granted") {
-                  Alert.alert(
-                    "Permission Required",
-                    "Please grant photo library access to choose an image.",
-                  );
-                  return;
-                }
-                const result = await ImagePicker.launchImageLibraryAsync({
-                  mediaTypes: ["images"],
-                  allowsEditing: true,
-                  aspect: [1, 1],
-                  quality: 0.8,
-                });
-                if (!result.canceled && result.assets[0]) {
-                  setCustomLogoUrl(result.assets[0].uri);
-                  setLogoStyle("default");
-                }
-              }}
-              style={styles.sheetActionButton}
-            >
-              <AppText variant="title3" style={styles.sheetActionIcon}>
-                🖼️
-              </AppText>
-              <AppText variant="subheadline" weight="700" color={colors.white}>
-                Choose image
-              </AppText>
-            </TouchableOpacity>
-          </View>
         </ScrollView>
-
-        <PressableScale
-          onPress={() => setCustomizeVisible(false)}
-          scale={0.97}
-          style={styles.sheetDoneBtn}
-        >
-          <AppText
-            variant="callout"
-            weight="700"
-            style={styles.sheetDoneBtnText}
-          >
-            Done
-          </AppText>
-        </PressableScale>
       </SwipeDownSheet>
+
+      {/* ── Icon Picker ──────────────────────────────────────────── */}
+      <IconPicker
+        visible={iconPickerVisible}
+        onClose={() => setIconPickerVisible(false)}
+        onSelect={handlePickIcon}
+      />
 
       {/* ── Picker Dropdown Modal (iOS action sheet style) ─────────── */}
       <Modal
@@ -2251,24 +2392,39 @@ export default function UnifiedFormScreen() {
                   paddingBottom: spacing[24],
                 }}
               >
-                <TextInput
-                  style={{
-                    backgroundColor: "#2C2C2E",
-                    borderRadius: 12,
-                    padding: spacing[16],
-                    fontSize: 17,
-                    color: colors.white,
-                    borderWidth: 0.5,
-                    borderColor: "rgba(255, 255, 255, 0.12)",
-                  }}
-                  placeholder="#FF5733"
-                  placeholderTextColor={colors.textMuted}
-                  value={colorEditValue}
-                  onChangeText={setColorEditValue}
-                  autoFocus
-                  selectTextOnFocus
-                  autoCapitalize="characters"
-                />
+                <View style={{ flexDirection: "row", gap: 12, alignItems: "center" }}>
+                  <View
+                    style={{
+                      width: 48,
+                      height: 48,
+                      borderRadius: 24,
+                      backgroundColor: /^#[0-9A-Fa-f]{6}$/.test(colorEditValue)
+                        ? colorEditValue
+                        : "#2C2C2E",
+                      borderWidth: 1,
+                      borderColor: "rgba(255,255,255,0.12)",
+                    }}
+                  />
+                  <TextInput
+                    style={{
+                      flex: 1,
+                      backgroundColor: "#2C2C2E",
+                      borderRadius: 12,
+                      padding: spacing[16],
+                      fontSize: 17,
+                      color: colors.white,
+                      borderWidth: 0.5,
+                      borderColor: "rgba(255, 255, 255, 0.12)",
+                    }}
+                    placeholder="#FF5733"
+                    placeholderTextColor={colors.textMuted}
+                    value={colorEditValue}
+                    onChangeText={setColorEditValue}
+                    autoFocus
+                    selectTextOnFocus
+                    autoCapitalize="characters"
+                  />
+                </View>
               </View>
             </BlurView>
           </View>
@@ -2508,16 +2664,6 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: 20,
   },
-  sheetDoneBtn: {
-    height: 52,
-    backgroundColor: "#FFFFFF",
-    borderRadius: 26,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 16,
-    width: "100%",
-  },
-  sheetDoneBtnText: { color: "#000000" },
   sheetScroll: { gap: 24, paddingBottom: 40 },
   previewCard: {
     height: 260,
@@ -2565,14 +2711,6 @@ const styles = StyleSheet.create({
     padding: 2,
   },
   logoVarItemActive: { borderColor: colors.accent },
-  badgeLogoWrapper: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: "#FFFFFF",
-    alignItems: "center",
-    justifyContent: "center",
-  },
   sheetButtonsRow: { flexDirection: "row", gap: 12, marginTop: spacing[8] },
   sheetActionButton: {
     flex: 1,
@@ -2584,7 +2722,24 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: spacing[8],
   },
+  sheetActionButtonActive: {
+    borderWidth: 1.5,
+    borderColor: colors.accent,
+    backgroundColor: "rgba(10, 132, 255, 0.12)",
+  },
   sheetActionIcon: { fontSize: 28 },
+  useBrandLogoButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing[8],
+    backgroundColor: "rgba(10, 132, 255, 0.12)",
+    borderWidth: 1,
+    borderColor: colors.accent,
+    borderRadius: 16,
+    paddingVertical: 14,
+    marginTop: spacing[8],
+  },
 
   // Dropdown — iOS action sheet style
   dropdownOverlay: {
@@ -2822,5 +2977,46 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 6,
+  },
+
+  // Trial presets
+  presetSection: {
+    paddingTop: spacing[16],
+    paddingBottom: spacing[8],
+    gap: spacing[8],
+  },
+  presetSectionLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: colors.textMuted,
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+    paddingHorizontal: spacing[4],
+  },
+  presetScroll: {
+    gap: spacing[8],
+    paddingRight: spacing[20],
+    paddingBottom: spacing[8],
+  },
+  presetChip: {
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 22,
+    backgroundColor: "rgba(255, 255, 255, 0.07)",
+    borderWidth: 0.5,
+    borderColor: "rgba(255, 255, 255, 0.1)",
+  },
+  presetChipSelected: {
+    backgroundColor: colors.white,
+    borderColor: colors.white,
+  },
+  presetChipText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "rgba(255, 255, 255, 0.75)",
+  },
+  presetChipTextSelected: {
+    color: colors.black,
+    fontWeight: "700",
   },
 });

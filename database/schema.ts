@@ -32,6 +32,12 @@ export interface DbSubscription {
   promoEndDate?: string | null;
 
   isPaused?: number; // 0 or 1
+  logoStyle?: string | null;   // legacy, no longer read/written (vestigial)
+  originalLogo?: string | null; // legacy, no longer read/written (vestigial)
+  logoIcon?: string | null;
+  logoImage?: string | null;
+  serviceId?: string | null;
+  brandVariant?: string | null;
 
   createdAt: string;       // ISO Date String
   updatedAt: string;       // ISO Date String
@@ -76,6 +82,12 @@ export const CREATE_TABLES_SQL = `
     promoStartDate TEXT,
     promoEndDate TEXT,
     isPaused INTEGER DEFAULT 0,
+    logoStyle TEXT DEFAULT 'original',
+    originalLogo TEXT,
+    logoIcon TEXT,
+    logoImage TEXT,
+    serviceId TEXT,
+    brandVariant TEXT,
     createdAt TEXT NOT NULL,
     updatedAt TEXT NOT NULL
   );

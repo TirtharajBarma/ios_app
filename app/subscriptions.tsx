@@ -31,7 +31,7 @@ import { LinearGradient } from "expo-linear-gradient";
 
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
-import { AppText, LogoCircle, Loading } from "@/components/ui";
+import { AppText, SubscriptionLogo, Loading } from "@/components/ui";
 import { colors, spacing, radius, getCurrencySymbol } from "@/constants";
 import { toMonthly, getSubscriptionActivePrice } from "@/utils/date";
 
@@ -261,7 +261,7 @@ export default function SubscriptionsListScreen() {
         </TouchableOpacity>
 
         <AppText variant="title3" weight="700" color={colors.white}>
-          Subscriptions
+          Subscriptions ({subscriptions.length})
         </AppText>
 
         <View style={styles.pillContainer}>
@@ -360,13 +360,11 @@ export default function SubscriptionsListScreen() {
                         accessibilityHint="Tap to view details, long press for actions"
                       >
                         <View style={styles.listItemLeft}>
-                          <LogoCircle
-                            source={sub.logoUrl}
+                          <SubscriptionLogo
+                            fields={sub}
                             name={sub.name}
                             color={sub.color}
                             size={40}
-                            bordered
-                            website={sub.website}
                           />
                           <View style={styles.listItemTextContainer}>
                             <View style={{ flexDirection: "row", alignItems: "center", gap: spacing[8] }}>

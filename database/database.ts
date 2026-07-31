@@ -141,6 +141,10 @@ function mapDbToSubscription(dbSub: DbSubscription): Subscription {
     promoEndDate: dbSub.promoEndDate ?? undefined,
 
     isPaused: dbSub.isPaused === 1,
+    serviceId: dbSub.serviceId || undefined,
+    brandVariant: (dbSub.brandVariant as any) || undefined,
+    logoIcon: dbSub.logoIcon || undefined,
+    logoImageUri: dbSub.logoImage || undefined,
 
     createdAt: dbSub.createdAt,
     updatedAt: dbSub.updatedAt,
@@ -183,6 +187,10 @@ function mapDomainToDb(id: string, input: NewSubscriptionInput): Omit<DbSubscrip
     promoStartDate: input.promoStartDate || null,
     promoEndDate: input.promoEndDate || null,
     isPaused: input.isPaused ? 1 : 0,
+    serviceId: input.serviceId || null,
+    brandVariant: input.brandVariant || null,
+    logoIcon: input.logoIcon || null,
+    logoImage: input.logoImageUri || null,
   };
 }
 
@@ -222,6 +230,21 @@ export async function updateSubscription(
   
   if (input.name !== undefined) dbUpdates.name = input.name;
   if (input.logoUrl !== undefined) dbUpdates.logo = input.logoUrl;
+  // Keep source columns symmetric with the create path: when any logo field is
+  // present in the payload, write all of them so stale/inactive sources are
+  // cleared (prevents reload from re-deriving an old source).
+  const hasLogoFields =
+    input.logoUrl !== undefined ||
+    input.serviceId !== undefined ||
+    input.brandVariant !== undefined ||
+    input.logoIcon !== undefined ||
+    input.logoImageUri !== undefined;
+  if (hasLogoFields) {
+    dbUpdates.logoIcon = input.logoIcon ?? null;
+    dbUpdates.logoImage = input.logoImageUri ?? null;
+    dbUpdates.serviceId = input.serviceId ?? null;
+    dbUpdates.brandVariant = input.brandVariant ?? null;
+  }
   if (input.price !== undefined) dbUpdates.price = input.price;
   if (input.currency !== undefined) dbUpdates.currency = input.currency;
   if (input.rawBillingCycle !== undefined) dbUpdates.billingCycle = input.rawBillingCycle;

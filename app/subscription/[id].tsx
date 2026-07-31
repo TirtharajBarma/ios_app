@@ -23,7 +23,7 @@ import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 
 import { colors, spacing, getCurrencySymbol } from "@/constants";
-import { AppText, LogoCircle, Toggle, PressableScale } from "@/components/ui";
+import { AppText, SubscriptionLogo, Toggle, PressableScale } from "@/components/ui";
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
 import { getSubscriptionActivePrice } from "@/utils/date";
 
@@ -117,6 +117,10 @@ export default function SubscriptionDetailScreen() {
         brandColor: brandColor || "",
         website: subscription.website || "",
         logo: subscription.logoUrl || "",
+        serviceId: subscription.serviceId || "",
+        brandVariant: subscription.brandVariant || "",
+        logoIcon: subscription.logoIcon || "",
+        logoImageUri: subscription.logoImageUri || "",
       },
     });
   };
@@ -234,13 +238,11 @@ export default function SubscriptionDetailScreen() {
       >
         {/* Centered Brand Info */}
         <View style={styles.brandContainer}>
-          <LogoCircle
-            source={subscription.logoUrl || undefined}
+          <SubscriptionLogo
+            fields={subscription}
             name={name}
-            color="#FFFFFF"
+            color={subscription.color}
             size={120}
-            bordered
-            website={subscription.website}
           />
           <AppText weight="800" color={colors.white} style={styles.brandName}>
             {name}

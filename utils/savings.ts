@@ -1,5 +1,6 @@
 import { parseISO, startOfDay, differenceInCalendarDays, differenceInCalendarMonths } from "date-fns";
 import type { Subscription } from "@/types/subscription";
+import type { BrandLogoVariantKey } from "@/assets/data/services";
 import { getSubscriptionActivePrice } from "@/utils/date";
 import * as db from "@/database/database";
 
@@ -11,6 +12,10 @@ export interface SavingsItem {
   monthsSkipped: number;
   totalSaved: number;
   logoUrl?: string;
+  serviceId?: string;
+  brandVariant?: BrandLogoVariantKey;
+  logoIcon?: string;
+  logoImageUri?: string;
   color?: string;
   website?: string;
   currency?: string;
@@ -20,7 +25,15 @@ export interface TrialWarning {
   subscriptionId: string;
   name: string;
   trialEndDate: string;
+  price?: number;
+  currency?: string;
+  billingCycle?: string;
+  rawBillingCycle?: string;
   logoUrl?: string;
+  serviceId?: string;
+  brandVariant?: BrandLogoVariantKey;
+  logoIcon?: string;
+  logoImageUri?: string;
   color?: string;
   website?: string;
 }
@@ -34,6 +47,10 @@ export interface BillSplitSaving {
   splitType: "people" | "percentage" | "share";
   splitValue: number;
   logoUrl?: string;
+  serviceId?: string;
+  brandVariant?: BrandLogoVariantKey;
+  logoIcon?: string;
+  logoImageUri?: string;
   color?: string;
   website?: string;
 }
@@ -136,6 +153,10 @@ export async function computeSavings(
           monthsSkipped: skippedCycles,
           totalSaved: saved,
           logoUrl: sub.logoUrl,
+          serviceId: sub.serviceId,
+          brandVariant: sub.brandVariant,
+          logoIcon: sub.logoIcon,
+          logoImageUri: sub.logoImageUri,
           color: sub.color,
           website: sub.website,
           currency: sub.currency,
@@ -152,7 +173,15 @@ export async function computeSavings(
             subscriptionId: sub.id,
             name: sub.name,
             trialEndDate: sub.trialEndDate!,
+            price: sub.price,
+            currency: sub.currency,
+            billingCycle: sub.billingCycle,
+            rawBillingCycle: sub.rawBillingCycle,
             logoUrl: sub.logoUrl,
+            serviceId: sub.serviceId,
+            brandVariant: sub.brandVariant,
+            logoIcon: sub.logoIcon,
+            logoImageUri: sub.logoImageUri,
             color: sub.color,
             website: sub.website,
           });
@@ -184,6 +213,10 @@ export async function computeSavings(
           splitType: sub.splitType,
           splitValue: sub.splitValue,
           logoUrl: sub.logoUrl,
+          serviceId: sub.serviceId,
+          brandVariant: sub.brandVariant,
+          logoIcon: sub.logoIcon,
+          logoImageUri: sub.logoImageUri,
           color: sub.color,
           website: sub.website,
         });
@@ -210,11 +243,15 @@ export async function computeSavings(
       parseISO(trialWarnings[0].trialEndDate),
     );
     const formattedEnd = `${earliestEnd.toLocaleString("default", { month: "short" })} ${earliestEnd.getDate()}`;
+    const earliestTime = earliestEnd.getTime();
     const totalTrialCost = trialWarnings.reduce((sum, t) => {
+      const end = parseISO(t.trialEndDate);
+      if (end.getTime() !== earliestTime) return sum;
       const sub = subscriptions.find((s) => s.id === t.subscriptionId);
       return sum + (sub ? sub.price : 0);
     }, 0);
-    advisorMessage = `You have ${trialWarnings.length} active trial${trialWarnings.length > 1 ? "s" : ""}. Cancel before ${formattedEnd} to avoid paying ${subscriptions[0]?.currency === "INR" ? "₹" : "$"}${totalTrialCost.toFixed(0)}.`;
+    const symbol = subscriptions[0]?.currency === "INR" ? "₹" : "$";
+    advisorMessage = `Cancel before ${formattedEnd} to avoid paying ${symbol}${totalTrialCost.toFixed(0)}.`;
   } else if (splitSavings.length > 0) {
     vaultMode = "advisor";
     advisorType = "splits";

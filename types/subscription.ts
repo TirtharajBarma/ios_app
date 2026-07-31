@@ -5,6 +5,8 @@
  * schema and the UI. Keeping a single source of truth here avoids drift.
  */
 
+import type { BrandLogoVariantKey } from "@/assets/data/services";
+
 /** How often a subscription is billed. */
 export type BillingCycle =
   | "weekly"
@@ -44,8 +46,24 @@ export interface Subscription {
   name: string;
   /** Brand color (hex) or gradient key used for the card. */
   color: string;
-  /** Optional logo URL / Name. */
+  /** Optional logo URL / Name (effective source, kept for backwards compatibility). */
   logoUrl?: string;
+  /**
+   * Stable catalog identifier (Service.id) associating this subscription with
+   * a known brand. Survives renames because it is never derived from the
+   * subscription's display name.
+   */
+  serviceId?: string;
+  /**
+   * Which bundled brand variant is active when no custom logo override is
+   * set. Only meaningful when `serviceId` resolves to a service that ships
+   * `logoVariants`.
+   */
+  brandVariant?: BrandLogoVariantKey;
+  /** Lucide icon name when the user picked a custom icon (custom override). */
+  logoIcon?: string;
+  /** Permanent app-storage URI of a user-picked custom image (custom override). */
+  logoImageUri?: string;
   /** Cost for one billing cycle, in major units (e.g. 9.99). */
   price: number;
   currency: Currency;

@@ -1,7 +1,7 @@
 import React, { memo } from "react";
 import { View, ScrollView, type StyleProp, type ViewStyle } from "react-native";
 import { parseISO, differenceInCalendarDays, isSameDay, startOfDay } from "date-fns";
-import { Card, AppText, LogoCircle, SectionHeader } from "@/components/ui";
+import { Card, AppText, SubscriptionLogo, SectionHeader } from "@/components/ui";
 import { colors, spacing, radius, hexToRGBA, getCurrencySymbol } from "@/constants";
 import { getSubscriptionActivePrice } from "@/utils/date";
 import { useSettingsStore } from "@/store/useSettingsStore";
@@ -43,7 +43,7 @@ const UpcomingCard = memo(function UpcomingCard({
   subscription: Subscription;
   onPress?: () => void;
 }) {
-  const { name, nextBillingDate, color, logoUrl, website } = subscription;
+  const { name, nextBillingDate, color } = subscription;
   const daysText = getRelativeDays(nextBillingDate);
   const activePrice = getSubscriptionActivePrice(subscription);
   const symbol = getCurrencySymbol(subscription.currency);
@@ -76,13 +76,11 @@ const UpcomingCard = memo(function UpcomingCard({
             justifyContent: "space-between",
           }}
         >
-          <LogoCircle
-            source={logoUrl}
+          <SubscriptionLogo
+            fields={subscription}
             name={name}
             color={color}
             size="sm"
-            bordered
-            website={website}
           />
           <AppText variant="footnote" weight="700" color={colors.white}>
             {symbol}{activePrice.toFixed(0)}

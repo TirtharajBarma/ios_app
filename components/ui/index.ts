@@ -44,6 +44,9 @@ export type { AvatarProps } from "./Avatar";
 export { default as LogoCircle } from "./LogoCircle";
 export type { LogoCircleProps } from "./LogoCircle";
 
+export { default as SubscriptionLogo } from "./SubscriptionLogo";
+export type { SubscriptionLogoProps } from "./SubscriptionLogo";
+
 export { default as EmptyState } from "./EmptyState";
 export type { EmptyStateProps } from "./EmptyState";
 
@@ -75,3 +78,6 @@ export type { OverviewExplanationSheetProps, ExplanationType } from "./OverviewE
 
 export { default as SavingsBottomSheet } from "./SavingsBottomSheet";
 export type { SavingsBottomSheetProps } from "./SavingsBottomSheet";
+
+export { default as IconPicker } from "./IconPicker";
+export type { IconPickerProps } from "./IconPicker";

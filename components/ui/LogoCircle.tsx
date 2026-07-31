@@ -1,10 +1,13 @@
-import React, { memo, useState, useCallback, useEffect, forwardRef } from "react";
+import React, { memo, useState, useCallback, useEffect, forwardRef, useRef } from "react";
+import { Animated } from "react-native";
 import { View, type ViewStyle } from "react-native";
 import { Image, type ImageSource } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import AppText from "./AppText";
 import { colors, shadows, hexToRGBA, typography } from "@/constants";
 import type { GradientStops } from "@/constants/gradients";
+import { getLucideIcon, isLucideIconSource } from "./lucideIcons";
+import { getFaviconUri } from "@/utils/faviconCache";
 
 type LogoSize = "sm" | "md" | "lg" | "xl";
 type FontVariant = keyof typeof typography;
@@ -23,12 +26,23 @@ export interface LogoCircleProps {
   size?: LogoSize | number;
   bordered?: boolean;
   shadowed?: boolean;
+  /** White plate behind image sources. Used by dark/wordmark logos. */
   whiteBackground?: boolean;
   gradient?: GradientStops;
   style?: ViewStyle;
   website?: string;
 }
 
+function isEmojiString(str: string): boolean {
+  if (str.length > 10) return false;
+  if (str.includes("/") || str.includes(".") || str.includes("://") || str.startsWith("file:")) return false;
+  for (const char of str) {
+    if (char.charCodeAt(0) > 127) return true;
+  }
+  return false;
+}
+
+/** Bundled brand-logo variants (curated catalog assets). */
 const LOCAL_LOGOS: Record<string, any> = {
   "local:jiohotstar": require("../../assets/images/logos/jiohotstar.jpg"),
   "local:jiocinema": require("../../assets/images/logos/jiocinema.jpg"),
@@ -36,6 +50,32 @@ const LOCAL_LOGOS: Record<string, any> = {
   "local:lionsgateplay": require("../../assets/images/logos/lionsgateplay.jpg"),
   "local:aha": require("../../assets/images/logos/aha.jpg"),
   "local:healthifyme": require("../../assets/images/logos/healthifyme.jpg"),
+
+  "local:brand:netflix-primary": require("../../assets/images/brand-logos/netflix-primary.png"),
+  "local:brand:netflix-mark": require("../../assets/images/brand-logos/netflix-mark.png"),
+  "local:brand:spotify-primary": require("../../assets/images/brand-logos/spotify-primary.png"),
+  "local:brand:spotify-mark": require("../../assets/images/brand-logos/spotify-mark.png"),
+  "local:brand:youtube-primary": require("../../assets/images/brand-logos/youtube-primary.png"),
+  "local:brand:youtube-mark": require("../../assets/images/brand-logos/youtube-mark.png"),
+  "local:brand:chatgpt-primary": require("../../assets/images/brand-logos/chatgpt-primary.png"),
+  "local:brand:notion-primary": require("../../assets/images/brand-logos/notion-primary.png"),
+  "local:brand:google-one-primary": require("../../assets/images/brand-logos/google-one-primary.png"),
+  "local:brand:google-primary": require("../../assets/images/brand-logos/google-primary.png"),
+  "local:brand:google-mark": require("../../assets/images/brand-logos/google-mark.png"),
+  "local:brand:amazon-prime-primary": require("../../assets/images/brand-logos/amazon-prime-primary.png"),
+  "local:brand:amazon-prime-mark": require("../../assets/images/brand-logos/amazon-prime-mark.png"),
+  "local:brand:prime-video-primary": require("../../assets/images/brand-logos/prime-video-primary.png"),
+  "local:brand:prime-video-alternate": require("../../assets/images/brand-logos/prime-video-alternate.png"),
+  "local:brand:apple-music-primary": require("../../assets/images/brand-logos/apple-music-primary.png"),
+  "local:brand:apple-music-mark": require("../../assets/images/brand-logos/apple-music-mark.png"),
+  "local:brand:apple-tv-primary": require("../../assets/images/brand-logos/apple-tv-primary.png"),
+  "local:brand:apple-tv-alternate": require("../../assets/images/brand-logos/apple-tv-alternate.png"),
+  "local:brand:disney-plus-primary": require("../../assets/images/brand-logos/disney-plus-primary.png"),
+  "local:brand:jio-primary": require("../../assets/images/brand-logos/jio-primary.png"),
+  "local:brand:airtel-primary": require("../../assets/images/brand-logos/airtel-primary.png"),
+  "local:brand:microsoft-primary": require("../../assets/images/brand-logos/microsoft-primary.png"),
+  "local:brand:github-primary": require("../../assets/images/brand-logos/github-primary.png"),
+  "local:brand:github-mark": require("../../assets/images/brand-logos/github-mark.png"),
 };
 
 const LogoCircle = forwardRef<View, LogoCircleProps>(function LogoCircle(
@@ -44,9 +84,9 @@ const LogoCircle = forwardRef<View, LogoCircleProps>(function LogoCircle(
     name,
     color = colors.accent,
     size = "md",
-    bordered = false,
     shadowed = false,
     whiteBackground = false,
+    bordered = false,
     gradient,
     style,
     website,
@@ -54,10 +94,13 @@ const LogoCircle = forwardRef<View, LogoCircleProps>(function LogoCircle(
   ref
 ) {
   const [errorCount, setErrorCount] = useState(0);
+  const [cachedFavicon, setCachedFavicon] = useState<string | null>(null);
+  const imageOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     setErrorCount(0);
-  }, [source]);
+    imageOpacity.setValue(0);
+  }, [source, imageOpacity]);
 
   const numericSize =
     typeof size === "number" ? size : sizeMap[size].size;
@@ -68,7 +111,19 @@ const LogoCircle = forwardRef<View, LogoCircleProps>(function LogoCircle(
     setErrorCount((prev) => prev + 1);
   }, []);
 
+  const handleLoad = useCallback(() => {
+    Animated.spring(imageOpacity, {
+      toValue: 1,
+      useNativeDriver: true,
+      damping: 18,
+      stiffness: 220,
+    }).start();
+  }, [imageOpacity]);
+
   const resolvedSource = typeof source === "string" && LOCAL_LOGOS[source] ? LOCAL_LOGOS[source] : source;
+  const isEmoji = typeof source === "string" && isEmojiString(source);
+  const iconName = typeof source === "string" && isLucideIconSource(source) ? source.slice(5) : null;
+  const LucideIcon = iconName ? getLucideIcon(iconName) : null;
   let currentSource: any = null;
 
   // Helper to extract clean domain
@@ -100,29 +155,40 @@ const LogoCircle = forwardRef<View, LogoCircleProps>(function LogoCircle(
 
   const domain = getDomain();
 
+  useEffect(() => {
+    if (!domain || source) return;
+    let cancelled = false;
+    getFaviconUri(domain).then((uri) => {
+      if (!cancelled) setCachedFavicon(uri);
+    });
+    return () => { cancelled = true; };
+  }, [domain, source]);
+
   if (resolvedSource && errorCount === 0) {
     currentSource = typeof resolvedSource === "string" ? { uri: resolvedSource } : resolvedSource;
   } else if (!resolvedSource && domain && errorCount === 0) {
     currentSource = {
-      uri: `https://www.google.com/s2/favicons?sz=128&domain=${domain}`,
+      uri: cachedFavicon || `https://www.google.com/s2/favicons?sz=128&domain=${domain}`,
     };
   } else if (domain && errorCount === 1) {
-    // Only try Google Favicon as fallback if the failed source was NOT already a google favicon
     const isGoogleFavicon = typeof resolvedSource === "string" && resolvedSource.includes("google.com/s2/favicons");
     if (!isGoogleFavicon) {
       currentSource = {
-        uri: `https://www.google.com/s2/favicons?sz=128&domain=${domain}`,
+        uri: cachedFavicon || `https://www.google.com/s2/favicons?sz=128&domain=${domain}`,
       };
     }
   }
 
   const showImage = currentSource !== null;
+  const hasGlyph = LucideIcon !== null || isEmoji;
   const fallbackGradient = gradient ?? [
     color,
     hexToRGBA(color, 0.6),
   ] as GradientStops;
 
-  const bgColor = showImage ? "#FFFFFF" : (whiteBackground ? "#FFFFFF" : color);
+  // Monogram (initial letter) is the automatic fallback when no source
+  // resolves at all.
+  const renderLetter = !showImage && !hasGlyph;
 
   const wrapperStyle: ViewStyle = {
     width: numericSize,
@@ -131,50 +197,91 @@ const LogoCircle = forwardRef<View, LogoCircleProps>(function LogoCircle(
     borderWidth: bordered ? 1.5 : 0,
     borderColor: showImage
       ? "rgba(255, 255, 255, 0.12)"
-      : (whiteBackground ? "rgba(0, 0, 0, 0.08)" : hexToRGBA(color, 0.4)),
+      : whiteBackground
+        ? "rgba(0, 0, 0, 0.08)"
+        : hexToRGBA(color, 0.4),
     overflow: "hidden",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: bgColor,
+    backgroundColor: showImage || whiteBackground ? "#FFFFFF" : color,
     ...(shadowed ? shadows.card.native : {}),
   };
 
-  if (showImage) {
+  const gradientFill = (
+    children: React.ReactNode
+  ) => (
+    <LinearGradient
+      colors={fallbackGradient}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={{
+        width: numericSize,
+        height: numericSize,
+        borderRadius: numericSize / 2,
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      {children}
+    </LinearGradient>
+  );
+
+  // ── Letter (monogram fallback) ─────────────────────────────────────
+  if (renderLetter) {
     return (
       <View ref={ref} style={[wrapperStyle, style]}>
-        <Image
-          source={currentSource}
-          style={{
-            width: numericSize * 0.68,
-            height: numericSize * 0.68,
-          }}
-          onError={handleError}
-          contentFit="contain"
-        />
+        {gradientFill(
+          <AppText variant={fontKey} weight="700" color={colors.white}>
+            {name ? name.charAt(0).toUpperCase() : "?"}
+          </AppText>
+        )}
       </View>
     );
   }
 
-  return (
-    <View ref={ref} style={[wrapperStyle, style]}>
-      <LinearGradient
-        colors={fallbackGradient}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={{
-          width: numericSize,
-          height: numericSize,
-          borderRadius: numericSize / 2,
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <AppText variant={fontKey} weight="700" color={colors.white}>
-          {name ? name.charAt(0).toUpperCase() : "?"}
-        </AppText>
-      </LinearGradient>
-    </View>
-  );
+  // ── Lucide icon ────────────────────────────────────────────────────
+  if (LucideIcon) {
+    return (
+      <View ref={ref} style={[wrapperStyle, style]}>
+        {gradientFill(<LucideIcon size={numericSize * 0.45} color={colors.white} />)}
+      </View>
+    );
+  }
+
+  // ── Emoji ────────────────────────────────────────────────────────────
+  if (isEmoji) {
+    return (
+      <View ref={ref} style={[wrapperStyle, style]}>
+        {gradientFill(
+          <AppText style={{ fontSize: numericSize * 0.45, lineHeight: numericSize * 0.52 }}>
+            {source as string}
+          </AppText>
+        )}
+      </View>
+    );
+  }
+
+  // ── Image (favicon / bundled asset / custom image) ─────────────────
+  if (showImage) {
+    return (
+      <View ref={ref} style={[wrapperStyle, style]}>
+        <Animated.View style={{ opacity: imageOpacity }}>
+          <Image
+            source={currentSource}
+            style={{
+              width: numericSize * 0.78,
+              height: numericSize * 0.78,
+            }}
+            onError={handleError}
+            onLoad={handleLoad}
+            contentFit="contain"
+          />
+        </Animated.View>
+      </View>
+    );
+  }
+
+  return null;
 });
 
 export default memo(LogoCircle);

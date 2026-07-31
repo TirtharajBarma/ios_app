@@ -5,7 +5,7 @@ import { Swipeable } from "react-native-gesture-handler";
 import { ChevronRight, Trash2, Repeat } from "lucide-react-native";
 import { format, parseISO, differenceInCalendarDays, isSameDay, startOfDay } from "date-fns";
 import * as Haptics from "expo-haptics";
-import { Card, AppText, LogoCircle } from "@/components/ui";
+import { Card, AppText, SubscriptionLogo } from "@/components/ui";
 import { colors, spacing, radius, hexToRGBA, getCurrencySymbol } from "@/constants";
 import { getSubscriptionActivePrice, formatBillingCycleLabel } from "@/utils/date";
 import type { Subscription } from "@/types/subscription";
@@ -60,7 +60,7 @@ function SubscriptionCard({
   onEdit,
   style,
 }: SubscriptionCardProps) {
-  const { name, billingCycle, nextBillingDate, color, isTrial, currency, logoUrl, website } = subscription;
+  const { name, billingCycle, nextBillingDate, color, isTrial, currency } = subscription;
   const status = getRenewalStatus(nextBillingDate);
   const activePrice = getSubscriptionActivePrice(subscription);
   const symbol = getCurrencySymbol(currency);
@@ -126,14 +126,12 @@ function SubscriptionCard({
             flex: 1,
           }}
         >
-          <LogoCircle
-            source={logoUrl}
+          <SubscriptionLogo
+            fields={subscription}
             name={name}
             color={color}
             size="md"
-            bordered
             style={{ marginRight: spacing[16] }}
-            website={website}
           />
           <View style={{ flex: 1 }}>
             <View

@@ -1,9 +1,10 @@
 import React, { memo } from "react";
 import { View, StyleSheet } from "react-native";
-import { AppText, LogoCircle } from "@/components/ui";
-import { colors, spacing, radius, hexToRGBA, getCurrencySymbol } from "@/constants";
+import { AppText, SubscriptionLogo } from "@/components/ui";
+import { colors, spacing, radius, getCurrencySymbol } from "@/constants";
 import { getSubscriptionActivePrice } from "@/utils/date";
 import { useSettingsStore } from "@/store/useSettingsStore";
+import type { LogoFields } from "@/utils/logo";
 
 export interface DetailsHeroProps {
   name: string;
@@ -13,9 +14,7 @@ export interface DetailsHeroProps {
   brandColor: string;
   category: string;
   isTrial: boolean;
-  logoUrl?: string;
-  whiteBackground?: boolean;
-  website?: string;
+  logoFields?: LogoFields;
   promoEnabled?: boolean;
   promoPrice?: number;
   promoEndDate?: string;
@@ -32,9 +31,7 @@ function DetailsHero({
   brandColor,
   category,
   isTrial,
-  logoUrl,
-  whiteBackground,
-  website,
+  logoFields,
   promoEnabled,
   promoPrice,
   promoEndDate,
@@ -75,16 +72,13 @@ function DetailsHero({
 
       <View style={styles.content}>
         {/* Large Logo */}
-        <LogoCircle
-          source={logoUrl}
+        <SubscriptionLogo
+          fields={logoFields}
           name={name}
-          color={colors.white}
+          color={brandColor}
           size={80}
-          bordered
           shadowed
-          whiteBackground={whiteBackground}
           style={styles.logo}
-          website={website}
         />
 
         {/* Subscription Name */}
