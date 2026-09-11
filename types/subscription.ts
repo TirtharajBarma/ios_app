@@ -104,6 +104,11 @@ export interface Subscription {
 
   isPaused?: boolean;
 
+  /** Whether this subscription is shared with a Supabase share-group. */
+  isShared?: boolean;
+  /** The private group this subscription is shared into. */
+  sharedGroupId?: string;
+
   createdAt: string;
   updatedAt: string;
 }

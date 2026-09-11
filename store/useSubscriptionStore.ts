@@ -12,6 +12,7 @@ import AsyncStorage from "@/utils/storage";
 import { getExchangeRates } from "@/utils/currency";
 import { triggerAutoBackup } from "@/utils/backup";
 import { computeSavings, type SavingsResult } from "@/utils/savings";
+import { pushSharedSubscription, syncSharedSubscriptions } from "@/utils/sync";
 
 export interface VaultState {
   totalSavings: number;
@@ -43,6 +44,8 @@ interface SubscriptionState {
   convertAllCurrencies: (oldCurrency: string, newCurrency: string) => Promise<void>;
   updateReminderDaysForDefaultTiming: (prevDays: number, newDays: number) => Promise<void>;
   importSubscriptions: (importedSubs: NewSubscriptionInput[]) => Promise<void>;
+  /** Pull shared subscriptions from Supabase and refresh local state. */
+  syncGroup: () => Promise<void>;
 
   // Compatibility aliases
   load: () => Promise<void>;
@@ -320,6 +323,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     scheduleReminder(sub).catch(() => {});
     triggerAutoBackup(currentSubscriptions).catch(() => {});
     refreshVault(currentSubscriptions).then((vault) => set({ vault }));
+    pushSharedSubscription(sub).catch(() => {});
     return sub;
   },
 
@@ -408,10 +412,12 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     }
     triggerAutoBackup(currentSubscriptions).catch(() => {});
     refreshVault(currentSubscriptions).then((vault) => set({ vault }));
+    if (updatedSub) pushSharedSubscription(updatedSub).catch(() => {});
   },
 
   removeSubscription: async (id) => {
     await db.initializeDatabase();
+    const removed = get().subscriptions.find((s) => s.id === id);
     await db.deleteSubscription(id);
     cancelReminder(id).catch(() => {});
     let currentSubscriptions: Subscription[] = [];
@@ -422,6 +428,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     });
     triggerAutoBackup(currentSubscriptions).catch(() => {});
     refreshVault(currentSubscriptions).then((vault) => set({ vault }));
+    if (removed?.isShared) pushSharedSubscription({ ...removed, isShared: false }).catch(() => {});
   },
 
   convertAllCurrencies: async (oldCurrency, newCurrency) => {
@@ -571,6 +578,13 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
 
   refresh: async () => {
     await get().loadSubscriptions();
+  },
+
+  syncGroup: async () => {
+    const changed = await syncSharedSubscriptions();
+    if (changed > 0) {
+      await get().refresh();
+    }
   },
 
   // ─── Compatibility Aliases ─────────────────────────────────────────

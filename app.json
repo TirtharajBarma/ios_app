@@ -51,7 +51,9 @@
       "router": {},
       "eas": {
         "projectId": "382b12ce-7c53-4d52-9dd2-8206e0bdea03"
-      }
+      },
+      "supabaseUrl": "https://nvsjrfzzessvynnuurcg.supabase.co",
+      "supabaseAnonKey": "sb_publishable_hmdnizlu8wzE6EwOj2IJvw_0mc9qG7J"
     },
     "owner": "tirtharaj_barma"
   }

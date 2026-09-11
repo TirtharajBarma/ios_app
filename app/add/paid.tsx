@@ -25,6 +25,10 @@ import {
   Palette,
   Smile,
   ImagePlus,
+  LockKeyhole,
+  Share2,
+  Users,
+  Check,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { format, addMonths, addYears } from "date-fns";
@@ -35,6 +39,7 @@ import * as ImagePicker from "expo-image-picker";
 import { colors, spacing, radius, hexToRGBA, CURRENCIES, getCurrencySymbol } from "@/constants";
 import {
   AppText,
+  Avatar,
   LogoCircle,
   SwipeDownSheet,
   Toggle,
@@ -50,6 +55,16 @@ import {
   getServiceById,
   type BrandLogoVariantKey,
 } from "@/assets/data/services";
+
+function avatarColor(seed: string) {
+  const palette = [
+    "#0A84FF", "#30D158", "#FF453A", "#FF9F0A",
+    "#BF5AF2", "#64D2FF", "#FF375F", "#AC8E68",
+  ];
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) | 0;
+  return palette[Math.abs(h) % palette.length];
+}
 
 /* ── Constants ──────────────────────────────────────────────────────── */
 
@@ -368,6 +383,19 @@ export default function UnifiedFormScreen() {
     "weeks" | "months" | "years" | "cycles"
   >(() => existingSub?.promoDurationUnit || "months");
 
+  // Shared Group (supabase)
+  const shareGroups = useSettingsStore((s) => s.shareGroups);
+  const [selectedGroupId, setSelectedGroupId] = useState<string | undefined>(
+    () => existingSub?.sharedGroupId || shareGroups[0]?.id,
+  );
+  const selectedGroup = useMemo(
+    () => shareGroups.find((g) => g.id === selectedGroupId) ?? shareGroups[0],
+    [shareGroups, selectedGroupId],
+  );
+  const [isShared, setIsShared] = useState(
+    () => existingSub?.isShared || false,
+  );
+
   const previewPrice = useMemo(() => {
     const basePrice = Number(amount || 0);
     const val = Number(splitValue || 1);
@@ -375,6 +403,12 @@ export default function UnifiedFormScreen() {
     if (splitType === "percentage") return basePrice * (val / 100);
     return val;
   }, [amount, splitType, splitValue]);
+
+  const splitPeopleCount = useMemo(() => {
+    if (splitType !== "people") return null;
+    const people = Math.max(1, Math.floor(Number(splitValue || 1)));
+    return Number.isFinite(people) ? people : 1;
+  }, [splitType, splitValue]);
 
   const [splitCardY, setSplitCardY] = useState(0);
   const [promoCardY, setPromoCardY] = useState(0);
@@ -541,6 +575,7 @@ export default function UnifiedFormScreen() {
     promoPrice,
     promoDurationValue,
     promoDurationUnit,
+    isShared,
   }));
 
   const hasUnsavedChanges = useMemo(() => {
@@ -572,7 +607,8 @@ export default function UnifiedFormScreen() {
       initialFormState.promoEnabled !== promoEnabled ||
       initialFormState.promoPrice !== promoPrice ||
       initialFormState.promoDurationValue !== promoDurationValue ||
-      initialFormState.promoDurationUnit !== promoDurationUnit
+      initialFormState.promoDurationUnit !== promoDurationUnit ||
+      initialFormState.isShared !== isShared
     );
   }, [
     amount,
@@ -603,6 +639,7 @@ export default function UnifiedFormScreen() {
     promoPrice,
     promoDurationValue,
     promoDurationUnit,
+    isShared,
     initialFormState,
   ]);
 
@@ -878,6 +915,11 @@ export default function UnifiedFormScreen() {
       promoDurationUnit: promoEnabled ? promoDurationUnit : undefined,
       promoStartDate: promoEnabled ? startDate.toISOString() : undefined,
       promoEndDate: calculatedPromoEndDate,
+      isShared: selectedGroup && splitEnabled ? isShared : false,
+      sharedGroupId:
+        selectedGroup && splitEnabled && isShared
+          ? selectedGroup.id
+          : undefined,
     };
 
     try {
@@ -1341,7 +1383,10 @@ export default function UnifiedFormScreen() {
               <SwitchRow
                 label="Split bill / Share cost"
                 value={splitEnabled}
-                onValueChange={setSplitEnabled}
+                onValueChange={(value) => {
+                  setSplitEnabled(value);
+                  if (!value) setIsShared(false);
+                }}
               />
               {splitEnabled && (
                 <>
@@ -1416,13 +1461,20 @@ export default function UnifiedFormScreen() {
                   {Number(amount || 0) > 0 && (
                     <>
                       <RowDivider />
-                      <Row height={38}>
-                        <AppText
-                          variant="caption1"
-                          color={colors.textSecondary}
-                        >
-                          Your share:
-                        </AppText>
+                      <View style={styles.splitPreview}>
+                        <View>
+                          <AppText
+                            variant="caption1"
+                            color={colors.textSecondary}
+                          >
+                            Your share
+                          </AppText>
+                          {splitPeopleCount ? (
+                            <AppText variant="caption2" color={colors.textMuted}>
+                              Split across {splitPeopleCount} people
+                            </AppText>
+                          ) : null}
+                        </View>
                         <AppText
                           variant="callout"
                           weight="700"
@@ -1431,9 +1483,119 @@ export default function UnifiedFormScreen() {
                           {getCurrencySymbol(currency)}
                           {previewPrice.toFixed(2)} / cycle
                         </AppText>
-                      </Row>
+                      </View>
                     </>
                   )}
+                  <RowDivider />
+                  <View style={styles.groupSharePanel}>
+                    <View style={styles.groupShareHeader}>
+                      <View style={styles.groupShareTitle}>
+                        <View
+                          style={[
+                            styles.groupShareIcon,
+                            isShared && styles.groupShareIconActive,
+                          ]}
+                        >
+                          {isShared ? (
+                            <Share2 size={15} color={colors.white} />
+                          ) : (
+                            <LockKeyhole size={15} color={colors.textSecondary} />
+                          )}
+                        </View>
+                        <View style={styles.groupShareCopy}>
+                          <AppText variant="subheadline" weight="700" color={colors.white}>
+                            Share this split with group
+                          </AppText>
+                          <AppText
+                            variant="caption1"
+                            color={colors.textMuted}
+                            style={styles.groupShareSubcopy}
+                          >
+                            {selectedGroup
+                              ? isShared
+                                ? `Only ${selectedGroup.name} members can see it.`
+                                : "Private on this phone until you turn this on."
+                              : "Create or join a group to sync this split."}
+                          </AppText>
+                        </View>
+                      </View>
+                      {selectedGroup ? (
+                        <View style={sectionStyles.switchSlot}>
+                          <Toggle
+                            value={isShared}
+                            onValueChange={(value) => {
+                              Haptics.selectionAsync();
+                              setIsShared(value);
+                            }}
+                          />
+                        </View>
+                      ) : null}
+                    </View>
+
+                    {/* Vertical group list — only visible when sharing is ON */}
+                    {isShared && selectedGroup && shareGroups.length > 0 && (
+                      <View style={styles.groupList}>
+                        <ScrollView
+                          nestedScrollEnabled
+                          showsVerticalScrollIndicator={false}
+                          contentContainerStyle={styles.groupListContent}
+                        >
+                          {shareGroups.map((g) => {
+                            const active = g.id === selectedGroup.id;
+                            return (
+                              <TouchableOpacity
+                                key={g.id}
+                                onPress={() => {
+                                  Haptics.selectionAsync();
+                                  setSelectedGroupId(g.id);
+                                }}
+                                activeOpacity={0.8}
+                                style={[styles.groupRow, active && styles.groupRowActive]}
+                              >
+                                <Avatar
+                                  size="small"
+                                  name={g.name}
+                                  bgColor={avatarColor(g.id)}
+                                />
+                                <View style={styles.groupRowText}>
+                                  <AppText
+                                    variant="subheadline"
+                                    weight="600"
+                                    color={colors.white}
+                                    numberOfLines={1}
+                                  >
+                                    {g.name}
+                                  </AppText>
+                                </View>
+                                {active ? (
+                                  <View style={styles.groupRowCheck}>
+                                    <Check size={14} color={colors.accent} />
+                                  </View>
+                                ) : null}
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </ScrollView>
+                      </View>
+                    )}
+
+                    {/* No groups — show CTA to create/join one */}
+                    {!selectedGroup && (
+                      <TouchableOpacity
+                        onPress={() => {
+                          Haptics.selectionAsync();
+                          router.push("/settings/shared");
+                        }}
+                        activeOpacity={0.78}
+                        style={styles.createGroupButton}
+                      >
+                        <Users size={16} color={colors.white} />
+                        <AppText variant="subheadline" weight="700" color={colors.white}>
+                          Set up a private group
+                        </AppText>
+                      </TouchableOpacity>
+                    )}
+                  </View>
                 </>
               )}
             </SectionCard>
@@ -2640,10 +2802,104 @@ const styles = StyleSheet.create({
     fontSize: 36,
     fontWeight: "700",
     color: colors.white,
-    letterSpacing: -1,
+    letterSpacing: 0,
     paddingHorizontal: spacing[4],
     paddingBottom: spacing[12],
     paddingTop: 0,
+  },
+
+  splitPreview: {
+    minHeight: 56,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing[12],
+    paddingVertical: spacing[12],
+  },
+  groupSharePanel: {
+    paddingVertical: spacing[16],
+    gap: spacing[12],
+  },
+  groupShareHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing[12],
+  },
+  groupShareTitle: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[12],
+  },
+  groupShareIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.07)",
+    borderWidth: 0.5,
+    borderColor: "rgba(255, 255, 255, 0.1)",
+  },
+  groupShareIconActive: {
+    backgroundColor: "rgba(10, 132, 255, 0.95)",
+    borderColor: "rgba(255, 255, 255, 0.24)",
+  },
+  groupShareCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: 3,
+  },
+  groupShareSubcopy: {
+    lineHeight: 17,
+  },
+  createGroupButton: {
+    minHeight: 50,
+    borderRadius: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing[8],
+    backgroundColor: "rgba(10, 132, 255, 0.9)",
+  },
+  // Vertical group list (shown when sharing is ON)
+  groupList: {
+    maxHeight: 200,
+    marginTop: spacing[12],
+    marginHorizontal: -spacing[4],
+  },
+  groupListContent: {
+    paddingHorizontal: spacing[4],
+  },
+  groupRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[8],
+    paddingVertical: spacing[8],
+    paddingHorizontal: spacing[12],
+    borderRadius: radius[12],
+    marginBottom: spacing[4],
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderWidth: 0.5,
+    borderColor: "rgba(255,255,255,0.06)",
+  },
+  groupRowActive: {
+    backgroundColor: hexToRGBA(colors.accent, 0.15),
+    borderColor: hexToRGBA(colors.accent, 0.3),
+  },
+  groupRowText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  groupRowCheck: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: hexToRGBA(colors.accent, 0.15),
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   // Customization sheet

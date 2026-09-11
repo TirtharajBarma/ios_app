@@ -10,11 +10,20 @@ import { initDatabase } from "@/database/database";
 import { requestNotificationPermissions } from "@/utils/notifications";
 import AsyncStorage from "@/utils/storage";
 import { useSettingsStore } from "@/store/useSettingsStore";
+import { useSubscriptionStore } from "@/store/useSubscriptionStore";
+import { isSupabaseConfigured } from "@/api/supabase";
 import { colors, radius } from "@/constants";
 import { AppText } from "@/components/ui";
 import { authState } from "@/utils/auth";
 
 const ONBOARDING_KEY = "@onboarding_complete";
+
+/** Debounced fire-and-forget pull of shared subscriptions (no-op when not configured). */
+function triggerSharedSync() {
+  const { shareGroups } = useSettingsStore.getState();
+  if (!shareGroups.length || !isSupabaseConfigured()) return;
+  useSubscriptionStore.getState().syncGroup().catch(() => {});
+}
 
 export default function RootLayout() {
   const router = useRouter();
@@ -39,7 +48,11 @@ export default function RootLayout() {
           return;
         }
 
-        const settingsStr = await AsyncStorage.getItem("@subo_settings_v2");
+        if (useSettingsStore.getState().shareGroups.length) {
+          triggerSharedSync();
+        }
+
+        const settingsStr = await AsyncStorage.getItem("@subo_settings_v3");
         if (settingsStr) {
           const parsed = JSON.parse(settingsStr);
           if (parsed.faceIdEnabled) {
@@ -111,6 +124,8 @@ export default function RootLayout() {
           setIsLocked(true);
           authenticate();
         }
+
+        triggerSharedSync();
       }
       appState.current = nextAppState;
     });

@@ -18,9 +18,9 @@ export async function createSubscription(
         paymentMethod, brandColor, notes, reminderEnabled, reminderDays,
         splitEnabled, splitType, splitValue,
         promoEnabled, promoPrice, promoDurationValue, promoDurationUnit, promoStartDate, promoEndDate,
-        logoStyle, originalLogo, logoIcon, logoImage, serviceId, brandVariant,
+        logoStyle, originalLogo, logoIcon, logoImage, serviceId, brandVariant, isShared, sharedGroupId,
         createdAt, updatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
     `;
 
     await db.runAsync(
@@ -58,6 +58,8 @@ export async function createSubscription(
       sub.logoImage ?? null,
       sub.serviceId ?? null,
       sub.brandVariant ?? null,
+      sub.isShared ?? 0,
+      sub.sharedGroupId ?? null,
       now,
       now
     );

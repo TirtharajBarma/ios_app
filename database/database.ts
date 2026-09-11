@@ -141,6 +141,8 @@ function mapDbToSubscription(dbSub: DbSubscription): Subscription {
     promoEndDate: dbSub.promoEndDate ?? undefined,
 
     isPaused: dbSub.isPaused === 1,
+    isShared: dbSub.isShared === 1,
+    sharedGroupId: dbSub.sharedGroupId || undefined,
     serviceId: dbSub.serviceId || undefined,
     brandVariant: (dbSub.brandVariant as any) || undefined,
     logoIcon: dbSub.logoIcon || undefined,
@@ -187,6 +189,8 @@ function mapDomainToDb(id: string, input: NewSubscriptionInput): Omit<DbSubscrip
     promoStartDate: input.promoStartDate || null,
     promoEndDate: input.promoEndDate || null,
     isPaused: input.isPaused ? 1 : 0,
+    isShared: input.isShared ? 1 : 0,
+    sharedGroupId: input.sharedGroupId || null,
     serviceId: input.serviceId || null,
     brandVariant: input.brandVariant || null,
     logoIcon: input.logoIcon || null,
@@ -290,6 +294,8 @@ export async function updateSubscription(
   if (input.promoStartDate !== undefined) dbUpdates.promoStartDate = input.promoStartDate;
   if (input.promoEndDate !== undefined) dbUpdates.promoEndDate = input.promoEndDate;
   if (input.isPaused !== undefined) dbUpdates.isPaused = input.isPaused ? 1 : 0;
+  if (input.isShared !== undefined) dbUpdates.isShared = input.isShared ? 1 : 0;
+  if (input.sharedGroupId !== undefined) dbUpdates.sharedGroupId = input.sharedGroupId || null;
 
   await dbUpdateSubscription(id, dbUpdates);
 }
