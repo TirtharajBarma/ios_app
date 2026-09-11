@@ -202,7 +202,7 @@ export default function NotificationsScreen() {
           activeOpacity={0.7}
           onPress={() => Linking.openURL(OPEN_SETTINGS_URL)}
         >
-          <AppText variant="footnote" color={colors.accent}>Manage in iPhone Settings</AppText>
+          <AppText variant="footnote" color={colors.accent}>Manage in {Platform.OS === "ios" ? "iPhone" : "Android"} Settings</AppText>
           <ExternalLink size={14} color={colors.accent} />
         </TouchableOpacity>
 

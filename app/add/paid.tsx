@@ -1012,7 +1012,11 @@ export default function UnifiedFormScreen() {
         </PressableScale>
       </View>
 
-      <View style={{ flex: 1 }}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "android" ? "height" : undefined}
+        keyboardVerticalOffset={0}
+      >
         <ScrollView
           ref={scrollRef}
           showsVerticalScrollIndicator={false}
@@ -1555,7 +1559,7 @@ export default function UnifiedFormScreen() {
           </View>
 
         </ScrollView>
-      </View>
+      </KeyboardAvoidingView>
 
       {/* ── Customization Sheet ────────────────────────────────────── */}
       <SwipeDownSheet

@@ -171,7 +171,7 @@ export default function SettingsIndex() {
 
         <View style={{ alignItems: "center", marginTop: spacing[32], marginBottom: spacing[16] }}>
           <AppText variant="footnote" color="rgba(255, 255, 255, 0.5)">
-            Built with ❤️ by Tirtharaj Barma
+            Built with ❤️ by Mamata Ray
           </AppText>
         </View>
       </ScrollView>

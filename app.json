@@ -46,6 +46,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "382b12ce-7c53-4d52-9dd2-8206e0bdea03"
+      }
+    },
+    "owner": "tirtharaj_barma"
   }
 }
