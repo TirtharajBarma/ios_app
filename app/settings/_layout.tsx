@@ -57,6 +57,18 @@ export default function SettingsLayout() {
           gestureEnabled: true,
         }}
       />
+      <Stack.Screen
+        name="budget"
+        options={{
+          gestureEnabled: true,
+        }}
+      />
+      <Stack.Screen
+        name="data"
+        options={{
+          gestureEnabled: true,
+        }}
+      />
     </Stack>
   );
 }

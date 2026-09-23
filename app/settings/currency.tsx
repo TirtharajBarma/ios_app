@@ -9,6 +9,7 @@ import { colors, spacing, radius, CURRENCIES } from "@/constants";
 import { AppText } from "@/components/ui";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
+import { useExpenseStore } from "@/store/useExpenseStore";
 
 export default function CurrencyScreen() {
   const router = useRouter();
@@ -48,6 +49,7 @@ export default function CurrencyScreen() {
                     Haptics.selectionAsync();
                     await convertAllCurrencies(currencyCode, item.code);
                     await setCurrencyCode(item.code);
+                    useExpenseStore.getState().setCurrency(item.code, item.symbol);
                     router.back();
                   }}
                   style={[styles.currencyRow, isSelected && styles.currencyRowSelected]}
