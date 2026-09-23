@@ -2,7 +2,7 @@ import type { SQLiteDatabase } from "expo-sqlite";
 import { CREATE_TABLES_SQL, CREATE_INDEXES_SQL } from "./schema";
 import { services, type Service } from "@/assets/data/services";
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 6;
 
 /** Columns that must exist for the current app version. */
 const REQUIRED_COLUMNS = [
@@ -32,6 +32,8 @@ const REQUIRED_COLUMNS = [
   "logoImage",
   "serviceId",
   "brandVariant",
+  "isShared",
+  "sharedGroupId",
 ];
 
 /** SQLite ALTER TABLE column defaults by column name. */
@@ -62,6 +64,8 @@ const COLUMN_DEFAULTS: Record<string, string> = {
   logoImage: "NULL",
   serviceId: "NULL",
   brandVariant: "NULL",
+  isShared: "0",
+  sharedGroupId: "NULL",
 };
 
 export async function runMigrations(db: SQLiteDatabase): Promise<void> {
@@ -254,6 +258,38 @@ export async function runMigrations(db: SQLiteDatabase): Promise<void> {
 
       await db.execAsync("PRAGMA user_version = 4;");
       console.log("Database: Successfully migrated to version 4.");
+    }
+
+    if (currentVersion < 5) {
+      console.log("Database: Running migration to version 5 (shared subscriptions)...");
+
+      await db.execAsync("BEGIN TRANSACTION;");
+      try {
+        await ensureColumns(db);
+        await db.execAsync("COMMIT;");
+      } catch (error) {
+        await db.execAsync("ROLLBACK;");
+        throw error;
+      }
+
+      await db.execAsync("PRAGMA user_version = 5;");
+      console.log("Database: Successfully migrated to version 5.");
+    }
+
+    if (currentVersion < 6) {
+      console.log("Database: Running migration to version 6 (multi-group sharing)...");
+
+      await db.execAsync("BEGIN TRANSACTION;");
+      try {
+        await ensureColumns(db);
+        await db.execAsync("COMMIT;");
+      } catch (error) {
+        await db.execAsync("ROLLBACK;");
+        throw error;
+      }
+
+      await db.execAsync("PRAGMA user_version = 6;");
+      console.log("Database: Successfully migrated to version 6.");
     }
   } catch (error) {
     console.error("Database migration error:", error);

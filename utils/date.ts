@@ -160,7 +160,18 @@ export function getNextRenewalDate(
       }
     } else {
       const safeMonths = customMonths > 0 ? customMonths : 1;
-      next = addMonths(start, periods * safeMonths);
+      if (safeMonths < 1) {
+        // Handle fractional months (e.g. custom:10:days mapped as 10/30) by calculating days
+        const days = Math.max(1, Math.round(safeMonths * 30));
+        next = addDays(start, periods * days);
+      } else {
+        next = addMonths(start, periods * safeMonths);
+      }
+    }
+
+    // Safety check: ensure `next` strictly advances past previous value to prevent infinite loop
+    if (next <= start && periods > 0) {
+      next = addDays(start, periods);
     }
   }
 
@@ -277,15 +288,18 @@ export function getSubscriptionActivePrice(sub: {
   }
 
   // 2. Splitting / Shared bill
-  if (sub.splitEnabled && sub.splitType && sub.splitValue !== undefined) {
+  if (sub.splitEnabled && sub.splitType && sub.splitValue !== undefined && sub.splitValue !== null) {
     if (sub.splitType === "people") {
-      const count = Number(sub.splitValue) || 1;
+      const val = Number(sub.splitValue);
+      const count = !isNaN(val) && val > 0 ? val : 1;
       basePrice = basePrice / count;
     } else if (sub.splitType === "percentage") {
-      const pct = Number(sub.splitValue) || 100;
+      const val = Number(sub.splitValue);
+      const pct = !isNaN(val) ? val : 100;
       basePrice = basePrice * (pct / 100);
     } else if (sub.splitType === "share") {
-      basePrice = Number(sub.splitValue) || basePrice;
+      const val = Number(sub.splitValue);
+      basePrice = !isNaN(val) ? val : basePrice;
     }
   }
 

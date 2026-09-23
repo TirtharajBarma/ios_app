@@ -134,6 +134,83 @@ Xcode will generate a fresh development profile and reinstall the app.
 
 ---
 
+## Building & Sharing an Android APK (EAS Cloud)
+
+The fastest way to share the app with friends/family: build an **APK in Expo's cloud** (no Android SDK needed on your Mac) and send them the file.
+
+### The daily loop (make a change → ship a new APK)
+
+```bash
+# 1. Make your code changes, then verify locally
+npm run ios                     # or npx expo start and test in Expo Go
+
+# 2. Build a new APK in the cloud (~5 min, cached after the first build)
+npx eas build --platform android --profile preview
+
+# 3. Download the newest APK into the project folder
+npx eas build:download --platform android
+
+# 4. (Optional) rename it for clarity
+mv app-release.apk subscription.apk
+```
+
+Then send `subscription.apk` to the tester via WhatsApp, Google Drive, USB, or email. They just **tap → Install → Replace**. Existing app data is kept because the bundle ID (`com.tirtharajbarma.subscription`) never changes.
+
+### First‑time setup (only once)
+
+```bash
+npx eas login                                   # requires a free Expo account
+npx eas init --force --non-interactive          # creates/link the EAS project
+```
+
+An `eas.json` with a `preview` profile (builds an **APK**, not the Play-Store AAB) is already committed:
+
+```json
+{
+  "cli": { "version": ">= 3.0.0" },
+  "build": {
+    "development": { "developmentClient": true, "distribution": "internal" },
+    "preview":     { "distribution": "internal", "android": { "buildType": "apk" } },
+    "production":  {}
+  }
+}
+```
+
+### Checking / letting EAS run in the background
+
+```bash
+npx eas build:list --platform android --limit 1    # view latest build status
+npx eas build:view <build-id>                       # detailed status of one build
+npx eas build:download --build-id <build-id>        # download a specific build
+```
+
+Cloud builds keep running even if you close your laptop. Check the dashboard at `https://expo.dev/accounts/<username>/projects/subscription`.
+
+### Installing the APK on a phone wired via USB
+
+```bash
+adb install /path/to/subscription.apk
+```
+
+> **Android note:** on Android, `expo-local-authentication` uses the **fingerprint** (or face unlock), not Face ID — Face ID is an iPhone‑only hardware feature. This is expected behaviour, not a bug.
+
+### Alternative: tester builds from Git themselves
+
+Only if the tester has a Mac + Expo account + Android SDK:
+
+```bash
+git clone <your-repo-url>
+cd subscription
+npm install
+npx eas login
+npx eas build --platform android --profile preview
+npx eas build:download --platform android
+```
+
+> Prefer the **first way** — sending a ready APK needs zero setup on their side.
+
+---
+
 ## Project Structure (high‑level)
 ```
 subscription/
@@ -165,6 +242,8 @@ npx expo run:ios --device                         # Debug build on a connected i
 npx expo run:ios --device --configuration Release   # Release (standalone) build
 npm run typecheck        # TypeScript checking
 npm run lint             # ESLint
+npx eas build --platform android --profile preview   # Build shared Android APK (cloud)
+npx eas build:download --platform android            # Download the newest APK
 ```
 
 ---

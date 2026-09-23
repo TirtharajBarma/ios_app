@@ -38,6 +38,8 @@ export interface DbSubscription {
   logoImage?: string | null;
   serviceId?: string | null;
   brandVariant?: string | null;
+  isShared?: number; // 0 = not shared, 1 = shared with group
+  sharedGroupId?: string | null; // which group this sub is shared into
 
   createdAt: string;       // ISO Date String
   updatedAt: string;       // ISO Date String
@@ -88,6 +90,8 @@ export const CREATE_TABLES_SQL = `
     logoImage TEXT,
     serviceId TEXT,
     brandVariant TEXT,
+    isShared INTEGER DEFAULT 0,
+    sharedGroupId TEXT,
     createdAt TEXT NOT NULL,
     updatedAt TEXT NOT NULL
   );

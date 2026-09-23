@@ -40,6 +40,18 @@ export default function SettingsLayout() {
         }}
       />
       <Stack.Screen
+        name="shared"
+        options={{
+          gestureEnabled: true,
+        }}
+      />
+      <Stack.Screen
+        name="shared/[id]"
+        options={{
+          gestureEnabled: true,
+        }}
+      />
+      <Stack.Screen
         name="privacy"
         options={{
           gestureEnabled: true,

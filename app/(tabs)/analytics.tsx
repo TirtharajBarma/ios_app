@@ -24,7 +24,7 @@ import {
 import SummaryCard from "@/components/cards/SummaryCard";
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
-import { getSubscriptionActivePrice } from "@/utils/date";
+import { getSubscriptionActivePrice, toMonthly } from "@/utils/date";
 import type { Subscription } from "@/types/subscription";
 
 function AnalyticsScreen() {
@@ -78,21 +78,10 @@ function AnalyticsScreen() {
   const { categories, maxCategorySpend } = React.useMemo(() => {
     const categoryMap = new Map<string, number>();
     for (const sub of subscriptions) {
-      if (sub.isTrial) continue;
-      const cat = sub.category.charAt(0).toUpperCase() + sub.category.slice(1);
-      const monthly = sub.billingCycle === "yearly"
-        ? sub.price / 12
-        : sub.billingCycle === "quarterly"
-        ? sub.price / 3
-        : sub.billingCycle === "semi-yearly"
-        ? sub.price / 6
-        : sub.billingCycle === "weekly"
-        ? sub.price * 52 / 12
-        : sub.billingCycle === "bi-weekly"
-        ? sub.price * 26 / 12
-        : sub.billingCycle === "custom" && sub.customIntervalMonths
-        ? sub.price / sub.customIntervalMonths
-        : sub.price;
+      if (sub.isTrial || sub.isPaused) continue;
+      const cat = sub.category ? sub.category.charAt(0).toUpperCase() + sub.category.slice(1) : "Other";
+      const activePrice = getSubscriptionActivePrice(sub);
+      const monthly = toMonthly(activePrice, sub.rawBillingCycle || sub.billingCycle, sub.customIntervalMonths);
       categoryMap.set(cat, (categoryMap.get(cat) || 0) + monthly);
     }
     const sorted = Array.from(categoryMap.entries()).sort((a, b) => b[1] - a[1]);

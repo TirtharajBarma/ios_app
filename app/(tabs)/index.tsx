@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import {
   View,
   StyleSheet,
@@ -276,6 +276,8 @@ export default function HomeScreen() {
   const { subscriptions, stats, loadSubscriptions, removeSubscription, isLoaded, vault } =
     useSubscriptionStore();
   const [sortBy, setSortBy] = useState<"date" | "price" | "name">("date");
+  const [showOnlyShared, setShowOnlyShared] = useState(false);
+  const hasSharedSubs = useMemo(() => subscriptions.some((s) => s.isShared), [subscriptions]);
   const [cardPage, setCardPage] = useState(0);
   const [explanationType, setExplanationType] = useState<ExplanationType | null>(null);
   const [showSavingsSheet, setShowSavingsSheet] = useState(false);
@@ -410,7 +412,10 @@ export default function HomeScreen() {
   };
 
   const sortedSubscriptions = React.useMemo(() => {
-    const list = [...subscriptions];
+    let list = [...subscriptions];
+    if (showOnlyShared) {
+      list = list.filter((s) => !!s.isShared);
+    }
     if (sortBy === "price") {
       return list.sort((a, b) => getSubscriptionActivePrice(b) - getSubscriptionActivePrice(a));
     } else if (sortBy === "name") {
@@ -423,7 +428,7 @@ export default function HomeScreen() {
           new Date(b.nextBillingDate).getTime(),
       );
     }
-  }, [subscriptions, sortBy]);
+  }, [subscriptions, sortBy, showOnlyShared]);
 
   const groupedSections = React.useMemo(() => {
     const thisMonth: typeof subscriptions = [];
@@ -1019,6 +1024,7 @@ export default function HomeScreen() {
                             {sub.splitEnabled && (
                               <Users size={11} color={colors.accent} />
                             )}
+                            {sub.isShared && <View style={styles.upNextSharedDot} />}
                             <AppText
                               style={[styles.upNextSubtitle, { marginTop: 0 }]}
                               numberOfLines={1}
@@ -1050,20 +1056,34 @@ export default function HomeScreen() {
                   }}
                   style={styles.titleChevronRow}
                 >
-                  <AppText style={styles.sectionTitle}>Subscriptions ({subscriptions.length})</AppText>
+                  <AppText style={styles.sectionTitle} numberOfLines={1}>Subscriptions ({subscriptions.length})</AppText>
                   <ChevronRight
                     size={22}
                     color="rgba(255, 255, 255, 0.4)"
                     style={{ marginLeft: 6, marginTop: 4 }}
                   />
                 </TouchableOpacity>
-                <PressableScale
-                  onPress={toggleSort}
-                  scale={0.95}
-                  style={styles.sortToggle}
-                >
-                  <AppText style={styles.sortText}>{getSortLabel()}</AppText>
-                </PressableScale>
+                <View style={styles.headerActions}>
+                  {hasSharedSubs && (
+                    <PressableScale
+                      onPress={() => { Haptics.selectionAsync(); setShowOnlyShared((v) => !v); }}
+                      scale={0.95}
+                      style={[styles.sharedToggle, showOnlyShared && styles.sharedToggleActive]}
+                    >
+                      <Users size={12} color={showOnlyShared ? colors.success : colors.textMuted} />
+                      <AppText style={[styles.sharedToggleText, showOnlyShared && styles.sharedToggleTextActive]}>
+                        Shared
+                      </AppText>
+                    </PressableScale>
+                  )}
+                  <PressableScale
+                    onPress={toggleSort}
+                    scale={0.95}
+                    style={styles.sortToggle}
+                  >
+                    <AppText style={styles.sortText}>{getSortLabel()}</AppText>
+                  </PressableScale>
+                </View>
               </View>
 
               {/* Grouped Lists by Due Month */}
@@ -1139,6 +1159,11 @@ export default function HomeScreen() {
                                     {sub.isPaused && (
                                       <View style={styles.pausedPill}>
                                         <AppText style={styles.pausedPillText}>PAUSED</AppText>
+                                      </View>
+                                    )}
+                                    {sub.isShared && (
+                                      <View style={styles.sharedPill}>
+                                        <AppText style={styles.sharedPillText}>SHARED</AppText>
                                       </View>
                                     )}
                                   </View>
@@ -1643,19 +1668,29 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginTop: 6,
   },
+  upNextSharedDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#30D158",
+  },
   subscriptionsHeader: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 10,
+    gap: spacing[8],
   },
   titleChevronRow: {
     flexDirection: "row",
     alignItems: "center",
+    flex: 1,
+    minWidth: 0,
+    flexShrink: 1,
   },
   sortToggle: {
     paddingHorizontal: 10,
     paddingVertical: spacing[4],
+    flexShrink: 0,
   },
   sortText: {
     fontSize: 15,
@@ -1699,6 +1734,8 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     fontWeight: "700",
     color: colors.white,
+    flexShrink: 1,
+    minWidth: 0,
   },
   listItemSubtitle: {
     fontSize: 13,
@@ -1772,5 +1809,49 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "rgba(255, 255, 255, 0.5)",
     letterSpacing: 0.5,
+  },
+  sharedPill: {
+    backgroundColor: "rgba(52, 199, 89, 0.14)",
+    borderWidth: 1,
+    borderColor: "rgba(52, 199, 89, 0.35)",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  sharedPillText: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: "#30D158",
+    letterSpacing: 0.5,
+  },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[8],
+    flexShrink: 0,
+  },
+  sharedToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: spacing[12],
+    paddingVertical: spacing[4],
+    borderRadius: radius[20],
+    backgroundColor: "rgba(255, 255, 255, 0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    flexShrink: 0,
+  },
+  sharedToggleActive: {
+    backgroundColor: "rgba(52, 199, 89, 0.16)",
+    borderColor: "rgba(52, 199, 89, 0.4)",
+  },
+  sharedToggleText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "rgba(255, 255, 255, 0.55)",
+  },
+  sharedToggleTextActive: {
+    color: "#30D158",
   },
 });

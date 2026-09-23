@@ -10,11 +10,21 @@ import { initDatabase } from "@/database/database";
 import { requestNotificationPermissions } from "@/utils/notifications";
 import AsyncStorage from "@/utils/storage";
 import { useSettingsStore } from "@/store/useSettingsStore";
+import { useSubscriptionStore } from "@/store/useSubscriptionStore";
+import { isSupabaseConfigured, fetchShareGroups, updateMyName } from "@/api/supabase";
+import { initSharedRealtimeSync } from "@/utils/sync";
 import { colors, radius } from "@/constants";
 import { AppText } from "@/components/ui";
 import { authState } from "@/utils/auth";
 
 const ONBOARDING_KEY = "@onboarding_complete";
+
+/** Debounced fire-and-forget pull of shared subscriptions (no-op when not configured). */
+function triggerSharedSync() {
+  const { shareGroups } = useSettingsStore.getState();
+  if (!shareGroups.length || !isSupabaseConfigured()) return;
+  useSubscriptionStore.getState().syncGroup().catch(() => {});
+}
 
 export default function RootLayout() {
   const router = useRouter();
@@ -32,6 +42,15 @@ export default function RootLayout() {
         await requestNotificationPermissions();
         await loadSettings();
 
+        // Re-push the persisted display name so group members see the latest
+        // Personalization name even if a previous push failed while offline.
+        const persistedName = useSettingsStore.getState().userName.trim();
+        if (persistedName && isSupabaseConfigured()) {
+          updateMyName(persistedName).catch((err) =>
+            console.warn("Startup: could not push display name to groups:", err)
+          );
+        }
+
         const onboardingDone = await AsyncStorage.getItem(ONBOARDING_KEY);
         if (!onboardingDone) {
           router.replace("/onboarding");
@@ -39,7 +58,41 @@ export default function RootLayout() {
           return;
         }
 
-        const settingsStr = await AsyncStorage.getItem("@subo_settings_v2");
+        // Always re-fetch groups from Supabase on startup so membership
+        // is restored even if AsyncStorage was cleared (e.g. Android system
+        // clears app data, reinstall, or the local cache is stale).
+        // This is non-blocking: the UI becomes ready immediately and the
+        // group list updates reactively when the fetch completes.
+        // On a fetch FAILURE the cached groups are deliberately left intact —
+        // a transient network blip must never look like "your groups vanished".
+        if (isSupabaseConfigured()) {
+          initSharedRealtimeSync();
+          const mapToPlain = (g: { id: string; name: string; code: string | null; role: "owner" | "member"; ownerUserId: string | null }) => ({
+            id: g.id,
+            name: g.name,
+            code: g.code,
+            role: g.role,
+            ownerUserId: g.ownerUserId,
+          });
+          fetchShareGroups()
+            .then((groups) => {
+              useSettingsStore.getState().setShareGroups(groups.map(mapToPlain));
+              if (groups.length > 0) {
+                useSubscriptionStore.getState().syncGroup().catch(() => {});
+              }
+            })
+            .catch((err) => {
+              console.warn("Startup: could not re-fetch groups from Supabase:", err);
+            });
+        }
+
+        // Fall back to the cached groups while the fetch (if configured) is
+        // still resolving, so shared subscriptions sync promptly on cold start.
+        if (useSettingsStore.getState().shareGroups.length) {
+          triggerSharedSync();
+        }
+
+        const settingsStr = await AsyncStorage.getItem("@subo_settings_v3");
         if (settingsStr) {
           const parsed = JSON.parse(settingsStr);
           if (parsed.faceIdEnabled) {
@@ -111,6 +164,8 @@ export default function RootLayout() {
           setIsLocked(true);
           authenticate();
         }
+
+        triggerSharedSync();
       }
       appState.current = nextAppState;
     });

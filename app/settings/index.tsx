@@ -16,6 +16,7 @@ import {
   Globe,
   Grid3X3,
   ShieldCheck,
+  Users,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 
@@ -142,6 +143,13 @@ export default function SettingsIndex() {
               value={`${currencyCode} (${currencySymbol})`}
               onPress={() => router.push("/settings/currency")}
             />
+            <Divider />
+            <Row
+              iconBg="#34C759"
+              icon={<Users size={18} color="#fff" />}
+              label="Shared Group"
+              onPress={() => router.push("/settings/shared")}
+            />
           </SectionCard>
         </View>
 
@@ -171,7 +179,7 @@ export default function SettingsIndex() {
 
         <View style={{ alignItems: "center", marginTop: spacing[32], marginBottom: spacing[16] }}>
           <AppText variant="footnote" color="rgba(255, 255, 255, 0.5)">
-            Built with ❤️ by Tirtharaj Barma
+            Built with ❤️ by Mamata Ray
           </AppText>
         </View>
       </ScrollView>

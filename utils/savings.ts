@@ -2,6 +2,7 @@ import { parseISO, startOfDay, differenceInCalendarDays, differenceInCalendarMon
 import type { Subscription } from "@/types/subscription";
 import type { BrandLogoVariantKey } from "@/assets/data/services";
 import { getSubscriptionActivePrice } from "@/utils/date";
+import { getCurrencySymbol } from "@/constants";
 import * as db from "@/database/database";
 
 export interface SavingsItem {
@@ -250,14 +251,17 @@ export async function computeSavings(
       const sub = subscriptions.find((s) => s.id === t.subscriptionId);
       return sum + (sub ? sub.price : 0);
     }, 0);
-    const symbol = subscriptions[0]?.currency === "INR" ? "₹" : "$";
+    const primaryCurrency = subscriptions[0]?.currency || "USD";
+    const symbol = getCurrencySymbol(primaryCurrency);
     advisorMessage = `Cancel before ${formattedEnd} to avoid paying ${symbol}${totalTrialCost.toFixed(0)}.`;
   } else if (splitSavings.length > 0) {
     vaultMode = "advisor";
     advisorType = "splits";
     const totalSplitSaving = splitSavings.reduce((s, sp) => s + sp.monthlySaving, 0);
     const roundSplit = Math.round(totalSplitSaving * 100) / 100;
-    advisorMessage = `Your shared subscriptions save you ${subscriptions[0]?.currency === "INR" ? "₹" : "$"}${roundSplit.toFixed(0)} every month.`;
+    const primaryCurrency = subscriptions[0]?.currency || "USD";
+    const symbol = getCurrencySymbol(primaryCurrency);
+    advisorMessage = `Your shared subscriptions save you ${symbol}${roundSplit.toFixed(0)} every month.`;
   } else {
     vaultMode = "advisor";
     advisorType = "suggestions";

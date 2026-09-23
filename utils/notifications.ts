@@ -27,6 +27,40 @@ try {
 
 const REMINDER_CHANNEL = "subscription-reminders";
 
+/** Titles for shared-subscription change alerts. */
+export type SharedChangeKind = "added" | "updated" | "removed";
+
+/**
+ * Fire an immediate local notification when a shared subscription changed
+ * on another device. Used instead of server push in the MVP — community
+ * members see the alert as soon as they open the app.
+ */
+export async function notifySharedChange(kind: SharedChangeKind, subName: string, publisher: string): Promise<void> {
+  if (!isNotificationsAvailable || !Notifications) return;
+  const globalEnabled = useSettingsStore.getState().notificationsEnabled;
+  if (!globalEnabled) return;
+  try {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: kind === "added"
+          ? `${publisher} shared ${subName}`
+          : kind === "updated"
+            ? `${subName} was updated`
+            : `${subName} was removed`,
+        body: kind === "added"
+          ? `${subName} is now visible in your shared group.`
+          : kind === "updated"
+            ? `${subName} was updated by ${publisher}.`
+            : `${publisher} removed ${subName} from the group.`,
+        sound: true,
+      },
+      trigger: null, // null = deliver immediately
+    });
+  } catch (error) {
+    console.warn(`Notifications: Failed to notify shared change (${subName})`, error);
+  }
+}
+
 export async function requestNotificationPermissions(): Promise<boolean> {
   if (!isNotificationsAvailable || !Notifications) return false;
 

@@ -42,7 +42,7 @@ import { subscriptionsToCSV, parseCSVToSubscriptions } from "@/utils/csv";
 export default function SettingsScreen() {
   const scrollY = useSharedValue(0);
   const insets = useSafeAreaInsets();
-  const { subscriptions, loadSubscriptions, removeSubscription } = useSubscriptionStore();
+  const { subscriptions, loadSubscriptions, removeSubscription, clearAllSubscriptions } = useSubscriptionStore();
   const [reminderCount, setReminderCount] = useState(0);
 
   useEffect(() => {
@@ -197,10 +197,14 @@ export default function SettingsScreen() {
           style: "destructive",
           onPress: async () => {
             try {
-              for (const sub of subscriptions) {
-                await removeSubscription(sub.id);
+              if (clearAllSubscriptions) {
+                await clearAllSubscriptions();
+              } else {
+                for (const sub of subscriptions) {
+                  await removeSubscription(sub.id);
+                }
+                await cancelAllReminders();
               }
-              await cancelAllReminders();
               setReminderCount(0);
               Alert.alert("Cleared", "All subscriptions have been deleted.");
             } catch (error) {

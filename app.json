@@ -41,11 +41,22 @@
       "expo-sqlite",
       "@react-native-community/datetimepicker",
       "expo-sharing",
-      "./plugins/with-ios-source-react-native"
+      "./plugins/with-ios-source-react-native",
+      "expo-image",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "382b12ce-7c53-4d52-9dd2-8206e0bdea03"
+      },
+      "supabaseUrl": "https://nvsjrfzzessvynnuurcg.supabase.co",
+      "supabaseAnonKey": "sb_publishable_hmdnizlu8wzE6EwOj2IJvw_0mc9qG7J"
+    },
+    "owner": "tirtharaj_barma"
   }
 }

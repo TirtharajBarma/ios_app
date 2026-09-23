@@ -1,6 +1,8 @@
+import { Redirect } from "expo-router";
+
 /**
- * Add subscription flow placeholder — UI not built yet.
+ * Add subscription route entry point — redirects to service search.
  */
-export default function AddScreen() {
-  return null;
+export default function AddIndexScreen() {
+  return <Redirect href="/add/search" />;
 }

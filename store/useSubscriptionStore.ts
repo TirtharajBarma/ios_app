@@ -12,6 +12,7 @@ import AsyncStorage from "@/utils/storage";
 import { getExchangeRates } from "@/utils/currency";
 import { triggerAutoBackup } from "@/utils/backup";
 import { computeSavings, type SavingsResult } from "@/utils/savings";
+import { pushSharedSubscription, syncSharedSubscriptions } from "@/utils/sync";
 
 export interface VaultState {
   totalSavings: number;
@@ -43,6 +44,9 @@ interface SubscriptionState {
   convertAllCurrencies: (oldCurrency: string, newCurrency: string) => Promise<void>;
   updateReminderDaysForDefaultTiming: (prevDays: number, newDays: number) => Promise<void>;
   importSubscriptions: (importedSubs: NewSubscriptionInput[]) => Promise<void>;
+  clearAllSubscriptions: () => Promise<void>;
+  /** Pull shared subscriptions from Supabase and refresh local state. */
+  syncGroup: () => Promise<void>;
 
   // Compatibility aliases
   load: () => Promise<void>;
@@ -242,7 +246,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
           // Only auto-advance paid subscriptions; trials that have ended remain
           // at their trialEndDate — the UI layer shows them as "Expired"
           if (!sub.isTrial && sub.nextBillingDate && !sub.isPaused) {
-            const billDate = new Date(sub.nextBillingDate);
+            const billDate = startOfDay(parseISO(sub.nextBillingDate));
             if (billDate < today) {
               const activePrice = getSubscriptionActivePrice(sub);
               await db.createTransaction({
@@ -253,7 +257,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
                 date: sub.nextBillingDate,
               }).catch(() => {});
 
-              const anchorDate = sub.startDate ? new Date(sub.startDate) : new Date(sub.nextBillingDate);
+              const anchorDate = sub.startDate ? startOfDay(parseISO(sub.startDate)) : billDate;
               const nextDate = getNextRenewalDate(
                 anchorDate,
                 sub.rawBillingCycle || sub.billingCycle,
@@ -281,7 +285,8 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
         }
       }
 
-      // Sort nearest renewal first
+      // Re-query database right before setting state to preserve any mutations that occurred concurrently during load
+      subscriptions = await db.getAllSubscriptions();
       subscriptions.sort((a, b) => {
         const timeA = a.nextBillingDate && !isNaN(new Date(a.nextBillingDate).getTime())
           ? new Date(a.nextBillingDate).getTime() : Infinity;
@@ -320,6 +325,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     scheduleReminder(sub).catch(() => {});
     triggerAutoBackup(currentSubscriptions).catch(() => {});
     refreshVault(currentSubscriptions).then((vault) => set({ vault }));
+    pushSharedSubscription(sub).catch(() => {});
     return sub;
   },
 
@@ -327,11 +333,13 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     await db.initializeDatabase();
     await db.updateSubscription(id, input);
     let updatedSub: Subscription | undefined;
+    let prevGroupId: string | undefined;
     let currentSubscriptions: Subscription[] = [];
     set((state) => {
       const idx = state.subscriptions.findIndex((s) => s.id === id);
       if (idx === -1) return state;
       const updated = [...state.subscriptions];
+      prevGroupId = updated[idx].sharedGroupId ?? undefined;
       updated[idx] = {
         ...updated[idx],
         ...input,
@@ -408,10 +416,14 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     }
     triggerAutoBackup(currentSubscriptions).catch(() => {});
     refreshVault(currentSubscriptions).then((vault) => set({ vault }));
+    // `prevGroupId` ensures unsharing/re-targeting a sub deletes the remote
+    // copy in the group it was actually shared to, never just the first group.
+    if (updatedSub) pushSharedSubscription(updatedSub, prevGroupId).catch(() => {});
   },
 
   removeSubscription: async (id) => {
     await db.initializeDatabase();
+    const removed = get().subscriptions.find((s) => s.id === id);
     await db.deleteSubscription(id);
     cancelReminder(id).catch(() => {});
     let currentSubscriptions: Subscription[] = [];
@@ -422,6 +434,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     });
     triggerAutoBackup(currentSubscriptions).catch(() => {});
     refreshVault(currentSubscriptions).then((vault) => set({ vault }));
+    if (removed?.isShared) pushSharedSubscription({ ...removed, isShared: false }).catch(() => {});
   },
 
   convertAllCurrencies: async (oldCurrency, newCurrency) => {
@@ -571,6 +584,26 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
 
   refresh: async () => {
     await get().loadSubscriptions();
+  },
+
+  syncGroup: async () => {
+    const changed = await syncSharedSubscriptions();
+    if (changed > 0) {
+      await get().refresh();
+    }
+  },
+
+  clearAllSubscriptions: async () => {
+    await db.initializeDatabase();
+    await db.deleteAllSubscriptions();
+    await cancelAllReminders().catch(() => {});
+    const vault = await refreshVault([]);
+    set({
+      subscriptions: [],
+      stats: computeStats([]),
+      vault,
+    });
+    triggerAutoBackup([]).catch(() => {});
   },
 
   // ─── Compatibility Aliases ─────────────────────────────────────────
