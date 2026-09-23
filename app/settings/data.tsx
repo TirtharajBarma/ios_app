@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   View,
   ScrollView,
@@ -17,6 +17,9 @@ import {
   Share2,
   Trash2,
   CheckCircle2,
+  Sparkles,
+  Cpu,
+  Layers,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import * as Sharing from 'expo-sharing';
@@ -25,11 +28,13 @@ import * as FileSystem from 'expo-file-system';
 import { AppText } from '@/components/ui';
 import { expenseColors } from '@/constants/expenseColors';
 import { useExpenseStore } from '@/store/useExpenseStore';
+import { getDeviceAiEngineInfo } from '@/services/onDeviceAi';
 
 export default function YourDataScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { transactions } = useExpenseStore();
+  const { transactions, accounts, categories, resetAllData } = useExpenseStore();
+  const aiEngineInfo = useMemo(() => getDeviceAiEngineInfo(), []);
 
   const handleExportData = async () => {
     Haptics.selectionAsync();
@@ -99,7 +104,9 @@ export default function YourDataScreen() {
           text: 'Erase Everything',
           style: 'destructive',
           onPress: () => {
-            Alert.alert('Data Erased', 'All data on this device has been erased.');
+            resetAllData();
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            Alert.alert('Data Erased', 'All data on this device has been erased and restored to clean initial state.');
           },
         },
       ]
@@ -132,11 +139,83 @@ export default function YourDataScreen() {
         <View style={styles.infoBanner}>
           <ShieldCheck size={20} color={expenseColors.accentGreen} />
           <AppText style={styles.infoBannerText}>
-            Subo is built local-first. Your financial data, accounts, budgets, and transactions belong to you and stay private on your device.
+            Subo is built local-first. Your financial data, accounts, budgets, and transactions belong exclusively to you and stay private on your device.
           </AppText>
         </View>
 
-        {/* 1. Data Privacy Highlights */}
+        {/* 1. Live Data Footprint */}
+        <View style={styles.sectionContainer}>
+          <AppText style={styles.sectionTitle}>DEVICE DATA FOOTPRINT</AppText>
+          <View style={styles.card}>
+            <View style={styles.metricsGrid}>
+              <View style={styles.metricCell}>
+                <AppText style={styles.metricCount}>{transactions.length}</AppText>
+                <AppText style={styles.metricLabel}>Transactions</AppText>
+              </View>
+              <View style={styles.metricDividerVertical} />
+              <View style={styles.metricCell}>
+                <AppText style={styles.metricCount}>{accounts.length}</AppText>
+                <AppText style={styles.metricLabel}>Accounts</AppText>
+              </View>
+              <View style={styles.metricDividerVertical} />
+              <View style={styles.metricCell}>
+                <AppText style={styles.metricCount}>{categories.length}</AppText>
+                <AppText style={styles.metricLabel}>Categories</AppText>
+              </View>
+            </View>
+
+            <View style={styles.divider} />
+
+            <View style={styles.featureRow}>
+              <View style={[styles.iconBox, { backgroundColor: 'rgba(235, 178, 154, 0.15)' }]}>
+                <Cpu size={18} color="#EBB29A" />
+              </View>
+              <View style={styles.featureTextCol}>
+                <AppText style={styles.featureTitle}>AI Engine: {aiEngineInfo.chip}</AppText>
+                <AppText style={styles.featureSub}>
+                  {aiEngineInfo.name} • 100% Offline Core • Zero cloud latency
+                </AppText>
+              </View>
+            </View>
+          </View>
+        </View>
+
+        {/* 2. On-Device AI Architecture & Privacy */}
+        <View style={styles.sectionContainer}>
+          <View style={styles.titleWithIcon}>
+            <Sparkles size={14} color="#EBB29A" />
+            <AppText style={styles.sectionTitle}>ON-DEVICE AI PRIVACY GUARANTEE</AppText>
+          </View>
+          <View style={styles.card}>
+            <View style={styles.featureRow}>
+              <View style={[styles.iconBox, { backgroundColor: 'rgba(92, 228, 154, 0.15)' }]}>
+                <Lock size={18} color="#5CE49A" />
+              </View>
+              <View style={styles.featureTextCol}>
+                <AppText style={styles.featureTitle}>Zero External AI Transmissions</AppText>
+                <AppText style={styles.featureSub}>
+                  Smart search, natural language queries, and semantic category inferences run exclusively using local heuristics and tokenizer logic directly on your phone hardware. No prompt or transaction is ever transmitted to OpenAI, Google, Anthropic, or any remote servers.
+                </AppText>
+              </View>
+            </View>
+
+            <View style={styles.divider} />
+
+            <View style={styles.featureRow}>
+              <View style={[styles.iconBox, { backgroundColor: 'rgba(74, 144, 226, 0.15)' }]}>
+                <Layers size={18} color="#4A90E2" />
+              </View>
+              <View style={styles.featureTextCol}>
+                <AppText style={styles.featureTitle}>No Model Training on Personal Finances</AppText>
+                <AppText style={styles.featureSub}>
+                  Your personal notes, merchant names, split expenses, and transaction habits remain untracked. They are never ingested, logged, or used to fine-tune AI models.
+                </AppText>
+              </View>
+            </View>
+          </View>
+        </View>
+
+        {/* 3. Data Privacy Highlights */}
         <View style={styles.sectionContainer}>
           <AppText style={styles.sectionTitle}>DATA ARCHITECTURE</AppText>
           <View style={styles.card}>
@@ -182,7 +261,7 @@ export default function YourDataScreen() {
           </View>
         </View>
 
-        {/* 2. Terms & Conditions (T&C) */}
+        {/* 4. Terms & Conditions (T&C) */}
         <View style={styles.sectionContainer}>
           <View style={styles.titleWithIcon}>
             <FileText size={15} color={expenseColors.textSubtle} />
@@ -200,9 +279,9 @@ export default function YourDataScreen() {
             <View style={styles.divider} />
 
             <View style={styles.tcItem}>
-              <AppText style={styles.tcNumber}>2. User Data Ownership</AppText>
+              <AppText style={styles.tcNumber}>2. User Data Ownership & Portability</AppText>
               <AppText style={styles.tcBody}>
-                You retain complete, exclusive ownership of all transactions, custom categories, account names, and financial records you log within the application. Subo claims no ownership or rights over your personal financial records.
+                You retain complete, exclusive ownership of all transactions, custom categories, account names, and financial records logged within Subo. You may export your entire transaction history to CSV at any time without restriction or fees.
               </AppText>
             </View>
 
@@ -211,16 +290,16 @@ export default function YourDataScreen() {
             <View style={styles.tcItem}>
               <AppText style={styles.tcNumber}>3. Non-Financial Advisory Disclaimer</AppText>
               <AppText style={styles.tcBody}>
-                Subo is an informational utility designed to assist with personal expense logging, budgeting, and recurring subscription visualization. It does not provide certified financial, investment, tax, or accounting advice. You are solely responsible for your financial decisions.
+                Subo is an informational personal utility designed to assist with manual expense logging, budgeting, and recurring subscription visualization. It does not provide certified financial, investment, legal, tax, or accounting advice. You are solely responsible for your financial decisions.
               </AppText>
             </View>
 
             <View style={styles.divider} />
 
             <View style={styles.tcItem}>
-              <AppText style={styles.tcNumber}>4. Local Storage & Backups</AppText>
+              <AppText style={styles.tcNumber}>4. Local Storage & Backup Responsibility</AppText>
               <AppText style={styles.tcBody}>
-                Because Subo uses local-first on-device storage, deleting the application or clearing device storage without generating an export backup may result in irreversible data loss. Users are encouraged to utilize the built-in CSV export function regularly.
+                Because Subo uses local-first on-device storage, deleting the application or clearing device storage without generating a CSV backup may result in irreversible data loss. Users are encouraged to utilize the built-in CSV export function regularly.
               </AppText>
             </View>
 
@@ -236,15 +315,15 @@ export default function YourDataScreen() {
             <View style={styles.divider} />
 
             <View style={styles.tcItem}>
-              <AppText style={styles.tcNumber}>6. Privacy Commitment</AppText>
+              <AppText style={styles.tcNumber}>6. Privacy Commitment & Zero Advertising</AppText>
               <AppText style={styles.tcBody}>
-                We never monetize, broker, or transmit your individual expense items or bank balances to advertising partners. Any anonymous crash reporting is strictly used to identify application stability bugs.
+                We never monetize, broker, or transmit your individual expense items, bank balances, or query history to advertising networks or third-party brokers.
               </AppText>
             </View>
           </View>
         </View>
 
-        {/* 3. Data Controls */}
+        {/* 5. Data Controls */}
         <View style={styles.sectionContainer}>
           <AppText style={styles.sectionTitle}>DATA CONTROLS</AppText>
           <View style={styles.card}>
@@ -444,5 +523,32 @@ const styles = StyleSheet.create({
     color: expenseColors.accentPeach,
     fontSize: 12,
     fontWeight: '700',
+  },
+  metricsGrid: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    paddingVertical: 6,
+  },
+  metricCell: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  metricCount: {
+    color: '#FFFFFF',
+    fontSize: 22,
+    fontWeight: '800',
+    letterSpacing: -0.5,
+    marginBottom: 4,
+  },
+  metricLabel: {
+    color: expenseColors.textMuted,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  metricDividerVertical: {
+    width: 1,
+    height: 32,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
   },
 });

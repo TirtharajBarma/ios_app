@@ -106,7 +106,7 @@ export const AccountsSection: React.FC<AccountsSectionProps> = ({ onAccountPress
 const styles = StyleSheet.create({
   container: {
     paddingHorizontal: 16,
-    marginBottom: 24,
+    marginBottom: 16,
   },
   sectionTitle: {
     color: expenseColors.textPrimary,
@@ -114,7 +114,7 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     fontWeight: '800',
     letterSpacing: 1.5,
-    marginBottom: 14,
+    marginBottom: 10,
   },
   cardsStack: {
     gap: 10,

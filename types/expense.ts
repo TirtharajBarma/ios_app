@@ -1,3 +1,13 @@
+export type TransactionType = 'expense' | 'income' | 'transfer' | 'debt_lend' | 'debt_borrow';
+
+export interface SplitDetails {
+  totalPaid: number;
+  yourShare: number;
+  friendsShare: number;
+  friendNames?: string;
+  settled?: boolean;
+}
+
 export interface ExpenseCategory {
   id: string;
   name: string;
@@ -9,7 +19,8 @@ export interface ExpenseCategory {
 export interface ExpenseAccount {
   id: string;
   name: string;
-  type?: 'savings' | 'credit' | 'wallet';
+  type?: 'savings' | 'credit' | 'wallet' | 'cash';
+  openingBalance?: number;
   txnCountThisMonth: number;
   balance: number;
   dueAmount?: number;
@@ -22,11 +33,16 @@ export interface ExpenseAccount {
 export interface ExpenseTransaction {
   id: string;
   amount: number;
-  type: 'income' | 'expense';
+  type: TransactionType;
   categoryId: string;
-  accountId: string;
-  date: string; // ISO format
+  accountId: string; // From Account
+  toAccountId?: string; // To Account (for transfers)
+  date: string; // ISO format (yyyy-MM-dd)
   note?: string;
+  tag?: string; // Event/Trip folder tag e.g. "Goa Trip", "Night Out"
+  split?: SplitDetails;
+  borrowerOrLender?: string;
+  isSettled?: boolean;
 }
 
 export interface ExpenseBudget {

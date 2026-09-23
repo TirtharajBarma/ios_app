@@ -722,7 +722,8 @@ export const ExpenseSettings: React.FC = () => {
         onRequestClose={closeCategoryModal}
       >
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
           style={styles.modalOverlay}
         >
           <Animated.View
@@ -743,10 +744,17 @@ export const ExpenseSettings: React.FC = () => {
               styles.modalSheet,
               {
                 transform: [{ translateY: categoryTranslateY }],
+                maxHeight: '88%',
                 paddingBottom: insets.bottom + 24,
               },
             ]}
           >
+            <ScrollView
+              bounces={false}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
+              showsVerticalScrollIndicator={false}
+            >
             {/* Gesture Handle Bar Area (Swipe down anywhere here closes like iPhone) */}
             <View {...categoryPanResponder.panHandlers} style={styles.dragHeaderArea}>
               <View style={styles.sheetHandle} />
@@ -839,6 +847,7 @@ export const ExpenseSettings: React.FC = () => {
                 </AppText>
               </TouchableOpacity>
             )}
+            </ScrollView>
           </Animated.View>
         </KeyboardAvoidingView>
       </Modal>
@@ -853,7 +862,8 @@ export const ExpenseSettings: React.FC = () => {
         onRequestClose={closeCurrencyModal}
       >
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
           style={styles.modalOverlay}
         >
           <Animated.View

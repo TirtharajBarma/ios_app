@@ -65,20 +65,22 @@ export const BudgetCard: React.FC = () => {
   const remainingBudget = getRemainingBudget();
   const breakdown = getCategoryBreakdown();
 
-  // Grand, bigger donut chart dimensions
-  const chartSize = 280;
+  // Scaled donut chart dimensions to match reference proportions
+  const chartSize = 296;
   const center = chartSize / 2;
-  const radius = 98;
-  const strokeWidth = 28;
+  const radius = 112;
+  const strokeWidth = 30;
   const circumference = 2 * Math.PI * radius;
 
   // Inner ring dimensions
-  const innerRadius = 66;
+  const innerRadius = 78;
   const innerStrokeWidth = 4;
   const innerCircumference = 2 * Math.PI * innerRadius;
 
-  // Active categories with spending
-  const activeBreakdown = breakdown.filter((item) => item.amount > 0);
+  // Active categories with spending, dynamically sorted descending by spending amount (highest to lowest)
+  const activeBreakdown = breakdown
+    .filter((item) => item.amount > 0)
+    .sort((a, b) => b.amount - a.amount);
   const totalCategoriesSpent = activeBreakdown.reduce((sum, item) => sum + item.amount, 0);
 
   // Selected category info
@@ -108,15 +110,17 @@ export const BudgetCard: React.FC = () => {
     const dy = locationY - center;
     const distance = Math.sqrt(dx * dx + dy * dy);
 
-    // If tapped inside inner circle, reset selection
-    if (distance <= innerRadius + 6) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-      setSelectedCatId(null);
+    // If tapped inside inner circle or on center text, reset selection if active
+    if (distance <= innerRadius + 8) {
+      if (selectedCatId !== null) {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+        setSelectedCatId(null);
+      }
       return;
     }
 
     // If outside donut ring bounds, ignore
-    if (distance < innerRadius - 6 || distance > radius + strokeWidth / 2 + 14) {
+    if (distance < innerRadius - 4 || distance > radius + strokeWidth / 2 + 16) {
       return;
     }
 
@@ -143,19 +147,23 @@ export const BudgetCard: React.FC = () => {
     setSelectedCatId((prev) => (prev === catId ? null : catId));
   };
 
-  // Center display calculations
+  // ─────────────────────────────────────────────────────────
+  // 1. INNER THIN GREEN PROGRESS RING (ALWAYS OVERALL BUDGET)
+  // ─────────────────────────────────────────────────────────
+  const overallBudgetRatio = monthlyBudget > 0 ? Math.min(totalSpent / monthlyBudget, 1) : 0;
+  const overallBudgetDash = overallBudgetRatio * innerCircumference;
+
+  // ─────────────────────────────────────────────────────────
+  // 2. CENTER CONTENT DISPLAY
+  // ─────────────────────────────────────────────────────────
   let centerTitle = 'Budget';
   let centerAmount = formatCompactCurrency(remainingBudget);
   let centerSubLabel = 'left';
   let centerFootnote = `${formatCompactCurrency(totalSpent)} of ${formatCompactCurrency(monthlyBudget)}`;
-  let innerDash = (monthlyBudget > 0 ? Math.min(totalSpent / monthlyBudget, 1) : 0) * innerCircumference;
 
   const hasFixedBudget = selectedCategoryItem && categoryBudgets[selectedCategoryItem.category.id] !== undefined;
   const catBudget = selectedCategoryItem && hasFixedBudget ? categoryBudgets[selectedCategoryItem.category.id] : 0;
   const catSpent = selectedCategoryItem ? selectedCategoryItem.amount : 0;
-  const catTxCount = selectedCategoryItem
-    ? transactions.filter((t) => t.categoryId === selectedCategoryItem.category.id).length
-    : 0;
 
   if (selectedCategoryItem) {
     const catName = `${selectedCategoryItem.category.name} ${selectedCategoryItem.category.emoji || ''}`.trim();
@@ -163,34 +171,22 @@ export const BudgetCard: React.FC = () => {
 
     if (hasFixedBudget && catBudget > 0) {
       const catRemaining = Math.max(catBudget - catSpent, 0);
-      const catUsedPct = Math.min(Math.round((catSpent / catBudget) * 100), 100);
-      const catUsedRatio = Math.min(catSpent / catBudget, 1);
+      const catUsedPct = Math.round((catSpent / catBudget) * 100);
 
-      innerDash = catUsedRatio * innerCircumference;
       centerAmount = formatCompactCurrency(catRemaining);
       centerSubLabel = 'remaining';
       centerFootnote = `${catUsedPct}% used of ${formatCompactCurrency(catBudget)}`;
     } else {
-      // Category budget NOT fixed: show total spent & % of total
-      const pctOfTotal = totalSpent > 0 ? Math.round((catSpent / totalSpent) * 100) : 0;
-      innerDash = (totalSpent > 0 ? Math.min(catSpent / totalSpent, 1) : 0) * innerCircumference;
       centerAmount = formatCompactCurrency(catSpent);
       centerSubLabel = 'spent';
-      centerFootnote = `${pctOfTotal}% of total spend • ${catTxCount} txns`;
+      centerFootnote = 'no budget set';
     }
   }
 
-  // Sort active categories strictly according to user-selected category order
-  const sortedBreakdown = [...activeBreakdown].sort((a, b) => {
-    const idxA = categories.findIndex((c) => c.id === a.category.id);
-    const idxB = categories.findIndex((c) => c.id === b.category.id);
-    return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB);
-  });
-
-  // Split into left and right columns evenly
-  const half = Math.ceil(sortedBreakdown.length / 2);
-  const sortedLeft = sortedBreakdown.slice(0, half);
-  const sortedRight = sortedBreakdown.slice(half);
+  // Split active categories into left and right columns for the legend (highest to lowest spend)
+  const half = Math.ceil(activeBreakdown.length / 2);
+  const sortedLeft = activeBreakdown.slice(0, half);
+  const sortedRight = activeBreakdown.slice(half);
 
   return (
     <View style={styles.cardContainer}>
@@ -210,38 +206,44 @@ export const BudgetCard: React.FC = () => {
               cx={center}
               cy={center}
               r={radius}
-              stroke="#1C1E27"
+              stroke="#12131A"
               strokeWidth={strokeWidth}
               fill="transparent"
             />
 
-            {/* Category Donut Segments */}
+            {/* Category Donut Segments (With thin dark gap separator between each category) */}
             {segments.map((seg) => {
               const isSelected = selectedCatId === seg.category.id;
               const hasSelection = selectedCatId !== null;
-              const strokeColor = hasSelection
-                ? isSelected
-                  ? seg.category.color
-                  : 'rgba(44, 48, 59, 0.45)'
-                : seg.category.color;
+              const segmentOpacity = hasSelection ? (isSelected ? 1.0 : 0.42) : 1.0;
+              const segRadius = isSelected ? radius + 1.5 : radius;
+              const segStrokeWidth = isSelected ? strokeWidth + 4 : strokeWidth;
+              const segCircumference = 2 * Math.PI * segRadius;
+              const segDashlength = seg.percentage * segCircumference;
+
+              // Subtle, hairline gap between segments
+              const gap = segments.length > 1 ? 1.5 : 0;
+              const visibleDashLength = Math.max(segDashlength - gap, 1);
+              const segOffset = (seg.offset / circumference) * segCircumference + gap / 2;
 
               return (
                 <Circle
                   key={seg.category.id}
                   cx={center}
                   cy={center}
-                  r={radius}
-                  stroke={strokeColor}
-                  strokeWidth={isSelected ? strokeWidth + 4 : strokeWidth}
+                  r={segRadius}
+                  stroke={seg.category.color}
+                  opacity={segmentOpacity}
+                  strokeWidth={segStrokeWidth}
                   fill="transparent"
-                  strokeDasharray={`${seg.strokeDashlength} ${circumference - seg.strokeDashlength}`}
-                  strokeDashoffset={-seg.offset}
+                  strokeDasharray={`${visibleDashLength} ${segCircumference - visibleDashLength}`}
+                  strokeDashoffset={-segOffset}
                   strokeLinecap="butt"
                 />
               );
             })}
 
-            {/* Inner Ring Detail */}
+            {/* Inner Ring Detail (NEVER CHANGES - ALWAYS OVERALL BUDGET) */}
             <Circle
               cx={center}
               cy={center}
@@ -250,15 +252,15 @@ export const BudgetCard: React.FC = () => {
               strokeWidth={innerStrokeWidth}
               fill="#12131A"
             />
-            {innerDash > 0 && (
+            {overallBudgetDash > 0 && (
               <Circle
                 cx={center}
                 cy={center}
                 r={innerRadius}
-                stroke={selectedCategoryItem?.category.color || expenseColors.accentGreen}
+                stroke={expenseColors.accentGreen}
                 strokeWidth={innerStrokeWidth}
                 fill="transparent"
-                strokeDasharray={`${innerDash} ${innerCircumference - innerDash}`}
+                strokeDasharray={`${overallBudgetDash} ${innerCircumference - overallBudgetDash}`}
                 strokeDashoffset={0}
                 strokeLinecap="round"
               />
@@ -337,7 +339,7 @@ export const BudgetCard: React.FC = () => {
                       ₹{catSpent.toLocaleString('en-IN')}
                     </AppText>
                     <AppText style={styles.selectedBudgetTotal}>
-                      {` (${catTxCount} transaction${catTxCount !== 1 ? 's' : ''})`}
+                      {' spent'}
                     </AppText>
                   </AppText>
                 )}
@@ -354,15 +356,21 @@ export const BudgetCard: React.FC = () => {
                 </>
               ) : (
                 <>
-                  <AppText style={styles.selectedRemainingValue}>
-                    {formatCompactCurrency(catSpent)}
+                  <AppText style={styles.selectedUnbudgetedValue}>
+                    unbudgeted
                   </AppText>
-                  <AppText style={styles.selectedRemainingLabel}>total spent</AppText>
+                  <AppText style={styles.selectedRemainingLabel}>no limit</AppText>
                 </>
               )}
             </View>
           </TouchableOpacity>
         </Animated.View>
+      ) : sortedLeft.length === 0 && sortedRight.length === 0 ? (
+        <View style={styles.emptyLegendNotice}>
+          <AppText style={styles.emptyLegendText}>
+            No expenses logged yet • Tap + to record your first transaction
+          </AppText>
+        </View>
       ) : (
         // 2-Column Legend for all active categories
         <View style={styles.legendContainer}>
@@ -429,9 +437,11 @@ const styles = StyleSheet.create({
   cardContainer: {
     backgroundColor: expenseColors.bgCard,
     borderRadius: 22,
-    padding: 20,
+    paddingTop: 16,
+    paddingBottom: 16,
+    paddingHorizontal: 16,
     marginHorizontal: 16,
-    marginBottom: 20,
+    marginBottom: 16,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.05)',
     alignItems: 'center',
@@ -442,22 +452,22 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     fontWeight: '800',
     letterSpacing: 1.5,
-    marginBottom: 14,
+    marginBottom: 8,
     textAlign: 'center',
   },
   chartContainer: {
-    width: 280,
-    height: 280,
+    width: 296,
+    height: 296,
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
-    marginBottom: 18,
+    marginBottom: 12,
   },
   centerOverlay: {
     position: 'absolute',
     alignItems: 'center',
     justifyContent: 'center',
-    width: 140,
+    width: 150,
   },
   centerBudgetLabel: {
     color: '#8E919D',
@@ -500,13 +510,13 @@ const styles = StyleSheet.create({
   },
   legendColumn: {
     flex: 1,
-    gap: 10,
+    gap: 8,
   },
   legendRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 3,
+    paddingVertical: 2.5,
   },
   legendLeft: {
     flexDirection: 'row',
@@ -534,6 +544,7 @@ const styles = StyleSheet.create({
   },
   selectedDetailWrapper: {
     width: '100%',
+    paddingHorizontal: 4,
   },
   selectedDetailCard: {
     flexDirection: 'row',
@@ -541,35 +552,35 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     width: '100%',
     backgroundColor: '#161822',
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
   },
   selectedLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
     flex: 1,
   },
   selectedDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
   selectedTextGroup: {
-    gap: 2,
+    gap: 1,
   },
   selectedName: {
     color: '#FFFFFF',
-    fontSize: 14,
-    lineHeight: 18,
+    fontSize: 13,
+    lineHeight: 16,
     fontWeight: '700',
   },
   selectedSpentLine: {
-    fontSize: 12,
-    lineHeight: 16,
+    fontSize: 11,
+    lineHeight: 14,
   },
   selectedSpentAmount: {
     color: '#FFFFFF',
@@ -585,14 +596,31 @@ const styles = StyleSheet.create({
   },
   selectedRemainingValue: {
     color: '#FFFFFF',
-    fontSize: 17,
-    lineHeight: 21,
+    fontSize: 15,
+    lineHeight: 18,
     fontWeight: '800',
+  },
+  selectedUnbudgetedValue: {
+    color: '#8E919D',
+    fontSize: 13,
+    lineHeight: 16,
+    fontWeight: '600',
   },
   selectedRemainingLabel: {
     color: '#8E919D',
-    fontSize: 11,
-    lineHeight: 15,
+    fontSize: 10,
+    lineHeight: 13,
     fontWeight: '500',
+  },
+  emptyLegendNotice: {
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyLegendText: {
+    color: expenseColors.textMuted,
+    fontSize: 11,
+    fontWeight: '500',
+    textAlign: 'center',
   },
 });

@@ -108,9 +108,11 @@ const styles = StyleSheet.create({
   cardContainer: {
     backgroundColor: expenseColors.bgCard,
     borderRadius: 22,
-    padding: 20,
+    paddingTop: 16,
+    paddingBottom: 16,
+    paddingHorizontal: 16,
     marginHorizontal: 16,
-    marginBottom: 20,
+    marginBottom: 16,
     borderWidth: 1,
     borderColor: expenseColors.borderCard,
   },

@@ -32,7 +32,7 @@ interface EditAccountModalProps {
   onClose: () => void;
 }
 
-type AccountType = 'savings' | 'credit' | 'wallet';
+type AccountType = 'savings' | 'credit' | 'wallet' | 'cash';
 
 export const EditAccountModal: React.FC<EditAccountModalProps> = ({
   visible,
@@ -146,7 +146,8 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
     >
       <KeyboardAvoidingView
         style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
       >
         {/* Header */}
         <View style={styles.header}>
@@ -161,9 +162,11 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
 
         <ScrollView
           style={styles.scroll}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: 220 }]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          automaticallyAdjustKeyboardInsets={true}
         >
           {/* ACCOUNT NAME */}
           <View style={styles.section}>

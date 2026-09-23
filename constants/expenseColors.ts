@@ -9,25 +9,28 @@ export const expenseColors = {
   textSubtle: '#8E919D',
   textMuted: '#696C75',
 
-  accentPeach: '#F6A573',
-  accentGreen: '#52C485',
-  accentGreenBg: 'rgba(82, 196, 133, 0.14)',
-  accentRed: '#E06D6D',
-  accentRedBg: 'rgba(224, 109, 109, 0.14)',
-  spentProgressFill: '#D47272',
+  accentPeach: '#F8B195',
+  accentGreen: '#70D6BC',
+  accentGreenBg: 'rgba(112, 214, 188, 0.15)',
+  accentRed: '#F48B8B',
+  accentRedBg: 'rgba(244, 139, 139, 0.15)',
+  accentBlue: '#90CAF9',
+  accentPurple: '#CE93D8',
+  spentProgressFill: '#E07A7A',
   trackBg: '#232631',
 
   categories: {
-    cig: '#EAA072',
-    trans: '#D98880',
-    shop: '#73C6B6',
-    food: '#A2D9AC',
-    ent: '#BA93CE',
-    misc: '#F2DA79',
-    health: '#E8A0BF',
-    util: '#85C1E9',
-    fin: '#9ADBB5',
+    cig: '#F6A27E',
+    trans: '#F39C94',
+    shop: '#76D2C4',
+    food: '#A9DFBF',
+    ent: '#D2B4DE',
+    misc: '#F9E79F',
+    health: '#F5B7B1',
+    util: '#AED6F1',
+    fin: '#A3E4D7',
   },
 };
+
 
 

@@ -3,6 +3,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@/utils/storage';
 import { ExpenseAccount, ExpenseCategory, ExpenseTransaction } from '@/types/expense';
 import { expenseColors } from '@/constants/expenseColors';
+import { executeSmartQuery, SmartQueryResult } from '@/services/onDeviceAi';
 
 export type AppThemeMode = 'editorial' | 'cream' | 'midnight' | 'system';
 
@@ -50,6 +51,7 @@ interface ExpenseState {
   reorderCategories: (fromIndex: number, toIndex: number) => void;
   setCategoryBudget: (catId: string, amount: number) => void;
   setAllCategoryBudgets: (budgets: Record<string, number>) => void;
+  resetAllData: () => void;
 
   // Derived Calculations
   getTotalBalance: () => number;
@@ -70,6 +72,7 @@ interface ExpenseState {
   } | null;
 
   getFilteredTransactions: () => ExpenseTransaction[];
+  getSmartSearchResult: () => SmartQueryResult | null;
   getCategoryById: (catId: string) => ExpenseCategory;
 }
 
@@ -193,9 +196,82 @@ export const useExpenseStore = create<ExpenseState>()(
       ...txData,
       id: `tx_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
     };
-    set((state) => ({
-      transactions: [newTx, ...state.transactions],
-    }));
+
+    set((state) => {
+      const updatedAccounts = state.accounts.map((acc) => {
+        let balance = acc.balance;
+        let dueAmount = acc.dueAmount || 0;
+        let monthlyChange = acc.monthlyChange;
+        let txnCountThisMonth = acc.txnCountThisMonth;
+
+        // 1. Expense
+        if (newTx.type === 'expense' && acc.id === newTx.accountId) {
+          txnCountThisMonth += 1;
+          if (acc.statusType === 'due' || acc.type === 'credit') {
+            dueAmount += newTx.amount;
+            monthlyChange -= newTx.amount;
+          } else {
+            balance = Math.max(0, balance - newTx.amount);
+            monthlyChange -= newTx.amount;
+          }
+        }
+
+        // 2. Income
+        if (newTx.type === 'income' && acc.id === newTx.accountId) {
+          txnCountThisMonth += 1;
+          balance += newTx.amount;
+          monthlyChange += newTx.amount;
+        }
+
+        // 3. Transfer Out (From Account)
+        if (newTx.type === 'transfer' && acc.id === newTx.accountId) {
+          txnCountThisMonth += 1;
+          if (acc.statusType === 'due' || acc.type === 'credit') {
+            dueAmount += newTx.amount;
+          } else {
+            balance = Math.max(0, balance - newTx.amount);
+          }
+        }
+
+        // 4. Transfer In / Bill Payment (To Account)
+        if (newTx.type === 'transfer' && acc.id === newTx.toAccountId) {
+          txnCountThisMonth += 1;
+          if (acc.statusType === 'due' || acc.type === 'credit') {
+            // Bill payment reduces credit card due amount!
+            dueAmount = Math.max(0, dueAmount - newTx.amount);
+          } else {
+            balance += newTx.amount;
+          }
+        }
+
+        // 5. Debt Lent
+        if (newTx.type === 'debt_lend' && acc.id === newTx.accountId) {
+          txnCountThisMonth += 1;
+          balance = Math.max(0, balance - newTx.amount);
+        }
+
+        // 6. Debt Borrowed
+        if (newTx.type === 'debt_borrow' && acc.id === newTx.accountId) {
+          txnCountThisMonth += 1;
+          balance += newTx.amount;
+        }
+
+        const isDue = acc.statusType === 'due' || acc.type === 'credit';
+        return {
+          ...acc,
+          balance,
+          dueAmount: isDue ? dueAmount : undefined,
+          monthlyChange,
+          txnCountThisMonth,
+          statusType: isDue ? ('due' as const) : ('positive' as const),
+        };
+      });
+
+      return {
+        transactions: [newTx, ...state.transactions],
+        accounts: updatedAccounts,
+      };
+    });
   },
 
   removeTransactions: (ids) => {
@@ -322,7 +398,10 @@ export const useExpenseStore = create<ExpenseState>()(
     const { transactions } = get();
     return transactions
       .filter((t) => t.type === 'expense')
-      .reduce((sum, t) => sum + t.amount, 0);
+      .reduce((sum, t) => {
+        const personalShare = t.split ? t.split.yourShare : t.amount;
+        return sum + personalShare;
+      }, 0);
   },
 
   getNetBalance: () => {
@@ -349,7 +428,10 @@ export const useExpenseStore = create<ExpenseState>()(
       .map((cat) => {
         const catSpent = transactions
           .filter((t) => t.type === 'expense' && t.categoryId === cat.id)
-          .reduce((sum, t) => sum + t.amount, 0);
+          .reduce((sum, t) => {
+            const personalShare = t.split ? t.split.yourShare : t.amount;
+            return sum + personalShare;
+          }, 0);
 
         const percentage = totalSpent > 0 ? Number(((catSpent / totalSpent) * 100).toFixed(1)) : 0;
         return {
@@ -367,8 +449,25 @@ export const useExpenseStore = create<ExpenseState>()(
     return sorted[0].amount > 0 ? sorted[0] : null;
   },
 
+  getSmartSearchResult: () => {
+    const { transactions, activeAccountFilter, smartSearchQuery, accounts, categories, currencySymbol } = get();
+    if (!smartSearchQuery.trim()) return null;
+
+    let candidateTxs = transactions;
+    if (activeAccountFilter && activeAccountFilter !== 'All') {
+      const matchedAcc = accounts.find(
+        (a) => a.id === activeAccountFilter || a.name.toLowerCase() === activeAccountFilter.toLowerCase()
+      );
+      if (matchedAcc) {
+        candidateTxs = candidateTxs.filter((t) => t.accountId === matchedAcc.id || t.toAccountId === matchedAcc.id);
+      }
+    }
+
+    return executeSmartQuery(smartSearchQuery, candidateTxs, categories, accounts, currencySymbol);
+  },
+
   getFilteredTransactions: () => {
-    const { transactions, activeAccountFilter, smartSearchQuery, accounts, categories } = get();
+    const { transactions, activeAccountFilter, smartSearchQuery, accounts, categories, currencySymbol } = get();
     let result = [...transactions];
 
     // Filter by Account
@@ -377,21 +476,35 @@ export const useExpenseStore = create<ExpenseState>()(
         (a) => a.id === activeAccountFilter || a.name.toLowerCase() === activeAccountFilter.toLowerCase()
       );
       if (matchedAcc) {
-        result = result.filter((t) => t.accountId === matchedAcc.id);
+        result = result.filter((t) => t.accountId === matchedAcc.id || t.toAccountId === matchedAcc.id);
       }
     }
 
-    // Filter by Smart Search Query
+    // Filter by Smart Search Query using On-Device AI
     if (smartSearchQuery.trim().length > 0) {
+      const aiResult = executeSmartQuery(smartSearchQuery, result, categories, accounts, currencySymbol);
+      if (aiResult.matchedTransactions.length > 0) {
+        return aiResult.matchedTransactions;
+      }
+
+      // Keyword fallback
       const q = smartSearchQuery.toLowerCase();
       result = result.filter((t) => {
         const cat = categories.find((c) => c.id === t.categoryId);
-        const acc = accounts.find((a) => a.id === t.accountId);
+        const fromAcc = accounts.find((a) => a.id === t.accountId);
+        const toAcc = t.toAccountId ? accounts.find((a) => a.id === t.toAccountId) : null;
         const matchNote = t.note ? t.note.toLowerCase().includes(q) : false;
+        const matchTag = t.tag ? t.tag.toLowerCase().includes(q) : false;
+        const matchFriend = t.borrowerOrLender
+          ? t.borrowerOrLender.toLowerCase().includes(q)
+          : t.split?.friendNames
+          ? t.split.friendNames.toLowerCase().includes(q)
+          : false;
         const matchCat = cat ? cat.name.toLowerCase().includes(q) : false;
-        const matchAcc = acc ? acc.name.toLowerCase().includes(q) : false;
+        const matchAcc = fromAcc ? fromAcc.name.toLowerCase().includes(q) : false;
+        const matchToAcc = toAcc ? toAcc.name.toLowerCase().includes(q) : false;
         const matchAmount = t.amount.toString().includes(q);
-        return matchNote || matchCat || matchAcc || matchAmount;
+        return matchNote || matchTag || matchFriend || matchCat || matchAcc || matchToAcc || matchAmount;
       });
     }
 
@@ -408,6 +521,19 @@ export const useExpenseStore = create<ExpenseState>()(
         iconName: 'MoreHorizontal',
       }
     );
+  },
+
+  resetAllData: () => {
+    set({
+      transactions: [],
+      selectedTransactionIds: [],
+      accounts: INITIAL_ACCOUNTS,
+      categories: INITIAL_CATEGORIES,
+      categoryBudgets: {},
+      monthlyBudget: 18400,
+      smartSearchQuery: '',
+      activeAccountFilter: 'All',
+    });
   },
 }),
 {
