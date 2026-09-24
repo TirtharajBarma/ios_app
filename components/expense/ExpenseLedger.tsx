@@ -25,7 +25,9 @@ import {
   Check,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
-import { AppText } from '@/components/ui';
+import * as Clipboard from 'expo-clipboard';
+import { MenuAction } from '@expo/ui/community/menu';
+import { AppText, NativeLiquidMenu } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
 import { FixedBottomNav } from './FixedBottomNav';
 import { expenseColors } from '@/constants/expenseColors';
@@ -76,8 +78,8 @@ export const ExpenseLedger: React.FC = () => {
   }, [categories, transactions]);
 
   const deviceAiInfo = useMemo(() => getDeviceAiEngineInfo(), []);
-  const aiResult = getSmartSearchResult();
-  const filteredTxs = getFilteredTransactions();
+  const aiResult = useMemo(() => getSmartSearchResult(), [transactions, activeAccountFilter, smartSearchQuery, accounts, categories]);
+  const filteredTxs = useMemo(() => getFilteredTransactions(), [transactions, activeAccountFilter, smartSearchQuery, accounts, categories]);
 
   const getCategoryObj = (catId: string) => {
     return categories.find((c) => c.id === catId) || categories[0];
@@ -155,9 +157,36 @@ export const ExpenseLedger: React.FC = () => {
       catStats.stdDev > 25 &&
       tx.amount > catStats.avg + 1.8 * catStats.stdDev;
 
-    return (
+    const txActions: MenuAction[] = [
+      {
+        id: 'copy',
+        title: 'Copy Details',
+        image: 'doc.on.doc' as any,
+      },
+      ...(canSettle
+        ? [
+            {
+              id: 'settle',
+              title: 'Settle Up',
+              image: 'checkmark.circle.fill' as any,
+            },
+          ]
+        : []),
+      {
+        id: 'select',
+        title: 'Select Item',
+        image: 'checklist' as any,
+      },
+      {
+        id: 'delete',
+        title: 'Delete Transaction',
+        image: 'trash.fill' as any,
+        attributes: { destructive: true },
+      },
+    ];
+
+    const rowContent = (
       <TouchableOpacity
-        key={tx.id}
         style={[styles.transactionRow, !isLast && styles.rowDivider]}
         activeOpacity={0.7}
         onPress={() => {
@@ -306,6 +335,40 @@ export const ExpenseLedger: React.FC = () => {
         </View>
       </TouchableOpacity>
     );
+
+    if (isSelectMode) {
+      return <React.Fragment key={tx.id}>{rowContent}</React.Fragment>;
+    }
+
+    return (
+      <NativeLiquidMenu
+        key={tx.id}
+        title={tx.note || cat.name}
+        actions={txActions}
+        shouldOpenOnLongPress={true}
+        onSelect={(actionId) => {
+          if (actionId === 'copy') {
+            const copyText = `${tx.note || cat.name}: ${amountDisplay} (${formattedDate})`;
+            Clipboard.setStringAsync(copyText).catch(() => {});
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+          } else if (actionId === 'settle') {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+            setSettlingTx(tx);
+            setSettleAccountId(tx.accountId || accounts[0]?.id || 'acc_hdfc');
+          } else if (actionId === 'select') {
+            Haptics.selectionAsync().catch(() => {});
+            setIsSelectMode(true);
+            toggleSelectTransaction(tx.id);
+          } else if (actionId === 'delete') {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+            removeTransactions([tx.id]);
+          }
+        }}
+        style={{ width: '100%' }}
+      >
+        {rowContent}
+      </NativeLiquidMenu>
+    );
   };
 
   return (
@@ -354,12 +417,12 @@ export const ExpenseLedger: React.FC = () => {
               <Sparkles size={14} color={expenseColors.accentPeach} />
               <AppText style={styles.smartSearchHeading}>ON-DEVICE AI QUERY</AppText>
             </View>
-            <View style={styles.hardwareBadge}>
+            {/* <View style={styles.hardwareBadge}>
               <Cpu size={10} color="#5CE49A" />
               <AppText style={styles.hardwareBadgeText}>
                 {Platform.OS === 'ios' ? ' Neural Engine' : '🤖 NNAPI ML'}
               </AppText>
-            </View>
+            </View> */}
           </View>
 
           {/* Search Input Box */}
@@ -468,6 +531,7 @@ export const ExpenseLedger: React.FC = () => {
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.filterScrollContainer}
+          style={styles.filterScrollView}
         >
           {accountFilterList.map((filterName) => {
             const isActive = activeAccountFilter.toLowerCase() === filterName.toLowerCase();
@@ -479,7 +543,10 @@ export const ExpenseLedger: React.FC = () => {
                   isActive ? styles.filterPillActive : styles.filterPillInactive,
                 ]}
                 activeOpacity={0.7}
-                onPress={() => setActiveAccountFilter(filterName)}
+                onPress={() => {
+                  Haptics.selectionAsync().catch(() => {});
+                  setActiveAccountFilter(filterName);
+                }}
               >
                 <AppText
                   style={[
@@ -893,16 +960,30 @@ const styles = StyleSheet.create({
   typeFilterTextInactive: {
     color: expenseColors.textSubtle,
   },
-  filterScrollContainer: {
-    paddingHorizontal: 16,
-    gap: 8,
-    marginBottom: 16,
-  },
-  filterPill: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 14,
-  },
+filterScrollView: {
+  height: 44,
+  flexGrow: 0,
+  flexShrink: 0,
+},
+filterScrollContainer: {
+  height: 44,
+  paddingHorizontal: 16,
+  gap: 8,
+  marginBottom: 16,
+  alignItems: 'center',
+  flexDirection: 'row',
+},
+filterPill: {
+  height: 36,
+  minHeight: 36,
+  paddingHorizontal: 14,
+  borderRadius: 14,
+  alignItems: 'center',
+  justifyContent: 'center',
+  alignSelf: 'center',
+  flexGrow: 0,
+  flexShrink: 0,
+},
   filterPillActive: {
     backgroundColor: '#FFFFFF',
   },
@@ -950,7 +1031,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#1C1F2B',
+    backgroundColor: '#1A1C24',
     borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 12,
@@ -1003,6 +1084,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1.2,
     textAlign: 'center',
     marginBottom: 10,
+    paddingTop: 12,
   },
   groupCard: {
     backgroundColor: expenseColors.bgCard,
@@ -1226,7 +1308,7 @@ const styles = StyleSheet.create({
   },
   settleModalCard: {
     width: '100%',
-    backgroundColor: '#161822',
+    backgroundColor: '#1A1C24',
     borderRadius: 22,
     padding: 18,
     borderWidth: 1,
@@ -1255,7 +1337,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   settleAmountHero: {
-    backgroundColor: '#1E2130',
+    backgroundColor: '#232633',
     borderRadius: 16,
     paddingVertical: 14,
     alignItems: 'center',
@@ -1276,7 +1358,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   settleAccChip: {
-    backgroundColor: '#1E2130',
+    backgroundColor: '#232633',
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 10,

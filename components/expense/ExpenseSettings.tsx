@@ -825,7 +825,7 @@ export const ExpenseSettings: React.FC = () => {
               {
                 transform: [{ translateY: currencyTranslateY }],
                 maxHeight: '82%',
-                paddingBottom: insets.bottom + 16,
+                paddingBottom: 0,
               },
             ]}
           >
@@ -851,7 +851,8 @@ export const ExpenseSettings: React.FC = () => {
             {/* Currencies List */}
             <ScrollView
               showsVerticalScrollIndicator={false}
-              contentContainerStyle={{ paddingBottom: 16 }}
+              contentContainerStyle={{ paddingBottom: insets.bottom + 24, backgroundColor: '#1A1C24' }}
+              style={{ backgroundColor: '#1A1C24' }}
             >
               {filteredCurrencies.map((item) => {
                 const isSelected = currencyCode === item.code;
@@ -1539,7 +1540,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.65)',
   },
   modalSheet: {
-    backgroundColor: '#16171E',
+    backgroundColor: '#1A1C24',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingHorizontal: 20,
@@ -1575,7 +1576,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   inputContainer: {
-    backgroundColor: '#1E202A',
+    backgroundColor: '#232633',
     borderRadius: 12,
     height: 52,
     paddingHorizontal: 16,
@@ -1607,7 +1608,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 10,
-    backgroundColor: '#1E202A',
+    backgroundColor: '#232633',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1657,7 +1658,7 @@ const styles = StyleSheet.create({
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1E202A',
+    backgroundColor: '#232633',
     borderRadius: 12,
     paddingHorizontal: 12,
     height: 44,

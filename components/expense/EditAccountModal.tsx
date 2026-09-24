@@ -352,7 +352,7 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F1015',
+    backgroundColor: '#101114',
   },
   header: {
     flexDirection: 'row',
@@ -394,7 +394,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
   },
   textInput: {
-    backgroundColor: '#1A1D27',
+    backgroundColor: '#1A1C24',
     borderRadius: 14,
     paddingHorizontal: 16,
     height: 52,
@@ -411,7 +411,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    backgroundColor: '#1A1D27',
+    backgroundColor: '#1A1C24',
     paddingVertical: 12,
     borderRadius: 14,
   },
@@ -431,11 +431,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#16171E',
+    backgroundColor: '#1A1C24',
     borderRadius: 12,
     padding: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.04)',
+    borderColor: 'rgba(255, 255, 255, 0.06)',
   },
   infoText: {
     color: '#8E919D',
@@ -445,7 +445,7 @@ const styles = StyleSheet.create({
   balanceCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1A1D27',
+    backgroundColor: '#1A1C24',
     borderRadius: 14,
     padding: 14,
     gap: 12,
@@ -454,7 +454,7 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 10,
-    backgroundColor: '#262A38',
+    backgroundColor: '#232633',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -469,12 +469,12 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   balanceInputBlock: {
-    backgroundColor: '#16171E',
+    backgroundColor: '#1A1C24',
     borderRadius: 14,
     padding: 14,
     gap: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.05)',
+    borderColor: 'rgba(255, 255, 255, 0.06)',
   },
   actionButtonsStack: {
     gap: 10,
@@ -485,7 +485,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: '#1A1D27',
+    backgroundColor: '#1A1C24',
     height: 48,
     borderRadius: 12,
   },

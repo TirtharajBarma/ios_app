@@ -30,7 +30,8 @@ import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
 
-import { AppText } from '@/components/ui';
+import { AppText, NativeLiquidMenu } from '@/components/ui';
+import { MenuAction } from '@expo/ui/community/menu';
 import { useExpenseStore } from '@/store/useExpenseStore';
 import { FixedBottomNav } from './FixedBottomNav';
 import { expenseColors } from '@/constants/expenseColors';
@@ -102,8 +103,7 @@ export const ExpenseImport: React.FC = () => {
   const { accounts, categories, addTransaction, currencySymbol } = useExpenseStore();
   const sym = currencySymbol || '₹';
 
-  const [selectedAccount, setSelectedAccount] = useState<string>(accounts[0]?.name || 'Primary');
-  const [showAccountDropdown, setShowAccountDropdown] = useState(false);
+  const [selectedAccount, setSelectedAccount] = useState<string>('');
   const [importStatus, setImportStatus] = useState<'idle' | 'uploading' | 'processing' | 'success'>('idle');
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
 
@@ -497,47 +497,39 @@ export const ExpenseImport: React.FC = () => {
             <AppText style={styles.accountCardTitle}>DEFAULT TARGET ACCOUNT</AppText>
           </View>
 
-          {/* Selector Dropdown */}
-          <TouchableOpacity
-            style={styles.dropdownSelector}
-            activeOpacity={0.8}
-            onPress={() => {
-              Haptics.selectionAsync();
-              setShowAccountDropdown(!showAccountDropdown);
-            }}
-          >
-            <AppText style={styles.dropdownSelectedText}>
-              {selectedAccount}
-            </AppText>
-            <ChevronDown size={18} color={expenseColors.textSubtle} />
-          </TouchableOpacity>
-
-          {/* Account Options List */}
-          {showAccountDropdown && (
-            <View style={styles.dropdownOptionsList}>
-              {accounts.map((acc) => (
-                <TouchableOpacity
-                  key={acc.id}
-                  style={styles.dropdownOptionItem}
-                  onPress={() => {
-                    Haptics.selectionAsync();
-                    setSelectedAccount(acc.name);
-                    setStagedAccountId(acc.id);
-                    setShowAccountDropdown(false);
-                  }}
-                >
-                  <AppText
-                    style={[
-                      styles.dropdownOptionText,
-                      acc.name === selectedAccount && styles.dropdownOptionSelectedText,
-                    ]}
-                  >
-                    {acc.name}
+          {/* Native Liquid Dropdown */}
+          {(() => {
+            const accountMenuActions: MenuAction[] = accounts.map((acc) => ({
+              id: acc.name,
+              title: acc.name,
+              image: (acc.statusType === 'due' || acc.type === 'credit')
+                ? 'creditcard.fill' as any
+                : acc.name.toLowerCase().includes('wallet') || acc.name.toLowerCase().includes('pay')
+                  ? 'wallet.pass.fill' as any
+                  : 'building.columns.fill' as any,
+              state: (selectedAccount === acc.name ? 'on' : 'off') as 'on' | 'off',
+            }));
+            return (
+              <NativeLiquidMenu
+                title="Select Account"
+                actions={accountMenuActions}
+                onSelect={(name) => {
+                  Haptics.selectionAsync().catch(() => {});
+                  setSelectedAccount(name);
+                  const acc = accounts.find((a) => a.name === name);
+                  if (acc) setStagedAccountId(acc.id);
+                }}
+                style={{ width: '100%' }}
+              >
+                <View style={styles.dropdownSelector}>
+                  <AppText style={[styles.dropdownSelectedText, !selectedAccount && { color: expenseColors.textMuted }]}>
+                    {selectedAccount || 'Select Account'}
                   </AppText>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
+                  <ChevronDown size={18} color={expenseColors.textSubtle} />
+                </View>
+              </NativeLiquidMenu>
+            );
+          })()}
 
           <AppText style={styles.accountCardDescription}>
             Transactions will be assigned to this account upon import.
@@ -769,7 +761,7 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: '#22242F',
+    backgroundColor: '#232633',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 16,
@@ -850,7 +842,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#22242F',
+    backgroundColor: '#232633',
     borderRadius: 14,
     paddingHorizontal: 16,
     paddingVertical: 14,
@@ -862,7 +854,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   dropdownOptionsList: {
-    backgroundColor: '#1C1E26',
+    backgroundColor: '#1A1C24',
     borderRadius: 12,
     marginBottom: 10,
     overflow: 'hidden',
@@ -890,7 +882,7 @@ const styles = StyleSheet.create({
   // ── Modal Staging Styles ──
   modalContainer: {
     flex: 1,
-    backgroundColor: '#12141C',
+    backgroundColor: '#101114',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -916,7 +908,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: '#222530',
+    backgroundColor: '#232633',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -925,7 +917,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 18,
     paddingVertical: 10,
-    backgroundColor: '#181A24',
+    backgroundColor: '#1A1C24',
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.04)',
   },
@@ -939,7 +931,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 12,
-    backgroundColor: '#222530',
+    backgroundColor: '#232633',
   },
   modalAccountPillActive: {
     backgroundColor: expenseColors.accentPeach,
@@ -984,7 +976,7 @@ const styles = StyleSheet.create({
   stagedItemRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1A1D27',
+    backgroundColor: '#1A1C24',
     borderRadius: 14,
     padding: 12,
     marginTop: 8,
@@ -1038,7 +1030,7 @@ const styles = StyleSheet.create({
   modalFooter: {
     paddingHorizontal: 16,
     paddingTop: 12,
-    backgroundColor: '#181A24',
+    backgroundColor: '#1A1C24',
     borderTopWidth: 1,
     borderTopColor: 'rgba(255,255,255,0.06)',
   },

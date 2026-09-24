@@ -201,7 +201,7 @@ const styles = StyleSheet.create({
   modalCard: {
     width: '100%',
     maxWidth: 360,
-    backgroundColor: '#16171E',
+    backgroundColor: '#1A1C24',
     borderRadius: 20,
     padding: 16,
     borderWidth: 1,
@@ -227,7 +227,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: '#22242F',
+    backgroundColor: '#232633',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -235,7 +235,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#1F222E',
+    backgroundColor: '#232633',
     borderRadius: 12,
     paddingHorizontal: 8,
     paddingVertical: 6,
@@ -290,7 +290,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   dayTextSelected: {
-    color: '#0F1015',
+    color: '#101114',
     fontWeight: '800',
   },
   quickActions: {
@@ -306,7 +306,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 8,
-    backgroundColor: '#22242F',
+    backgroundColor: '#232633',
   },
   quickBtnText: {
     color: expenseColors.accentPeach,

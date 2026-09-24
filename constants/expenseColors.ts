@@ -1,8 +1,8 @@
 export const expenseColors = {
-  bgPrimary: '#0E0F14',
-  bgCard: '#15171F',
-  borderCard: 'rgba(255, 255, 255, 0.04)',
-  circleBtnBg: '#22252E',
+  bgPrimary: '#101114',
+  bgCard: '#1A1C24',
+  borderCard: 'rgba(255, 255, 255, 0.06)',
+  circleBtnBg: '#232633',
 
   textPrimary: '#FFFFFF',
   textSecondary: '#A2A5B0',

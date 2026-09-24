@@ -219,7 +219,7 @@ export const BudgetCard: React.FC = () => {
               cx={center}
               cy={center}
               r={radius}
-              stroke="#12131A"
+              stroke="#101114"
               strokeWidth={strokeWidth}
               fill="transparent"
             />
@@ -263,7 +263,7 @@ export const BudgetCard: React.FC = () => {
               r={innerRadius}
               stroke="rgba(255, 255, 255, 0.08)"
               strokeWidth={innerStrokeWidth}
-              fill="#12131A"
+              fill="#1A1C24"
             />
             {overallBudgetDash > 0 && (
               <Circle
@@ -564,7 +564,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     width: '100%',
-    backgroundColor: '#161822',
+    backgroundColor: '#232633',
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 9,

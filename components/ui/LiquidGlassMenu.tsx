@@ -12,7 +12,7 @@ import {
 import { BlurView } from 'expo-blur';
 import { GlassView, GlassContainer } from 'expo-glass-effect';
 import * as Haptics from 'expo-haptics';
-import { AppText } from '@/components/ui';
+import AppText from './AppText';
 
 export interface LiquidGlassMenuItem {
   label: string;

@@ -21,10 +21,10 @@ export const transparentWhite = {
 
 export const colors = {
   // Backgrounds
-  background: "#000000",
-  surface: "#1C1C1E",
-  surfaceSecondary: "#2C2C2E",
-  card: "#232325",
+  background: "#101114",
+  surface: "#1A1C24",
+  surfaceSecondary: "#242733",
+  card: "#1A1C24",
 
   // Text
   textPrimary: "#FFFFFF",

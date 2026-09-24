@@ -14,7 +14,9 @@ import {
   CreditCard,
   Wallet,
 } from 'lucide-react-native';
-import { AppText } from '@/components/ui';
+import * as Haptics from 'expo-haptics';
+import { MenuAction } from '@expo/ui/community/menu';
+import { AppText, NativeLiquidMenu } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
 import { expenseColors } from '@/constants/expenseColors';
 import { ExpenseAccount } from '@/types/expense';
@@ -29,7 +31,13 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
   visible,
   onClose,
 }) => {
-  const { accounts, transactions, currencySymbol } = useExpenseStore();
+  const {
+    accounts,
+    transactions,
+    currencySymbol,
+    deleteAccount,
+    archiveAccount,
+  } = useExpenseStore();
   const sym = currencySymbol || '₹';
   const [selectedAccountForEdit, setSelectedAccountForEdit] = useState<ExpenseAccount | null>(null);
   const [showEditModal, setShowEditModal] = useState<boolean>(false);
@@ -96,44 +104,81 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
               const txCount = getAccountTxCount(account.id) || account.txnCountThisMonth || 0;
               const isDue = account.statusType === 'due' && (account.dueAmount ?? 0) > 0;
 
+              const accountActions: MenuAction[] = [
+                {
+                  id: 'edit',
+                  title: 'Edit Details',
+                  image: 'pencil' as any,
+                },
+                {
+                  id: 'archive',
+                  title: 'Archive Account',
+                  image: 'archivebox.fill' as any,
+                },
+                {
+                  id: 'delete',
+                  title: 'Delete Account',
+                  image: 'trash.fill' as any,
+                  attributes: { destructive: true },
+                },
+              ];
+
               return (
-                <TouchableOpacity
+                <NativeLiquidMenu
                   key={account.id}
-                  style={styles.accountRow}
-                  onPress={() => handleOpenEdit(account)}
-                  activeOpacity={0.75}
+                  title={account.name}
+                  actions={accountActions}
+                  shouldOpenOnLongPress={true}
+                  onSelect={(actionId) => {
+                    if (actionId === 'edit') {
+                      handleOpenEdit(account);
+                    } else if (actionId === 'archive') {
+                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+                      archiveAccount(account.id);
+                    } else if (actionId === 'delete') {
+                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+                      deleteAccount(account.id);
+                    }
+                  }}
+                  style={{ width: '100%' }}
                 >
-                  {/* Left Icon */}
-                  <View style={styles.iconCircle}>
-                    {getAccountIcon(account)}
-                  </View>
-
-                  {/* Middle Info */}
-                  <View style={styles.infoCol}>
-                    <AppText style={styles.accountName}>
-                      {account.name}
-                    </AppText>
-                    {isDue ? (
-                      <AppText style={styles.dueText}>
-                        Due: {sym}{account.dueAmount?.toLocaleString('en-IN')}
-                      </AppText>
-                    ) : (
-                      <AppText style={styles.balanceText}>
-                        {sym}{account.balance.toLocaleString('en-IN')}
-                      </AppText>
-                    )}
-                  </View>
-
-                  {/* Right: Badge + Chevron */}
-                  <View style={styles.rightGroup}>
-                    <View style={styles.txBadge}>
-                      <AppText style={styles.txBadgeText}>
-                        {txCount} txns
-                      </AppText>
+                  <TouchableOpacity
+                    style={styles.accountRow}
+                    onPress={() => handleOpenEdit(account)}
+                    activeOpacity={0.75}
+                  >
+                    {/* Left Icon */}
+                    <View style={styles.iconCircle}>
+                      {getAccountIcon(account)}
                     </View>
-                    <ChevronRight size={18} color="#555866" />
-                  </View>
-                </TouchableOpacity>
+
+                    {/* Middle Info */}
+                    <View style={styles.infoCol}>
+                      <AppText style={styles.accountName}>
+                        {account.name}
+                      </AppText>
+                      {isDue ? (
+                        <AppText style={styles.dueText}>
+                          Due: {sym}{account.dueAmount?.toLocaleString('en-IN')}
+                        </AppText>
+                      ) : (
+                        <AppText style={styles.balanceText}>
+                          {sym}{account.balance.toLocaleString('en-IN')}
+                        </AppText>
+                      )}
+                    </View>
+
+                    {/* Right: Badge + Chevron */}
+                    <View style={styles.rightGroup}>
+                      <View style={styles.txBadge}>
+                        <AppText style={styles.txBadgeText}>
+                          {txCount} txns
+                        </AppText>
+                      </View>
+                      <ChevronRight size={18} color="#555866" />
+                    </View>
+                  </TouchableOpacity>
+                </NativeLiquidMenu>
               );
             })}
           </View>
@@ -153,7 +198,7 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F1015',
+    backgroundColor: '#101114',
   },
   header: {
     flexDirection: 'row',
@@ -181,7 +226,7 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: '#262A38',
+    backgroundColor: '#232633',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -213,7 +258,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#1E212D',
+    backgroundColor: '#1A1C24',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -243,7 +288,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   txBadge: {
-    backgroundColor: '#1A1D27',
+    backgroundColor: '#1A1C24',
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 8,

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -30,7 +30,7 @@ import {
   Trash2,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
-import { AppText } from '@/components/ui';
+import { AppText, NativeLiquidMenu } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
 import { useSubscriptionStore } from '@/store/useSubscriptionStore';
 import { expenseColors } from '@/constants/expenseColors';
@@ -148,6 +148,47 @@ const VENDOR_CATEGORY_MAP: Record<string, string> = {
   rent: 'cat_util',
 };
 
+const getAccountIcon = (name: string) => {
+  const n = (name || '').toLowerCase();
+  if (n.includes('card') || n.includes('myzone') || n.includes('neo') || n.includes('credit')) {
+    return <CreditCard size={14} color="#FFFFFF" />;
+  }
+  if (n.includes('wallet') || n.includes('pay') || n.includes('slice')) {
+    return <Wallet size={14} color="#FFFFFF" />;
+  }
+  if (n.includes('cash')) {
+    return <Banknote size={14} color="#FFFFFF" />;
+  }
+  return <Banknote size={14} color="#FFFFFF" />;
+};
+
+const getCategorySfSymbol = (catId: string, name?: string): string => {
+  const n = (name || '').toLowerCase();
+  const id = (catId || '').toLowerCase();
+  if (id.includes('food') || n.includes('food') || n.includes('dining') || n.includes('eat') || n.includes('coffee')) return 'fork.knife';
+  if (id.includes('shop') || n.includes('shop') || n.includes('store') || n.includes('buy')) return 'bag.fill';
+  if (id.includes('trans') || id.includes('travel') || n.includes('travel') || n.includes('uber') || n.includes('fuel')) return 'car.fill';
+  if (id.includes('cig') || n.includes('smoke') || n.includes('tobacco')) return 'flame.fill';
+  if (id.includes('health') || n.includes('med') || n.includes('doctor') || n.includes('gym')) return 'cross.case.fill';
+  if (id.includes('util') || n.includes('bill') || n.includes('power') || n.includes('wifi')) return 'bolt.fill';
+  if (id.includes('ent') || n.includes('movie') || n.includes('game') || n.includes('music')) return 'tv.fill';
+  if (id.includes('edu') || n.includes('course') || n.includes('book')) return 'book.fill';
+  if (id.includes('inv') || n.includes('stock') || n.includes('crypto')) return 'chart.line.uptrend.xyaxis';
+  if (id.includes('sal') || n.includes('salary') || n.includes('pay')) return 'banknote.fill';
+  if (id.includes('free') || n.includes('work') || n.includes('client')) return 'laptopcomputer';
+  if (id.includes('groc') || n.includes('grocery') || n.includes('market')) return 'cart.fill';
+  if (id.includes('rent') || n.includes('home') || n.includes('house')) return 'house.fill';
+  return 'tag.fill';
+};
+
+const getAccountSfSymbol = (name: string): string => {
+  const n = (name || '').toLowerCase();
+  if (n.includes('card') || n.includes('credit') || n.includes('myzone') || n.includes('neo')) return 'creditcard.fill';
+  if (n.includes('wallet') || n.includes('slice') || n.includes('pay')) return 'wallet.pass.fill';
+  if (n.includes('cash')) return 'banknote.fill';
+  return 'building.columns.fill';
+};
+
 export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   visible,
   onClose,
@@ -168,15 +209,11 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   const [debtType, setDebtType] = useState<DebtType>('lend');
   const [amount, setAmount] = useState<string>('');
   const [merchant, setMerchant] = useState<string>('');
-  const [selectedAccountId, setSelectedAccountId] = useState<string>(
-    accounts[0]?.id || 'acc_hdfc'
-  );
+  const [selectedAccountId, setSelectedAccountId] = useState<string>('');
   const [toAccountId, setToAccountId] = useState<string>(
     accounts[1]?.id || accounts[0]?.id || 'acc_slice'
   );
-  const [selectedCategoryId, setSelectedCategoryId] = useState<string>(
-    categories[0]?.id || 'cat_shop'
-  );
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string>('');
   const [txDate, setTxDate] = useState<Date>(new Date(2026, 8, 23)); // Sep 23, 2026 default
   const [note, setNote] = useState<string>('');
   const [selectedTag, setSelectedTag] = useState<string>('');
@@ -206,7 +243,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   const [newPresetAmount, setNewPresetAmount] = useState<string>('');
   const [newPresetCatId, setNewPresetCatId] = useState<string>(categories[0]?.id || 'cat_shop');
 
-  // Account Dropdown Picker Modal
+  // Account Dropdown Picker Modal (Transfer mode)
   const [accountPickerSide, setAccountPickerSide] = useState<'from' | 'to' | null>(null);
   const [showAddAccountModal, setShowAddAccountModal] = useState<boolean>(false);
 
@@ -393,23 +430,57 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
     onClose();
   };
 
-  const getAccountIcon = (name: string) => {
-    const n = name.toLowerCase();
-    if (n.includes('card') || n.includes('myzone') || n.includes('neo') || n.includes('credit')) {
-      return <CreditCard size={14} color="#FFFFFF" />;
-    }
-    if (n.includes('wallet') || n.includes('pay') || n.includes('slice')) {
-      return <Wallet size={14} color="#FFFFFF" />;
-    }
-    if (n.includes('cash')) {
-      return <Banknote size={14} color="#FFFFFF" />;
-    }
-    return <Banknote size={14} color="#FFFFFF" />;
-  };
-
-  const fromAccObj = accounts.find((a) => a.id === selectedAccountId) || accounts[0];
+  const selectedCatObj = categories.find((c) => c.id === selectedCategoryId) || null;
+  const fromAccObj = accounts.find((a) => a.id === selectedAccountId) || null;
   const toAccObj = accounts.find((a) => a.id === toAccountId) || accounts[1] || accounts[0];
   const isCreditCardPayment = toAccObj?.statusType === 'due' || toAccObj?.type === 'credit';
+
+  // Keep primary root menu compact (<= 6 items) so iOS UIKit always presents the popover DOWNWARDS
+  const topCategoryIds = ['cat_food', 'cat_shop', 'cat_trans', 'cat_cig', 'cat_util'];
+  const primaryCategories = categories.filter((c) =>
+    topCategoryIds.includes(c.id) || c.id === selectedCategoryId
+  );
+  const otherCategories = categories.filter((c) =>
+    !primaryCategories.some((p) => p.id === c.id)
+  );
+
+  const categoryActions = [
+    ...primaryCategories.map((cat) => ({
+      id: cat.id,
+      title: `${cat.name}${cat.emoji ? ` ${cat.emoji}` : ''}`,
+      image: getCategorySfSymbol(cat.id, cat.name) as any,
+      state: (selectedCategoryId === cat.id ? 'on' : 'off') as 'on' | 'off',
+    })),
+    ...(otherCategories.length > 0
+      ? [
+          {
+            id: '__MORE_CATEGORIES__',
+            title: 'More Categories...',
+            image: 'ellipsis.circle' as any,
+            subactions: otherCategories.map((cat) => ({
+              id: cat.id,
+              title: `${cat.name}${cat.emoji ? ` ${cat.emoji}` : ''}`,
+              image: getCategorySfSymbol(cat.id, cat.name) as any,
+              state: (selectedCategoryId === cat.id ? 'on' : 'off') as 'on' | 'off',
+            })),
+          },
+        ]
+      : []),
+  ];
+
+  const accountActions = [
+    ...accounts.map((acc) => ({
+      id: acc.id,
+      title: `${acc.name} (${acc.statusType === 'due' ? `Due: ${sym}${acc.dueAmount || 0}` : `Bal: ${sym}${acc.balance}`})`,
+      image: getAccountSfSymbol(acc.name) as any,
+      state: (selectedAccountId === acc.id ? 'on' : 'off') as 'on' | 'off',
+    })),
+    {
+      id: '__ADD_ACCOUNT__',
+      title: 'Add New Account...',
+      image: 'plus.circle' as any,
+    },
+  ];
 
   const modeThemeColor = expenseColors.accentPeach; // Consistent warm peach aesthetic across all modes
 
@@ -451,69 +522,37 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
           {/* Segmented Type Control: 4 Clean Modes with Unified Peach Highlight */}
           <View style={styles.typeSegment}>
             <TouchableOpacity
-              style={[
-                styles.typeBtn,
-                tabMode === 'expense' && styles.typeBtnActive,
-              ]}
-              onPress={() => setTabMode('expense')}
+              style={[styles.typeBtn, tabMode === 'expense' && styles.typeBtnActive]}
+              onPress={() => { Haptics.selectionAsync().catch(() => {}); setTabMode('expense'); }}
             >
-              <AppText
-                style={[
-                  styles.typeBtnText,
-                  tabMode === 'expense' && styles.typeBtnTextActive,
-                ]}
-              >
+              <AppText style={[styles.typeBtnText, tabMode === 'expense' && styles.typeBtnTextActive]}>
                 EXPENSE
               </AppText>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[
-                styles.typeBtn,
-                tabMode === 'income' && styles.typeBtnActive,
-              ]}
-              onPress={() => setTabMode('income')}
+              style={[styles.typeBtn, tabMode === 'income' && styles.typeBtnActive]}
+              onPress={() => { Haptics.selectionAsync().catch(() => {}); setTabMode('income'); }}
             >
-              <AppText
-                style={[
-                  styles.typeBtnText,
-                  tabMode === 'income' && styles.typeBtnTextActive,
-                ]}
-              >
+              <AppText style={[styles.typeBtnText, tabMode === 'income' && styles.typeBtnTextActive]}>
                 INCOME
               </AppText>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[
-                styles.typeBtn,
-                tabMode === 'transfer' && styles.typeBtnActive,
-              ]}
-              onPress={() => setTabMode('transfer')}
+              style={[styles.typeBtn, tabMode === 'transfer' && styles.typeBtnActive]}
+              onPress={() => { Haptics.selectionAsync().catch(() => {}); setTabMode('transfer'); }}
             >
-              <AppText
-                style={[
-                  styles.typeBtnText,
-                  tabMode === 'transfer' && styles.typeBtnTextActive,
-                ]}
-              >
+              <AppText style={[styles.typeBtnText, tabMode === 'transfer' && styles.typeBtnTextActive]}>
                 TRANSFER
               </AppText>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[
-                styles.typeBtn,
-                tabMode === 'debt' && styles.typeBtnActive,
-              ]}
-              onPress={() => setTabMode('debt')}
+              style={[styles.typeBtn, tabMode === 'debt' && styles.typeBtnActive]}
+              onPress={() => { Haptics.selectionAsync().catch(() => {}); setTabMode('debt'); }}
             >
-              <AppText
-                style={[
-                  styles.typeBtnText,
-                  tabMode === 'debt' && styles.typeBtnTextActive,
-                ]}
-              >
+              <AppText style={[styles.typeBtnText, tabMode === 'debt' && styles.typeBtnTextActive]}>
                 LEND/BORROW
               </AppText>
             </TouchableOpacity>
@@ -723,139 +762,131 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             </View>
           )}
 
-          {/* CATEGORY (Click & Scroll) */}
-          {(tabMode === 'expense' || tabMode === 'income') && (
-            <View style={styles.section}>
-              <AppText style={styles.label}>CATEGORY</AppText>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.categoryScrollRow}
-              >
-                {categories.map((cat) => {
-                  const selected = selectedCategoryId === cat.id;
-                  const catBg = selected
-                    ? getCategoryBgColor(cat.color, '35')
-                    : getCategoryBgColor(cat.color, '14');
-                  const catBorder = selected ? cat.color : getCategoryBgColor(cat.color, '38');
-
-                  return (
-                    <TouchableOpacity
-                      key={cat.id}
-                      onPress={() => {
-                        Haptics.selectionAsync().catch(() => {});
-                        setSelectedCategoryId(cat.id);
-                      }}
-                      style={[
-                        styles.categoryPill,
-                        {
-                          backgroundColor: catBg,
-                          borderColor: catBorder,
-                          borderWidth: selected ? 2 : 1,
-                        },
-                      ]}
-                      activeOpacity={0.75}
-                    >
-                      <CategoryIcon
-                        category={cat}
-                        size={15}
-                        color={cat.color}
-                        strokeWidth={2}
-                        fill={selected}
-                      />
-                      <AppText
-                        style={[
-                          styles.categoryPillText,
-                          {
-                            color: selected ? '#FFFFFF' : '#E0E3EB',
-                            fontWeight: selected ? '800' : '600',
-                          },
-                        ]}
-                      >
-                        {cat.name.toUpperCase()}{cat.emoji ? ` ${cat.emoji}` : ''}
+          {/* ── SIDE-BY-SIDE: CATEGORY & ACCOUNT DROPDOWNS (Apple Native Liquid UI 50% / 50%) ── */}
+          {(tabMode === 'expense' || tabMode === 'income') ? (
+            <View style={styles.sideBySideRow}>
+              {/* Left Column: Category Dropdown */}
+              <View style={styles.dropdownColumn}>
+                <AppText style={styles.label}>CATEGORY</AppText>
+                <NativeLiquidMenu
+                  title="Category"
+                  actions={categoryActions}
+                  onSelect={(catId) => {
+                    Haptics.selectionAsync().catch(() => {});
+                    setSelectedCategoryId(catId);
+                  }}
+                  style={{ width: '100%' }}
+                >
+                  <View style={styles.dropdownTrigger}>
+                    <View style={styles.dropdownTriggerLeft}>
+                      {selectedCatObj && (
+                        <View
+                          style={[
+                            styles.dropdownIconCircle,
+                            { backgroundColor: getCategoryBgColor(selectedCatObj.color, '25') },
+                          ]}
+                        >
+                          <CategoryIcon
+                            category={selectedCatObj}
+                            size={14}
+                            color={selectedCatObj.color}
+                            strokeWidth={2}
+                            fill
+                          />
+                        </View>
+                      )}
+                      <AppText style={styles.dropdownTriggerValue} numberOfLines={1}>
+                        {selectedCatObj ? `${selectedCatObj.name.toUpperCase()}${selectedCatObj.emoji ? ` ${selectedCatObj.emoji}` : ''}` : 'Select'}
                       </AppText>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-            </View>
-          )}
+                    </View>
+                    <ChevronDown size={15} color="#7E8394" />
+                  </View>
+                </NativeLiquidMenu>
+              </View>
 
-          {/* ACCOUNT SELECTION (Click & Scroll) */}
-          {tabMode !== 'transfer' && (
+              {/* Right Column: Account Dropdown */}
+              <View style={styles.dropdownColumn}>
+                <AppText style={styles.label}>
+                  {tabMode === 'income' ? 'RECEIVE IN' : 'PAID FROM'}
+                </AppText>
+                <NativeLiquidMenu
+                  title={tabMode === 'income' ? 'Receive In' : 'Paid From'}
+                  actions={accountActions}
+                  onSelect={(accId) => {
+                    if (accId === '__ADD_ACCOUNT__') {
+                      setShowAddAccountModal(true);
+                    } else {
+                      Haptics.selectionAsync().catch(() => {});
+                      setSelectedAccountId(accId);
+                    }
+                  }}
+                  style={{ width: '100%' }}
+                >
+                  <View style={styles.dropdownTrigger}>
+                    <View style={styles.dropdownTriggerLeft}>
+                      {fromAccObj && (
+                        <View style={styles.dropdownIconCircle}>
+                          {getAccountIcon(fromAccObj.name)}
+                        </View>
+                      )}
+                      <View style={{ flexShrink: 1 }}>
+                        <AppText style={styles.dropdownTriggerValue} numberOfLines={1}>
+                          {fromAccObj ? fromAccObj.name.toUpperCase() : 'Select'}
+                        </AppText>
+                        {fromAccObj && (
+                          <AppText style={styles.dropdownTriggerSub} numberOfLines={1}>
+                            {fromAccObj.statusType === 'due' ? `Due:${sym}${fromAccObj.dueAmount || 0}` : `Bal:${sym}${fromAccObj.balance}`}
+                          </AppText>
+                        )}
+                      </View>
+                    </View>
+                    <ChevronDown size={15} color="#7E8394" />
+                  </View>
+                </NativeLiquidMenu>
+              </View>
+            </View>
+          ) : tabMode === 'debt' ? (
+            /* Full Width Dropdown for Debt Account */
             <View style={styles.section}>
               <AppText style={styles.label}>
-                {tabMode === 'income'
-                  ? 'RECEIVING ACCOUNT'
-                  : tabMode === 'debt' && debtType === 'borrow'
-                  ? 'RECEIVED IN ACCOUNT'
-                  : 'PAID FROM ACCOUNT'}
+                {debtType === 'borrow' ? 'RECEIVED IN ACCOUNT' : 'PAID FROM ACCOUNT'}
               </AppText>
-              {accounts.length === 0 ? (
-                <View style={styles.noAccountWarningCard}>
-                  <AlertCircle size={18} color={expenseColors.accentPeach} />
-                  <View style={{ flex: 1 }}>
-                    <AppText style={styles.noAccountWarningTitle}>Account Required</AppText>
-                    <AppText style={styles.noAccountWarningSub}>
-                      You need at least one account to record this transaction.
-                    </AppText>
+              <NativeLiquidMenu
+                title={debtType === 'borrow' ? 'Receive In' : 'Paid From'}
+                actions={accountActions}
+                onSelect={(accId) => {
+                  if (accId === '__ADD_ACCOUNT__') {
+                    setShowAddAccountModal(true);
+                  } else {
+                    Haptics.selectionAsync().catch(() => {});
+                    setSelectedAccountId(accId);
+                  }
+                }}
+                style={{ width: '100%' }}
+              >
+                <View style={styles.dropdownTrigger}>
+                  <View style={styles.dropdownTriggerLeft}>
+                    {fromAccObj && (
+                      <View style={styles.dropdownIconCircle}>
+                        {getAccountIcon(fromAccObj.name)}
+                      </View>
+                    )}
+                    <View style={{ flexShrink: 1 }}>
+                      <AppText style={styles.dropdownTriggerValue} numberOfLines={1}>
+                        {fromAccObj ? fromAccObj.name.toUpperCase() : 'Select Account'}
+                      </AppText>
+                      {fromAccObj && (
+                        <AppText style={styles.dropdownTriggerSub} numberOfLines={1}>
+                          {fromAccObj.statusType === 'due' ? `Due: ${sym}${fromAccObj.dueAmount || 0}` : `Bal: ${sym}${fromAccObj.balance}`}
+                        </AppText>
+                      )}
+                    </View>
                   </View>
-                  <TouchableOpacity
-                    style={styles.addAccountWarningBtn}
-                    onPress={() => setShowAddAccountModal(true)}
-                    activeOpacity={0.8}
-                  >
-                    <Plus size={14} color="#0F1015" />
-                    <AppText style={styles.addAccountWarningBtnText}>Add</AppText>
-                  </TouchableOpacity>
+                  <ChevronDown size={15} color="#7E8394" />
                 </View>
-              ) : (
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.accountScrollRow}
-                >
-                  {accounts.map((acc) => {
-                    const selected = selectedAccountId === acc.id;
-                    return (
-                      <TouchableOpacity
-                        key={acc.id}
-                        onPress={() => {
-                          Haptics.selectionAsync().catch(() => {});
-                          setSelectedAccountId(acc.id);
-                        }}
-                        style={[
-                          styles.accountPill,
-                          selected && styles.accountPillSelected,
-                        ]}
-                        activeOpacity={0.75}
-                      >
-                        <View style={[styles.accountIconWrap, selected && styles.accountIconWrapSelected]}>
-                          {getAccountIcon(acc.name)}
-                        </View>
-                        <View>
-                          <AppText style={[styles.accountPillText, selected && styles.accountPillTextSelected]}>
-                            {acc.name.toUpperCase()}
-                          </AppText>
-                          <AppText style={styles.accountPillBal}>
-                            {acc.statusType === 'due' ? `Due: ${sym}${acc.dueAmount || 0}` : `Bal: ${sym}${acc.balance}`}
-                          </AppText>
-                        </View>
-                      </TouchableOpacity>
-                    );
-                  })}
-                  <TouchableOpacity
-                    style={styles.addAccountQuickPill}
-                    onPress={() => setShowAddAccountModal(true)}
-                    activeOpacity={0.8}
-                  >
-                    <Plus size={13} color={expenseColors.accentPeach} />
-                    <AppText style={styles.addAccountQuickPillText}>NEW</AppText>
-                  </TouchableOpacity>
-                </ScrollView>
-              )}
+              </NativeLiquidMenu>
             </View>
-          )}
+          ) : null}
 
           {/* PROMINENT TRANSACTION DATE CARD */}
           <TouchableOpacity
@@ -1230,7 +1261,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0D0E12',
+    backgroundColor: '#101114',
   },
   dragHandleContainer: {
     alignItems: 'center',
@@ -1288,12 +1319,12 @@ const styles = StyleSheet.create({
   // ── Mode Switcher Segment ──
   typeSegment: {
     flexDirection: 'row',
-    backgroundColor: '#161822',
+    backgroundColor: '#1A1C24',
     borderRadius: 16,
     padding: 4,
     gap: 4,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.05)',
+    borderColor: 'rgba(255, 255, 255, 0.06)',
   },
   typeBtn: {
     flex: 1,
@@ -1312,14 +1343,14 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   typeBtnTextActive: {
-    color: '#0D0E12',
+    color: '#101114',
     fontWeight: '800',
   },
 
   // ── Debt Subsegment ──
   debtSegment: {
     flexDirection: 'row',
-    backgroundColor: '#161822',
+    backgroundColor: '#1A1C24',
     borderRadius: 14,
     padding: 4,
     gap: 6,
@@ -1342,13 +1373,13 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   debtSubBtnTextActive: {
-    color: '#0D0E12',
+    color: '#101114',
     fontWeight: '800',
   },
 
   // ── Quick Log Presets Bar ──
   presetSection: {
-    backgroundColor: '#141620',
+    backgroundColor: '#1A1C24',
     borderRadius: 18,
     padding: 10,
     borderWidth: 1,
@@ -1362,7 +1393,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#1E2130',
+    backgroundColor: '#232633',
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 12,
@@ -1385,12 +1416,12 @@ const styles = StyleSheet.create({
 
   // ── Hero Amount Card ──
   heroAmountCard: {
-    backgroundColor: '#141620',
+    backgroundColor: '#1A1C24',
     borderRadius: 20,
     paddingVertical: 20,
     paddingHorizontal: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.07)',
+    borderColor: 'rgba(255, 255, 255, 0.06)',
     alignItems: 'center',
   },
   heroAmountLabel: {
@@ -1425,7 +1456,7 @@ const styles = StyleSheet.create({
 
   // ── Transfer Hero Card ──
   transferHeroCard: {
-    backgroundColor: '#141A29',
+    backgroundColor: '#1A1C24',
     borderRadius: 20,
     padding: 16,
     borderWidth: 1,
@@ -1455,7 +1486,7 @@ const styles = StyleSheet.create({
   },
   transferSelectBox: {
     flex: 1,
-    backgroundColor: '#1B2338',
+    backgroundColor: '#232633',
     borderRadius: 14,
     padding: 10,
     borderWidth: 1,
@@ -1540,7 +1571,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   textInput: {
-    backgroundColor: '#161822',
+    backgroundColor: '#1A1C24',
     borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -1551,98 +1582,59 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.07)',
   },
 
-  // ── Category Scroll ──
-  categoryScrollRow: {
+  // ── Native Side-by-Side Dropdown Controls (Apple Liquid UI) ──
+  sideBySideRow: {
     flexDirection: 'row',
-    gap: 8,
-    paddingVertical: 2,
+    alignItems: 'flex-start',
+    gap: 12,
   },
-  categoryPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  dropdownColumn: {
+    flex: 1,
+    minWidth: 0,
     gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 14,
   },
-  categoryPillSelected: {
-    backgroundColor: 'rgba(255, 157, 102, 0.2)',
-    borderColor: '#FF9D66',
-    borderWidth: 2,
-  },
-  categoryPillText: {
-    fontSize: 11,
-    color: '#A0A5B5',
-    letterSpacing: 0.4,
-  },
-  categoryPillTextSelected: {
-    color: '#FFFFFF',
-    fontWeight: '800',
-  },
-
-  // ── Accounts Scroll ──
-  accountScrollRow: {
-    flexDirection: 'row',
-    gap: 8,
-    paddingVertical: 2,
-  },
-  accountPill: {
+  dropdownTrigger: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 14,
+    justifyContent: 'space-between',
     backgroundColor: '#161822',
+    borderRadius: 14,
+    paddingHorizontal: 12,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
+    height: 54,
+    minHeight: 54,
   },
-  accountPillSelected: {
-    backgroundColor: '#272B3B',
+  dropdownTriggerActive: {
     borderColor: '#FF9D66',
-    borderWidth: 1.5,
+    backgroundColor: '#1C1F2D',
   },
-  accountIconWrap: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+  dropdownTriggerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+    minWidth: 0,
+  },
+  dropdownIconCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  accountIconWrapSelected: {
-    backgroundColor: '#FF9D66',
-  },
-  accountPillText: {
-    color: '#8E919D',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  accountPillTextSelected: {
+  dropdownTriggerValue: {
     color: '#FFFFFF',
+    fontSize: 11.5,
     fontWeight: '800',
+    letterSpacing: 0.3,
   },
-  accountPillBal: {
-    color: '#7C8092',
-    fontSize: 10,
+  dropdownTriggerSub: {
+    color: '#7E8394',
+    fontSize: 9.5,
     fontWeight: '600',
     marginTop: 1,
-  },
-  addAccountQuickPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 14,
-    backgroundColor: 'rgba(255, 157, 102, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 157, 102, 0.3)',
-  },
-  addAccountQuickPillText: {
-    color: '#FF9D66',
-    fontSize: 10,
-    fontWeight: '800',
   },
   noAccountWarningCard: {
     flexDirection: 'row',
@@ -1672,7 +1664,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   addAccountWarningBtnText: {
-    color: '#0F1015',
+    color: '#101114',
     fontSize: 11,
     fontWeight: '800',
   },
@@ -1682,7 +1674,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#161822',
+    backgroundColor: '#1A1C24',
     borderRadius: 16,
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -1730,7 +1722,7 @@ const styles = StyleSheet.create({
 
   // ── Split Bill Card ──
   splitToggleCard: {
-    backgroundColor: '#161822',
+    backgroundColor: '#1A1C24',
     borderRadius: 18,
     padding: 14,
     borderWidth: 1,
@@ -1786,7 +1778,7 @@ const styles = StyleSheet.create({
   splitInputRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1F2230',
+    backgroundColor: '#232633',
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -1806,7 +1798,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   splitFixedRow: {
-    backgroundColor: '#1F2230',
+    backgroundColor: '#232633',
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -1824,7 +1816,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#161822',
+    backgroundColor: '#1A1C24',
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 12,
@@ -1841,7 +1833,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   tagChip: {
-    backgroundColor: '#161822',
+    backgroundColor: '#1A1C24',
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 12,
@@ -1864,7 +1856,7 @@ const styles = StyleSheet.create({
 
   // ── Subscription ──
   subscriptionCard: {
-    backgroundColor: '#161822',
+    backgroundColor: '#1A1C24',
     borderRadius: 18,
     padding: 14,
     borderWidth: 1,
@@ -1904,7 +1896,7 @@ const styles = StyleSheet.create({
   },
   cycleSegment: {
     flexDirection: 'row',
-    backgroundColor: '#1E2130',
+    backgroundColor: '#232633',
     borderRadius: 10,
     padding: 2,
   },
@@ -1922,14 +1914,14 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   cycleBtnTextActive: {
-    color: '#0F1015',
+    color: '#101114',
     fontWeight: '800',
   },
   nextDateBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#1E2130',
+    backgroundColor: '#232633',
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 8,
@@ -1954,7 +1946,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
   },
   saveBtnText: {
-    color: '#0D0E12',
+    color: '#101114',
     fontSize: 14,
     fontWeight: '800',
     letterSpacing: 0.8,
@@ -1970,7 +1962,7 @@ const styles = StyleSheet.create({
   },
   presetModalCard: {
     width: '100%',
-    backgroundColor: '#161822',
+    backgroundColor: '#1A1C24',
     borderRadius: 22,
     padding: 18,
     borderWidth: 1,
@@ -1996,7 +1988,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   modalCatChip: {
-    backgroundColor: '#1E2130',
+    backgroundColor: '#232633',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 10,
@@ -2011,14 +2003,14 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
   presetModalSaveBtnText: {
-    color: '#0D0E12',
+    color: '#101114',
     fontSize: 13,
     fontWeight: '800',
   },
 
   pickerModalContent: {
     width: '100%',
-    backgroundColor: '#161822',
+    backgroundColor: '#1A1C24',
     borderRadius: 22,
     padding: 18,
     borderWidth: 1,
@@ -2042,7 +2034,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#1E2130',
+    backgroundColor: '#232633',
     padding: 12,
     borderRadius: 14,
     borderWidth: 1,

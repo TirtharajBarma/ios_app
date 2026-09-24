@@ -1306,7 +1306,7 @@ const st = StyleSheet.create({
     gap: 8,
     marginHorizontal: PAGE_M,
     marginBottom: 14,
-    backgroundColor: '#161822',
+    backgroundColor: '#1A1C24',
     padding: 4,
     borderRadius: 14,
     borderWidth: 1,
@@ -1521,7 +1521,7 @@ const st = StyleSheet.create({
     overflow: 'hidden',
   },
   dayDetailCard: {
-    backgroundColor: '#12131A',
+    backgroundColor: '#1A1C24',
     borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.06)',
