@@ -409,44 +409,6 @@ export const ExpenseSettings: React.FC = () => {
     reorderCategories(fromIdx, toIdx);
   };
 
-  const handleExportData = async () => {
-    try {
-      if (transactions.length === 0) {
-        Alert.alert('No Data', 'There are no transactions to export.');
-        return;
-      }
-
-      const csvHeader = 'ID,Date,Amount,Type,Category,Account,Note\n';
-      const csvRows = transactions
-        .map(
-          (t) =>
-            `"${t.id}","${t.date}",${t.amount},"${t.type}","${t.categoryId}","${t.accountId}","${t.note || ''}"`
-        )
-        .join('\n');
-
-      const fileContent = csvHeader + csvRows;
-      const docDir = (FileSystem as any).documentDirectory || (FileSystem as any).cacheDirectory || '';
-      const fileUri = `${docDir}expense_transactions.csv`;
-
-      await FileSystem.writeAsStringAsync(fileUri, fileContent, {
-        encoding: FileSystem.EncodingType.UTF8,
-      });
-
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, {
-          mimeType: 'text/csv',
-          dialogTitle: 'Export Expense Transactions',
-          UTI: 'public.comma-separated-values-text',
-        });
-      } else {
-        Alert.alert('Export Successful', `Saved CSV file to ${fileUri}`);
-      }
-    } catch (err) {
-      console.warn('Export error:', err);
-      Alert.alert('Export Failed', 'Could not export transaction data.');
-    }
-  };
-
   const handleSignOut = () => {
     Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
       { text: 'Cancel', style: 'cancel' },
@@ -636,29 +598,7 @@ export const ExpenseSettings: React.FC = () => {
           </View>
         </TouchableOpacity>
 
-        {/* 5. Export Card */}
-        <TouchableOpacity
-          style={styles.cardContainer}
-          activeOpacity={0.7}
-          onPress={handleExportData}
-        >
-          <View style={styles.cardRowBetween}>
-            <View style={styles.iconRowLeft}>
-              <View style={styles.orangeIconCircle}>
-                <Share2 size={16} color={expenseColors.accentPeach} />
-              </View>
-              <View>
-                <AppText style={styles.cardTitle}>EXPORT</AppText>
-                <AppText style={styles.settingSubValue}>
-                  Export transactions as CSV or PDF
-                </AppText>
-              </View>
-            </View>
-            <ChevronRight size={18} color={expenseColors.textSubtle} />
-          </View>
-        </TouchableOpacity>
-
-        {/* 6. Your Data Card */}
+        {/* 5. Your Data Card */}
         <TouchableOpacity
           style={styles.cardContainer}
           activeOpacity={0.7}

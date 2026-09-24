@@ -14,19 +14,20 @@ import { useExpenseStore } from '@/store/useExpenseStore';
 import { expenseColors } from '@/constants/expenseColors';
 import { formatCompactCurrency } from './MoneyFlowCard';
 
-export const formatBudgetLegendAmount = (amount: number): string => {
-  if (amount === 0) return '₹0';
+export const formatBudgetLegendAmount = (amount: number, symbol: string = '₹'): string => {
+  if (amount === 0) return `${symbol}0`;
   if (Math.abs(amount) >= 1000) {
     const kValue = (amount / 1000).toFixed(1);
     const formatted = kValue.endsWith('.0') ? kValue.slice(0, -2) : kValue;
-    return `₹${formatted}K`;
+    return `${symbol}${formatted}K`;
   }
-  return `₹${amount.toLocaleString('en-IN')}`;
+  return `${symbol}${amount.toLocaleString('en-IN')}`;
 };
 
 export const BudgetCard: React.FC = () => {
   const {
     monthlyBudget,
+    currencySymbol,
     getTotalSpent,
     getRemainingBudget,
     getCategoryBreakdown,
@@ -34,6 +35,8 @@ export const BudgetCard: React.FC = () => {
     transactions,
     categories,
   } = useExpenseStore();
+
+  const sym = currencySymbol || '₹';
 
   const [selectedCatId, setSelectedCatId] = useState<string | null>(null);
 
@@ -134,8 +137,13 @@ export const BudgetCard: React.FC = () => {
     for (const seg of segments) {
       const segSpanDeg = seg.percentage * 360;
       if (normalizedAngle >= currentAngle && normalizedAngle < currentAngle + segSpanDeg) {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-        setSelectedCatId((prev) => (prev === seg.category.id ? null : seg.category.id));
+        if (selectedCatId === seg.category.id) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+          setSelectedCatId(null);
+        } else {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+          setSelectedCatId(seg.category.id);
+        }
         return;
       }
       currentAngle += segSpanDeg;
@@ -143,8 +151,13 @@ export const BudgetCard: React.FC = () => {
   };
 
   const handleSelectCategory = (catId: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    setSelectedCatId((prev) => (prev === catId ? null : catId));
+    if (selectedCatId === catId) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+      setSelectedCatId(null);
+    } else {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+      setSelectedCatId(catId);
+    }
   };
 
   // ─────────────────────────────────────────────────────────
@@ -327,16 +340,16 @@ export const BudgetCard: React.FC = () => {
                 {hasFixedBudget && catBudget > 0 ? (
                   <AppText style={styles.selectedSpentLine}>
                     <AppText style={styles.selectedSpentAmount}>
-                      ₹{catSpent.toLocaleString('en-IN')}
+                      {sym}{catSpent.toLocaleString('en-IN')}
                     </AppText>
                     <AppText style={styles.selectedBudgetTotal}>
-                      {` of ₹${catBudget.toLocaleString('en-IN')}`}
+                      {` of ${sym}${catBudget.toLocaleString('en-IN')}`}
                     </AppText>
                   </AppText>
                 ) : (
                   <AppText style={styles.selectedSpentLine}>
                     <AppText style={styles.selectedSpentAmount}>
-                      ₹{catSpent.toLocaleString('en-IN')}
+                      {sym}{catSpent.toLocaleString('en-IN')}
                     </AppText>
                     <AppText style={styles.selectedBudgetTotal}>
                       {' spent'}
@@ -395,7 +408,7 @@ export const BudgetCard: React.FC = () => {
                   </AppText>
                 </View>
                 <AppText style={styles.legendAmount}>
-                  {formatBudgetLegendAmount(item.amount)}
+                  {formatBudgetLegendAmount(item.amount, sym)}
                 </AppText>
               </TouchableOpacity>
             ))}
@@ -422,7 +435,7 @@ export const BudgetCard: React.FC = () => {
                   </AppText>
                 </View>
                 <AppText style={styles.legendAmount}>
-                  {formatBudgetLegendAmount(item.amount)}
+                  {formatBudgetLegendAmount(item.amount, sym)}
                 </AppText>
               </TouchableOpacity>
             ))}

@@ -218,9 +218,10 @@ export default function RootLayout() {
         <Stack.Screen
           name="settings"
           options={{
-            presentation: "modal",
             headerShown: false,
+            animation: "slide_from_right",
             gestureEnabled: true,
+            fullScreenGestureEnabled: true,
           }}
         />
       </Stack>

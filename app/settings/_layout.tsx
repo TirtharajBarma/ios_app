@@ -1,4 +1,5 @@
 import { Stack } from "expo-router";
+import { Platform } from "react-native";
 
 export default function SettingsLayout() {
   return (
@@ -7,6 +8,8 @@ export default function SettingsLayout() {
         headerShown: false,
         animation: "slide_from_right",
         gestureEnabled: true,
+        fullScreenGestureEnabled: Platform.OS === 'ios',
+        gestureDirection: "horizontal",
       }}
     >
       <Stack.Screen

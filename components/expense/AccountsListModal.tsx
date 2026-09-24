@@ -29,7 +29,8 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
   visible,
   onClose,
 }) => {
-  const { accounts, transactions } = useExpenseStore();
+  const { accounts, transactions, currencySymbol } = useExpenseStore();
+  const sym = currencySymbol || '₹';
   const [selectedAccountForEdit, setSelectedAccountForEdit] = useState<ExpenseAccount | null>(null);
   const [showEditModal, setShowEditModal] = useState<boolean>(false);
 
@@ -114,11 +115,11 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
                     </AppText>
                     {isDue ? (
                       <AppText style={styles.dueText}>
-                        Due: ₹{account.dueAmount?.toLocaleString('en-IN')}
+                        Due: {sym}{account.dueAmount?.toLocaleString('en-IN')}
                       </AppText>
                     ) : (
                       <AppText style={styles.balanceText}>
-                        ₹{account.balance.toLocaleString('en-IN')}
+                        {sym}{account.balance.toLocaleString('en-IN')}
                       </AppText>
                     )}
                   </View>

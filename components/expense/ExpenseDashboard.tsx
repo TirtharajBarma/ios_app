@@ -32,7 +32,6 @@ export const ExpenseDashboard: React.FC = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { transactions, accounts, monthlyBudget, currencySymbol } = useExpenseStore();
-  const [activeTab, setActiveTab] = useState<ExpenseTabType>('home');
   const [dismissOnboarding, setDismissOnboarding] = useState<boolean>(false);
 
   const [showAddTxModal, setShowAddTxModal] = useState<boolean>(false);
@@ -239,10 +238,7 @@ export const ExpenseDashboard: React.FC = () => {
       </ScrollView>
 
       {/* Fixed Bottom Navigation */}
-      <FixedBottomNav
-        activeTab={activeTab}
-        onTabPress={(tab) => setActiveTab(tab)}
-      />
+      <FixedBottomNav activeTab="home" />
 
       {/* Add Transaction Modal */}
       <AddTransactionModal

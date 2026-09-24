@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path, Rect } from 'react-native-svg';
-import { Flame, Trophy, Plus } from 'lucide-react-native';
+import { Flame, Trophy, Plus, Sparkles, TrendingUp, Calendar, Zap, Compass } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { AppText } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
@@ -19,6 +19,8 @@ import { useSubscriptionStore } from '@/store/useSubscriptionStore';
 import { FixedBottomNav } from './FixedBottomNav';
 import { expenseColors } from '@/constants/expenseColors';
 import { formatCompactCurrency } from './MoneyFlowCard';
+
+export type TimeHorizon = '1W' | '1M' | '6M' | '1Y' | 'ALL';
 
 const SW = Dimensions.get('window').width;
 
@@ -37,8 +39,8 @@ const TILE_W       = Math.floor((INNER_W - CAL_GAP * 6) / 7);
 const TILE_H       = 32;       // compact tile height to reduce card height
 
 // ── Sankey ───────────────────────────────────
-const INCOME_W  = 58;
-const RLABEL_W  = 110;
+const INCOME_W  = 46;
+const RLABEL_W  = 138;
 const SVG_W     = INNER_W - INCOME_W - RLABEL_W;
 const CHART_H   = 200;
 const SRC_W     = 9;
@@ -138,8 +140,14 @@ interface VsCat {
   id: string;
   name: string;
   emoji?: string;
+  thisAmount: number;
+  lastAmount: number;
   formatted: string;
-  percent: number;
+  thisPercent: number;
+  lastPercent: number;
+  changeBadge: string;
+  isNew: boolean;
+  isIncrease: boolean;
   color: string;
 }
 
@@ -163,7 +171,10 @@ function getMonthYearInfo(monthStr: string) {
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const startOffset = new Date(year, month, 1).getDay(); // 0 = Sun, 1 = Mon, 2 = Tue...
 
-  return { year, month, daysInMonth, startOffset };
+  const lastMonth = month === 0 ? 11 : month - 1;
+  const lastYear = month === 0 ? year - 1 : year;
+
+  return { year, month, daysInMonth, startOffset, lastYear, lastMonth };
 }
 
 // ─────────────────────────────────────────────
@@ -171,10 +182,23 @@ function getMonthYearInfo(monthStr: string) {
 // ─────────────────────────────────────────────
 export const ExpenseVisualizer: React.FC = () => {
   const insets = useSafeAreaInsets();
-  const { selectedMonth, getTotalSpent, getCategoryBreakdown, transactions, categories: storeCategories } = useExpenseStore();
+  const { selectedMonth, getTotalSpent, getCategoryBreakdown, transactions, categories: storeCategories, currencySymbol } = useExpenseStore();
+  const sym = currencySymbol || '₹';
   const { subscriptions } = useSubscriptionStore();
+  const [timeHorizon, setTimeHorizon] = useState<TimeHorizon>('1M');
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const [displayedDay, setDisplayedDay] = useState<number | null>(null);
+  const [selectedBandId, setSelectedBandId] = useState<string | null>(null);
+
+  const toggleBandSelection = (catId: string) => {
+    if (selectedBandId === catId) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+      setSelectedBandId(null);
+    } else {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+      setSelectedBandId(catId);
+    }
+  };
 
   // Animated values for professional expand/collapse and smooth cross-fade
   const expandAnim = useRef(new Animated.Value(0)).current;
@@ -184,18 +208,161 @@ export const ExpenseVisualizer: React.FC = () => {
   const totalSpent = getTotalSpent();
   const breakdown = getCategoryBreakdown();
 
-  // Dynamic active spending categories sorted descending by spend (highest up, lowest down)
+  // dynamic calendar calculation for any month/year (Sunday to Saturday)
+  const { year: curYear, month: curMonth, daysInMonth, startOffset, lastYear, lastMonth } = getMonthYearInfo(selectedMonth);
+  const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  // Month-filtered expense transactions only
+  const monthExpenses = useMemo(() => {
+    return transactions.filter(tx => {
+      if (tx.type !== 'expense') return false;
+      const txDate = new Date(tx.date);
+      return txDate.getFullYear() === curYear && txDate.getMonth() === curMonth;
+    });
+  }, [transactions, curYear, curMonth]);
+
+  // Weekend vs Weekday Contrast Algorithm
+  const weekendVsWeekday = useMemo(() => {
+    let weekdaySum = 0;
+    let weekendSum = 0;
+
+    const targetTxs = timeHorizon === '1W'
+      ? transactions.filter(t => {
+          if (t.type !== 'expense') return false;
+          const refTime = new Date(curYear, curMonth, daysInMonth).getTime();
+          const weekAgo = refTime - 7 * 86400000;
+          const tTime = new Date(t.date).getTime();
+          return tTime >= weekAgo && tTime <= refTime;
+        })
+      : timeHorizon === '1M'
+      ? monthExpenses
+      : transactions.filter(t => {
+          if (t.type !== 'expense') return false;
+          const monthCount = timeHorizon === '6M' ? 6 : 12;
+          const startRange = new Date(curYear, curMonth - monthCount + 1, 1).getTime();
+          const endRange = new Date(curYear, curMonth + 1, 0, 23, 59, 59).getTime();
+          const tTime = new Date(t.date).getTime();
+          return tTime >= startRange && tTime <= endRange;
+        });
+
+    targetTxs.forEach(tx => {
+      const day = new Date(tx.date).getDay();
+      const isWeekend = day === 0 || day === 6;
+      const share = tx.split ? tx.split.yourShare : tx.amount;
+      if (isWeekend) {
+        weekendSum += share;
+      } else {
+        weekdaySum += share;
+      }
+    });
+
+    const total = weekdaySum + weekendSum;
+    const weekendPct = total > 0 ? Math.round((weekendSum / total) * 100) : 0;
+    const weekdayPct = total > 0 ? 100 - weekendPct : 0;
+
+    // Daily averages
+    const avgWeekend = weekendSum / 8; // approx 8 weekend days in a month
+    const avgWeekday = weekdaySum / 22; // approx 22 weekdays
+    const ratio = avgWeekday > 0 ? (avgWeekend / avgWeekday).toFixed(1) : '1.0';
+
+    return {
+      weekdaySum,
+      weekendSum,
+      weekendPct,
+      weekdayPct,
+      avgWeekend,
+      avgWeekday,
+      ratio,
+    };
+  }, [transactions, monthExpenses, timeHorizon, curYear, curMonth, daysInMonth]);
+
+  // Multi-Month Trend calculation for 6M, 1Y, ALL (Anchored to selectedMonth)
+  const multiMonthTrend = useMemo(() => {
+    const monthCount = timeHorizon === '6M' ? 6 : timeHorizon === '1Y' ? 12 : 12;
+    const result: { label: string; year: number; month: number; amount: number; isCurrent: boolean }[] = [];
+
+    for (let i = monthCount - 1; i >= 0; i--) {
+      const d = new Date(curYear, curMonth - i, 1);
+      const mYear = d.getFullYear();
+      const mMonth = d.getMonth();
+      const label = d.toLocaleDateString('en-US', { month: 'short' });
+
+      const spentInMonth = transactions
+        .filter(t => {
+          if (t.type !== 'expense') return false;
+          const tDate = new Date(t.date);
+          return tDate.getFullYear() === mYear && tDate.getMonth() === mMonth;
+        })
+        .reduce((sum, t) => sum + (t.split ? t.split.yourShare : t.amount), 0);
+
+      result.push({
+        label,
+        year: mYear,
+        month: mMonth,
+        amount: spentInMonth,
+        isCurrent: i === 0,
+      });
+    }
+
+    const maxAmt = Math.max(...result.map(r => r.amount), 100);
+    const totalSpentInHorizon = result.reduce((s, r) => s + r.amount, 0);
+    const avgMonthly = Math.round(totalSpentInHorizon / Math.max(monthCount, 1));
+    return { data: result, maxAmt, totalSpentInHorizon, avgMonthly };
+  }, [transactions, timeHorizon, curYear, curMonth]);
+
+  // Horizon-filtered expense transactions
+  const horizonExpenses = useMemo(() => {
+    if (timeHorizon === '1M') {
+      return monthExpenses;
+    }
+    if (timeHorizon === '1W') {
+      const refTime = new Date(curYear, curMonth, daysInMonth).getTime();
+      const weekAgo = refTime - 7 * 86400000;
+      return transactions.filter(t => {
+        if (t.type !== 'expense') return false;
+        const tTime = new Date(t.date).getTime();
+        return tTime >= weekAgo && tTime <= refTime;
+      });
+    }
+    if (timeHorizon === '6M' || timeHorizon === '1Y') {
+      const monthCount = timeHorizon === '6M' ? 6 : 12;
+      const startRange = new Date(curYear, curMonth - monthCount + 1, 1).getTime();
+      const endRange = new Date(curYear, curMonth + 1, 0, 23, 59, 59).getTime();
+      return transactions.filter(t => {
+        if (t.type !== 'expense') return false;
+        const tTime = new Date(t.date).getTime();
+        return tTime >= startRange && tTime <= endRange;
+      });
+    }
+    return transactions.filter(t => t.type === 'expense');
+  }, [transactions, timeHorizon, monthExpenses, curYear, curMonth, daysInMonth]);
+
+  const horizonTotalSpent = useMemo(() => {
+    return horizonExpenses.reduce((sum, t) => sum + (t.split ? t.split.yourShare : t.amount), 0);
+  }, [horizonExpenses]);
+
+  // Dynamic active spending categories sorted descending by spend for chosen horizon
   const activeBreakdown = useMemo(() => {
-    return breakdown
-      .filter((item) => item.amount > 0)
+    const catMap: Record<string, number> = {};
+    horizonExpenses.forEach(tx => {
+      const share = tx.split ? tx.split.yourShare : tx.amount;
+      catMap[tx.categoryId] = (catMap[tx.categoryId] || 0) + share;
+    });
+
+    return storeCategories
+      .map(cat => ({
+        category: cat,
+        amount: catMap[cat.id] || 0,
+      }))
+      .filter(item => item.amount > 0)
       .sort((a, b) => b.amount - a.amount);
-  }, [breakdown]);
+  }, [horizonExpenses, storeCategories]);
 
   const cats: FlowCat[] = useMemo(() => {
     return activeBreakdown.map((item) => ({
       id: item.category.id,
       name: item.category.name.toUpperCase(),
-      label: item.category.name.length > 10 ? item.category.name.slice(0, 9).toUpperCase() + '...' : item.category.name.toUpperCase(),
+      label: item.category.name.toUpperCase(),
       emoji: item.category.emoji,
       color: item.category.color,
       amount: item.amount,
@@ -212,34 +379,88 @@ export const ExpenseVisualizer: React.FC = () => {
   const labelTops = useMemo(() => resolveY(streams, chartHeight), [streams, chartHeight]);
   const dstLX     = SVG_W - DST_W;
 
-  // dynamic vs last month / active categories share
-  const vsCategories: VsCat[] = useMemo(() => {
-    return activeBreakdown.map((item) => {
-      const pct = totalSpent > 0 ? Math.min(Math.round((item.amount / totalSpent) * 100), 100) : 0;
-      const formatted = item.amount >= 1000 ? `₹${(item.amount / 1000).toFixed(1)}K` : `₹${item.amount.toLocaleString('en-IN')}`;
-      return {
-        id: item.category.id,
-        name: item.category.name.toUpperCase(),
-        emoji: item.category.emoji,
-        formatted,
-        percent: pct,
-        color: item.category.color,
-      };
-    });
-  }, [activeBreakdown, totalSpent]);
-
-  // dynamic calendar calculation for any month/year (Sunday to Saturday)
-  const { year: curYear, month: curMonth, daysInMonth, startOffset } = getMonthYearInfo(selectedMonth);
-  const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
-  // Month-filtered expense transactions only
-  const monthExpenses = useMemo(() => {
+  // Last month expense transactions for month-over-month comparison
+  const lastMonthExpenses = useMemo(() => {
     return transactions.filter(tx => {
       if (tx.type !== 'expense') return false;
       const txDate = new Date(tx.date);
-      return txDate.getFullYear() === curYear && txDate.getMonth() === curMonth;
+      return txDate.getFullYear() === lastYear && txDate.getMonth() === lastMonth;
     });
-  }, [transactions, curYear, curMonth]);
+  }, [transactions, lastYear, lastMonth]);
+
+  // Dynamic VS Last Month comparison algorithm
+  const vsCategories: VsCat[] = useMemo(() => {
+    const thisMonthMap: Record<string, number> = {};
+    const lastMonthMap: Record<string, number> = {};
+
+    monthExpenses.forEach(tx => {
+      const share = tx.split ? tx.split.yourShare : tx.amount;
+      thisMonthMap[tx.categoryId] = (thisMonthMap[tx.categoryId] || 0) + share;
+    });
+
+    lastMonthExpenses.forEach(tx => {
+      const share = tx.split ? tx.split.yourShare : tx.amount;
+      lastMonthMap[tx.categoryId] = (lastMonthMap[tx.categoryId] || 0) + share;
+    });
+
+    const activeList: VsCat[] = [];
+    storeCategories.forEach(cat => {
+      const thisAmt = thisMonthMap[cat.id] || 0;
+      const lastAmt = lastMonthMap[cat.id] || 0;
+
+      if (thisAmt > 0 || lastAmt > 0) {
+        let changeBadge = 'NEW';
+        let isNew = false;
+        let isIncrease = false;
+
+        if (lastAmt === 0 && thisAmt > 0) {
+          changeBadge = 'NEW';
+          isNew = true;
+        } else if (thisAmt === 0 && lastAmt > 0) {
+          changeBadge = '-100%';
+          isIncrease = false;
+        } else if (lastAmt > 0 && thisAmt > 0) {
+          const diff = thisAmt - lastAmt;
+          const pct = Math.round((diff / lastAmt) * 100);
+          if (pct > 0) {
+            changeBadge = `+${pct}%`;
+            isIncrease = true;
+          } else if (pct < 0) {
+            changeBadge = `${pct}%`;
+            isIncrease = false;
+          } else {
+            changeBadge = '0%';
+            isIncrease = false;
+          }
+        }
+
+        const formatted = thisAmt >= 1000 ? `${sym}${(thisAmt / 1000).toFixed(1)}K` : `${sym}${thisAmt.toLocaleString('en-IN')}`;
+
+        activeList.push({
+          id: cat.id,
+          name: cat.name.toUpperCase(),
+          emoji: cat.emoji,
+          thisAmount: thisAmt,
+          lastAmount: lastAmt,
+          formatted,
+          thisPercent: 0,
+          lastPercent: 0,
+          changeBadge,
+          isNew,
+          isIncrease,
+          color: cat.color,
+        });
+      }
+    });
+
+    const maxVal = Math.max(...activeList.map(c => Math.max(c.thisAmount, c.lastAmount)), 1);
+    activeList.forEach(c => {
+      c.thisPercent = Math.min(Math.round((c.thisAmount / maxVal) * 100), 100);
+      c.lastPercent = Math.min(Math.round((c.lastAmount / maxVal) * 100), 100);
+    });
+
+    return activeList.sort((a, b) => b.thisAmount - a.thisAmount);
+  }, [monthExpenses, lastMonthExpenses, storeCategories]);
 
   // Construct explicit 7-column rows to guarantee zero wrapping glitches
   const calendarRows: (number | null)[][] = [];
@@ -339,6 +560,11 @@ export const ExpenseVisualizer: React.FC = () => {
   const maxRhythmAmount = useMemo(() => {
     const maxVal = Math.max(...rhythmData.map(r => r.amt), 100);
     return Math.max(Math.ceil(maxVal / 100) * 100, 100);
+  }, [rhythmData]);
+
+  const avgRhythmAmount = useMemo(() => {
+    const total = rhythmData.reduce((sum, r) => sum + r.amt, 0);
+    return Math.round(total / 7);
   }, [rhythmData]);
 
   const handleDayPress = (day: number) => {
@@ -456,16 +682,161 @@ export const ExpenseVisualizer: React.FC = () => {
           <AppText style={st.titleViz}>VISUALIZER</AppText>
         </View>
 
-        {/* ═══ CARD 1: INCOME FLOW ═══ */}
-        <View style={st.card}>
+        {/* ═══ MULTI-HORIZON TIME SWITCHER ═══ */}
+        <View style={st.horizonContainer}>
+          {(['1W', '1M', '6M', '1Y', 'ALL'] as TimeHorizon[]).map((hz) => {
+            const isSelected = timeHorizon === hz;
+            return (
+              <TouchableOpacity
+                key={hz}
+                style={[st.horizonPill, isSelected && st.horizonPillActive]}
+                onPress={() => {
+                  Haptics.selectionAsync().catch(() => {});
+                  setTimeHorizon(hz);
+                }}
+                activeOpacity={0.75}
+              >
+                <AppText style={[st.horizonPillText, isSelected && st.horizonPillTextActive]}>
+                  {hz}
+                </AppText>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
 
+        {/* ═══ MULTI-MONTH TREND (6M / 1Y / ALL) ═══ */}
+        {(timeHorizon === '6M' || timeHorizon === '1Y' || timeHorizon === 'ALL') && (
+          <View style={st.card}>
+            <View style={st.rowBetween}>
+              <View>
+                <AppText style={st.cardLabel}>MULTI-MONTH TREND</AppText>
+                <AppText style={st.cardSub}>
+                  {timeHorizon === '6M' ? 'Last 6 Months' : timeHorizon === '1Y' ? 'Last 12 Months' : 'All Time History'}
+                </AppText>
+              </View>
+              <AppText style={st.flowAmt}>
+                {sym}{multiMonthTrend.data.reduce((s, d) => s + d.amount, 0).toLocaleString('en-IN')}
+              </AppText>
+            </View>
+
+            <View style={st.trendChartContainer}>
+              {multiMonthTrend.data.map((item, idx) => {
+                const barH = Math.max(Math.round((item.amount / multiMonthTrend.maxAmt) * 110), 4);
+                return (
+                  <View key={idx} style={st.trendCol}>
+                    {item.amount > 0 ? (
+                      <AppText style={st.trendAmtLabel} numberOfLines={1}>
+                        {formatCompactCurrency(item.amount)}
+                      </AppText>
+                    ) : (
+                      <View style={{ height: 14 }} />
+                    )}
+                    <View style={st.trendTrack}>
+                      <View
+                        style={[
+                          st.trendBar,
+                          { height: barH },
+                          item.isCurrent && st.trendBarCurrent,
+                        ]}
+                      />
+                    </View>
+                    <AppText style={[st.trendMonthLabel, item.isCurrent && st.trendMonthLabelCurrent]}>
+                      {item.label}
+                    </AppText>
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+        )}
+
+        {/* ═══ WEEKEND VS WEEKDAY CONTRAST CARD ═══ */}
+        <View style={st.card}>
           <View style={st.rowBetween}>
             <View>
-              <AppText style={st.cardLabel}>INCOME FLOW</AppText>
-              <AppText style={st.cardSub}>{selectedMonth}</AppText>
+              <AppText style={st.cardLabel}>WEEKEND VS WEEKDAY</AppText>
+              <AppText style={st.cardSub}>
+                {weekendVsWeekday.weekendPct >= 50
+                  ? `⚡ Weekend Surge: ${weekendVsWeekday.ratio}x higher daily burn`
+                  : '⚖️ Balanced weekday vs weekend rhythm'}
+              </AppText>
             </View>
-            <AppText style={st.flowAmt}>₹{totalSpent.toLocaleString('en-IN')}</AppText>
+            <View style={st.weekendBadge}>
+              <Zap size={10} color="#FF725E" />
+              <AppText style={st.weekendBadgeText}>{weekendVsWeekday.weekendPct}% Sat-Sun</AppText>
+            </View>
           </View>
+
+          {/* Dual Split Bar */}
+          <View style={st.contrastTrack}>
+            <View
+              style={[
+                st.contrastBarWeekday,
+                { width: `${Math.max(weekendVsWeekday.weekdayPct, 4)}%` as any },
+              ]}
+            />
+            <View
+              style={[
+                st.contrastBarWeekend,
+                { width: `${Math.max(weekendVsWeekday.weekendPct, 4)}%` as any },
+              ]}
+            />
+          </View>
+
+          {/* Stats Grid */}
+          <View style={st.contrastStatsRow}>
+            <View style={st.contrastStatCol}>
+              <View style={st.statDotRow}>
+                <View style={[st.miniDot, { backgroundColor: '#9B8AFB' }]} />
+                <AppText style={st.statLabel}>Weekdays (Mon-Fri)</AppText>
+              </View>
+              <AppText style={st.statAmount}>{sym}{weekendVsWeekday.weekdaySum.toLocaleString('en-IN')}</AppText>
+              <AppText style={st.statSub}>~{sym}{Math.round(weekendVsWeekday.avgWeekday).toLocaleString('en-IN')}/day</AppText>
+            </View>
+
+            <View style={st.contrastDivider} />
+
+            <View style={st.contrastStatCol}>
+              <View style={st.statDotRow}>
+                <View style={[st.miniDot, { backgroundColor: '#FF725E' }]} />
+                <AppText style={st.statLabel}>Weekends (Sat-Sun)</AppText>
+              </View>
+              <AppText style={st.statAmount}>{sym}{weekendVsWeekday.weekendSum.toLocaleString('en-IN')}</AppText>
+              <AppText style={st.statSub}>~{sym}{Math.round(weekendVsWeekday.avgWeekend).toLocaleString('en-IN')}/day</AppText>
+            </View>
+          </View>
+        </View>
+
+        {/* ═══ CARD 1: CATEGORY FLOW ═══ */}
+        <View style={st.card}>
+
+          {(() => {
+            const selectedStream = streams.find(s => s.cat.id === selectedBandId);
+            const displayAmt = selectedStream ? selectedStream.cat.amount : horizonTotalSpent;
+            const pctOfTotal = horizonTotalSpent > 0 && selectedStream ? ((selectedStream.cat.amount / horizonTotalSpent) * 100).toFixed(1) : null;
+            const horizonLabel =
+              timeHorizon === '1M'
+                ? selectedMonth
+                : timeHorizon === '1W'
+                ? 'Last 7 Days'
+                : timeHorizon === '6M'
+                ? 'Past 6 Months'
+                : timeHorizon === '1Y'
+                ? 'Past 12 Months'
+                : 'All Recorded Time';
+
+            return (
+              <View style={st.rowBetween}>
+                <View>
+                  <AppText style={st.cardLabel}>CATEGORY FLOW</AppText>
+                  <AppText style={st.cardSub}>
+                    {selectedStream ? `${selectedStream.cat.name} • ${pctOfTotal}% OF TOTAL` : horizonLabel}
+                  </AppText>
+                </View>
+                <AppText style={st.flowAmt}>{sym}{displayAmt.toLocaleString('en-IN')}</AppText>
+              </View>
+            );
+          })()}
 
           {/* flow body */}
           {cats.length === 0 ? (
@@ -490,270 +861,396 @@ export const ExpenseVisualizer: React.FC = () => {
                 {/* source bar */}
                 <Rect x={0} y={0} width={SRC_W} height={chartHeight} rx={4} fill="#5CE49A" />
                 {/* ribbons */}
-                {streams.map(s => (
-                  <Path key={s.cat.id} d={s.path} fill={s.cat.color} opacity={0.88} />
-                ))}
+                {streams.map(s => {
+                  const isSelected = selectedBandId === s.cat.id;
+                  const hasSelection = selectedBandId !== null;
+                  const opacity = isSelected ? 1.0 : (hasSelection ? 0.22 : 0.88);
+                  return (
+                    <Path
+                      key={s.cat.id}
+                      d={s.path}
+                      fill={s.cat.color}
+                      opacity={opacity}
+                      stroke={isSelected ? '#FFFFFF' : 'none'}
+                      strokeWidth={isSelected ? 1.5 : 0}
+                      onPress={() => toggleBandSelection(s.cat.id)}
+                    />
+                  );
+                })}
                 {/* dest bars */}
-                {streams.map(s => (
-                  <Rect
-                    key={`d${s.cat.id}`}
-                    x={dstLX} y={s.dY1}
-                    width={DST_W} height={s.dY2 - s.dY1}
-                    rx={3} fill={s.cat.color}
-                  />
-                ))}
+                {streams.map(s => {
+                  const isSelected = selectedBandId === s.cat.id;
+                  const hasSelection = selectedBandId !== null;
+                  const opacity = isSelected ? 1.0 : (hasSelection ? 0.22 : 1.0);
+                  return (
+                    <Rect
+                      key={`d${s.cat.id}`}
+                      x={dstLX} y={s.dY1}
+                      width={DST_W} height={s.dY2 - s.dY1}
+                      rx={3} fill={s.cat.color}
+                      opacity={opacity}
+                      stroke={isSelected ? '#FFFFFF' : 'none'}
+                      strokeWidth={isSelected ? 1.5 : 0}
+                      onPress={() => toggleBandSelection(s.cat.id)}
+                    />
+                  );
+                })}
               </Svg>
 
-              {/* right label column */}
+              {/* right label column with interactive percentage */}
               <View style={{ width: RLABEL_W, height: chartHeight, position: 'relative' }}>
-                {streams.map((s, i) => (
-                  <View key={`l${s.cat.id}`} style={[st.labelSlot, { top: labelTops[i] }]}>
-                    <AppText style={[st.catLabel, { color: s.cat.color }]} numberOfLines={1}>
-                      {s.cat.label}
-                    </AppText>
-                    <AppText style={st.catAmt} numberOfLines={1}>
-                      – {formatCompactCurrency(s.cat.amount)}
-                    </AppText>
-                  </View>
-                ))}
-              </View>
+                {streams.map((s, i) => {
+                  const isSelected = selectedBandId === s.cat.id;
+                  const hasSelection = selectedBandId !== null;
+                  const opacity = isSelected ? 1.0 : (hasSelection ? 0.35 : 1.0);
+                  const pct = totalSpent > 0 ? ((s.cat.amount / totalSpent) * 100).toFixed(1) : '0';
 
-            </View>
-          )}
-        </View>
-
-        {/* ═══ CARD 2: SPENDING CALENDAR (Compact Height + Full Year Support) ═══ */}
-        <View style={st.compactCard}>
-
-          {/* header */}
-          <View style={st.rowBetweenCompact}>
-            <AppText style={st.cardLabel}>SPENDING CALENDAR</AppText>
-            <View style={st.legendRow}>
-              <AppText style={st.legendTxt}>Less</AppText>
-              {['#1D1F2A','#3A2E28','#7A4828','#C96B35','#E84040'].map(c => (
-                <View key={c} style={[st.legendBox, { backgroundColor: c }]} />
-              ))}
-              <AppText style={st.legendTxt}>More</AppText>
-            </View>
-          </View>
-
-          {/* weekday row: Sun to Sat */}
-          <View style={[st.weekRow, { gap: CAL_GAP }]}>
-            {WEEKDAYS.map(d => (
-              <View key={d} style={{ width: TILE_W, alignItems: 'center' }}>
-                <AppText style={st.weekDay}>{d}</AppText>
-              </View>
-            ))}
-          </View>
-
-          {/* grid in explicit 7-item rows */}
-          <View style={{ gap: CAL_ROW_GAP, marginBottom: 8 }}>
-            {calendarRows.map((row, rIdx) => (
-              <View key={`r-${rIdx}`} style={[st.weekRow, { gap: CAL_GAP }]}>
-                {row.map((day, cIdx) => (
-                  day !== null ? (
-                    <TouchableOpacity
-                      key={`d-${day}`}
-                      activeOpacity={0.75}
-                      onPress={() => handleDayPress(day)}
-                      style={[
-                        st.tile,
-                        { width: TILE_W, height: TILE_H, backgroundColor: heatColor(day) },
-                        selectedDay === day && st.tileSel,
-                      ]}
-                    >
-                      <AppText style={st.tileNum}>{day}</AppText>
-                    </TouchableOpacity>
-                  ) : (
-                    <View key={`b-${cIdx}`} style={{ width: TILE_W, height: TILE_H }} />
-                  )
-                ))}
-              </View>
-            ))}
-          </View>
-
-          {/* insight cards */}
-          <View style={st.insightRow}>
-            <View style={st.insightCard}>
-              <Flame size={14} color="#FFFFFF" />
-              <View style={{ flex: 1 }}>
-                <AppText style={st.insightHead}>Heaviest:</AppText>
-                <AppText style={st.insightSub}>{heaviestDayName}</AppText>
-              </View>
-              <AppText style={st.insightVal}>{formatCompactCurrency(heaviestDayAmount)}</AppText>
-            </View>
-            <View style={st.insightCard}>
-              <Trophy size={14} color="#FFFFFF" />
-              <AppText style={st.insightStreak}>{noSpendStreak}-day no-spend streak</AppText>
-            </View>
-          </View>
-
-          {/* Selected Day Spending Breakdown Popup (Professional Butter-Smooth Animation) */}
-          <Animated.View
-            style={[
-              st.dayDetailWrapper,
-              {
-                maxHeight: popupHeight,
-                opacity: popupOpacity,
-              },
-            ]}
-          >
-            {displayedDay !== null && (
-              <Animated.View
-                style={[
-                  st.dayDetailCard,
-                  {
-                    opacity: contentFadeAnim,
-                    transform: [
-                      {
-                        translateY: contentFadeAnim.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: [6, 0],
-                        }),
-                      },
-                    ],
-                  },
-                ]}
-              >
-                <AppText style={st.dayDetailDate}>
-                  {formatDayDate(displayedDay)}
-                </AppText>
-                <AppText style={st.dayDetailTotal}>
-                  Total: ₹{(dailySpend[displayedDay] || 0).toLocaleString('en-IN')}
-                </AppText>
-
-                {getDayItems(displayedDay).length > 0 ? (
-                  <View style={st.dayItemsStack}>
-                    {getDayItems(displayedDay).map((item, idx) => (
-                      <View key={idx} style={st.dayItemRow}>
-                        <View style={st.dayPill}>
-                          <AppText style={[st.dayPillText, { color: item.color || '#FF9D66' }]}>
-                            {item.category}{item.emoji ? ` ${item.emoji}` : ''}
-                          </AppText>
-                        </View>
-                        <AppText style={st.dayItemAmt}>
-                          ₹{item.amount.toLocaleString('en-IN')}
-                        </AppText>
-                      </View>
-                    ))}
-                  </View>
-                ) : (
-                  <AppText style={st.dayNoSpendText}>
-                    No spending on this day ✨
-                  </AppText>
-                )}
-              </Animated.View>
-            )}
-          </Animated.View>
-
-        </View>
-
-        {/* ═══ CARD 3: WEEKLY RHYTHM (Exact Reference Match) ═══ */}
-        <View style={st.card}>
-          <AppText style={st.cardLabel}>WEEKLY RHYTHM</AppText>
-          <View style={st.rhythmContainer}>
-            {/* Y Axis */}
-            <View style={st.yAxis}>
-              {[maxRhythmAmount, Math.round(maxRhythmAmount * 0.66), Math.round(maxRhythmAmount * 0.33), 0].map(v => (
-                <AppText key={v} style={st.yLbl}>₹{v}</AppText>
-              ))}
-            </View>
-
-            {/* Chart Area */}
-            <View style={st.rhythmChartArea}>
-              {/* Dashed Average Line */}
-              <View style={[st.avgLine, { bottom: 24 + Math.round(0.4 * RHYTHM_BAR_H) }]} />
-              <AppText style={[st.avgLbl, { bottom: 24 + Math.round(0.4 * RHYTHM_BAR_H) - 6 }]}>
-                avg
-              </AppText>
-
-              {/* Bars Row */}
-              <View style={st.barsRow}>
-                {rhythmData.map(rd => {
-                  const barH = Math.round((rd.amt / maxRhythmAmount) * RHYTHM_BAR_H);
                   return (
-                    <View key={rd.day} style={st.barCol}>
-                      {/* Top Label (e.g. ₹244 or ₹0) */}
-                      {rd.showLabel ? (
+                    <TouchableOpacity
+                      key={`l${s.cat.id}`}
+                      style={[st.labelSlot, { top: labelTops[i], opacity }]}
+                      activeOpacity={0.7}
+                      onPress={() => toggleBandSelection(s.cat.id)}
+                    >
+                      <AppText
+                        style={[
+                          st.catLabel,
+                          { color: s.cat.color, fontWeight: isSelected ? '800' : '700' },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {s.cat.label}
+                      </AppText>
+                      <View style={st.catAmountRow}>
                         <AppText
                           style={[
-                            st.barAmt,
-                            rd.amt === 0 && st.barAmtZero,
-                            { bottom: 24 + Math.max(barH + 4, 4) },
+                            st.catAmt,
+                            isSelected && { color: '#FFFFFF', fontWeight: '800' },
                           ]}
+                          numberOfLines={1}
                         >
-                          {rd.labelText}
+                          – {formatCompactCurrency(s.cat.amount)}
                         </AppText>
-                      ) : null}
-
-                      {/* Bar Fill */}
-                      {rd.amt > 0 ? (
-                        <View style={[st.barFill, { height: Math.max(barH, 4) }]} />
-                      ) : null}
-
-                      {/* Day Label below axis */}
-                      <AppText style={st.barDay}>{rd.day}</AppText>
-                    </View>
+                        {isSelected && (
+                          <AppText
+                            style={[
+                              st.catPctText,
+                              { color: s.cat.color },
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {pct}%
+                          </AppText>
+                        )}
+                      </View>
+                    </TouchableOpacity>
                   );
                 })}
               </View>
-            </View>
-          </View>
-        </View>
 
-        {/* ═══ CARD 4: VS LAST MONTH (Exact Reference Match) ═══ */}
-        <View style={st.card}>
-          <View style={st.rowBetween}>
-            <AppText style={st.cardLabel}>VS LAST MONTH</AppText>
-            <View style={st.legendRow}>
-              <View style={[st.legendSq, { backgroundColor: '#2C2D35' }]} />
-              <AppText style={st.legendTxt}>Last</AppText>
-              <View style={[st.legendSq, { backgroundColor: '#FFFFFF', marginLeft: 8 }]} />
-              <AppText style={st.legendTxt}>This</AppText>
-            </View>
-          </View>
-          {vsCategories.length === 0 ? (
-            <View style={{ paddingVertical: 18, alignItems: 'center' }}>
-              <AppText style={{ color: expenseColors.textMuted, fontSize: 12 }}>
-                No category expenses recorded this month
-              </AppText>
-            </View>
-          ) : (
-            <View style={st.vsStack}>
-              {vsCategories.map(cat => (
-                <View key={cat.id} style={st.vsItem}>
-                  {/* Top Row: [Dot + Name + Emoji] .............. [NEW pill + Amount] */}
-                  <View style={st.vsTopRow}>
-                    <View style={st.vsLeft}>
-                      <View style={[st.vsDot, { backgroundColor: cat.color }]} />
-                      <AppText style={st.vsCat}>
-                        {cat.name}
-                        {cat.emoji ? ` ${cat.emoji}` : ''}
-                      </AppText>
-                    </View>
-                    <View style={st.vsRight}>
-                      <View style={st.newPill}>
-                        <AppText style={st.newTxt}>NEW</AppText>
-                      </View>
-                      <AppText style={st.vsAmt}>{cat.formatted}</AppText>
-                    </View>
-                  </View>
-
-                  {/* Progress Bar (no background track) */}
-                  <View
-                    style={[
-                      st.vsFill,
-                      {
-                        backgroundColor: cat.color,
-                        width: `${cat.percent}%` as any,
-                      },
-                    ]}
-                  />
-                </View>
-              ))}
             </View>
           )}
         </View>
+
+        {/* ═══ CARD 2: SPENDING CALENDAR (Active in 1M view) ═══ */}
+        {timeHorizon === '1M' && (
+          <View style={st.compactCard}>
+
+            {/* header */}
+            <View style={st.rowBetweenCompact}>
+              <AppText style={st.cardLabel}>SPENDING CALENDAR</AppText>
+              <View style={st.legendRow}>
+                <AppText style={st.legendTxt}>Less</AppText>
+                {['#1D1F2A','#3A2E28','#7A4828','#C96B35','#E84040'].map(c => (
+                  <View key={c} style={[st.legendBox, { backgroundColor: c }]} />
+                ))}
+                <AppText style={st.legendTxt}>More</AppText>
+              </View>
+            </View>
+
+            {/* weekday row: Sun to Sat */}
+            <View style={[st.weekRow, { gap: CAL_GAP }]}>
+              {WEEKDAYS.map(d => (
+                <View key={d} style={{ width: TILE_W, alignItems: 'center' }}>
+                  <AppText style={st.weekDay}>{d}</AppText>
+                </View>
+              ))}
+            </View>
+
+            {/* grid in explicit 7-item rows */}
+            <View style={{ gap: CAL_ROW_GAP, marginBottom: 8 }}>
+              {calendarRows.map((row, rIdx) => (
+                <View key={`r-${rIdx}`} style={[st.weekRow, { gap: CAL_GAP }]}>
+                  {row.map((day, cIdx) => (
+                    day !== null ? (
+                      <TouchableOpacity
+                        key={`d-${day}`}
+                        activeOpacity={0.75}
+                        onPress={() => handleDayPress(day)}
+                        style={[
+                          st.tile,
+                          { width: TILE_W, height: TILE_H, backgroundColor: heatColor(day) },
+                          selectedDay === day && st.tileSel,
+                        ]}
+                      >
+                        <AppText style={st.tileNum}>{day}</AppText>
+                      </TouchableOpacity>
+                    ) : (
+                      <View key={`b-${cIdx}`} style={{ width: TILE_W, height: TILE_H }} />
+                    )
+                  ))}
+                </View>
+              ))}
+            </View>
+
+            {/* insight cards */}
+            <View style={st.insightRow}>
+              <View style={st.insightCard}>
+                <Flame size={14} color="#FFFFFF" />
+                <View style={{ flex: 1 }}>
+                  <AppText style={st.insightHead}>Heaviest:</AppText>
+                  <AppText style={st.insightSub}>{heaviestDayName}</AppText>
+                </View>
+                <AppText style={st.insightVal}>{formatCompactCurrency(heaviestDayAmount)}</AppText>
+              </View>
+              <View style={st.insightCard}>
+                <Trophy size={14} color="#FFFFFF" />
+                <AppText style={st.insightStreak}>{noSpendStreak}-day no-spend streak</AppText>
+              </View>
+            </View>
+
+            {/* Selected Day Spending Breakdown Popup (Professional Butter-Smooth Animation) */}
+            <Animated.View
+              style={[
+                st.dayDetailWrapper,
+                {
+                  maxHeight: popupHeight,
+                  opacity: popupOpacity,
+                },
+              ]}
+            >
+              {displayedDay !== null && (
+                <Animated.View
+                  style={[
+                    st.dayDetailCard,
+                    {
+                      opacity: contentFadeAnim,
+                      transform: [
+                        {
+                          translateY: contentFadeAnim.interpolate({
+                            inputRange: [0, 1],
+                            outputRange: [6, 0],
+                          }),
+                        },
+                      ],
+                    },
+                  ]}
+                >
+                  <AppText style={st.dayDetailDate}>
+                    {formatDayDate(displayedDay)}
+                  </AppText>
+                  <AppText style={st.dayDetailTotal}>
+                    Total: {sym}{(dailySpend[displayedDay] || 0).toLocaleString('en-IN')}
+                  </AppText>
+
+                  {getDayItems(displayedDay).length > 0 ? (
+                    <View style={st.dayItemsStack}>
+                      {getDayItems(displayedDay).map((item, idx) => (
+                        <View key={idx} style={st.dayItemRow}>
+                          <View style={st.dayPill}>
+                            <AppText style={[st.dayPillText, { color: item.color || '#FF9D66' }]}>
+                              {item.category}{item.emoji ? ` ${item.emoji}` : ''}
+                            </AppText>
+                          </View>
+                          <AppText style={st.dayItemAmt}>
+                            {sym}{item.amount.toLocaleString('en-IN')}
+                          </AppText>
+                        </View>
+                      ))}
+                    </View>
+                  ) : (
+                    <AppText style={st.dayNoSpendText}>
+                      No spending on this day ✨
+                    </AppText>
+                  )}
+                </Animated.View>
+              )}
+            </Animated.View>
+
+          </View>
+        )}
+
+        {/* ═══ CARD 3: WEEKLY RHYTHM (1M and 1W views) ═══ */}
+        {(timeHorizon === '1M' || timeHorizon === '1W') && (
+          <View style={st.card}>
+            <View style={st.rowBetween}>
+              <AppText style={st.cardLabel}>WEEKLY RHYTHM</AppText>
+              {avgRhythmAmount > 0 && (
+                <AppText style={st.cardSub}>
+                  Avg: {sym}{avgRhythmAmount.toLocaleString('en-IN')}/day
+                </AppText>
+              )}
+            </View>
+
+            <View style={st.rhythmContainer}>
+              {/* Y Axis */}
+              <View style={st.yAxis}>
+                {[maxRhythmAmount, Math.round(maxRhythmAmount * 0.66), Math.round(maxRhythmAmount * 0.33), 0].map(v => (
+                  <AppText key={v} style={st.yLbl}>{sym}{v}</AppText>
+                ))}
+              </View>
+
+              {/* Chart Area */}
+              <View style={st.rhythmChartArea}>
+                {/* Dashed Average Line at mathematically correct height */}
+                {avgRhythmAmount > 0 && (
+                  <>
+                    <View
+                      style={[
+                        st.avgLine,
+                        {
+                          bottom: 24 + Math.min(Math.round((avgRhythmAmount / maxRhythmAmount) * RHYTHM_BAR_H), RHYTHM_BAR_H),
+                        },
+                      ]}
+                    />
+                    <AppText
+                      style={[
+                        st.avgLbl,
+                        {
+                          bottom: 24 + Math.min(Math.round((avgRhythmAmount / maxRhythmAmount) * RHYTHM_BAR_H), RHYTHM_BAR_H) - 6,
+                        },
+                      ]}
+                    >
+                      avg
+                    </AppText>
+                  </>
+                )}
+
+                {/* Bars Row */}
+                <View style={st.barsRow}>
+                  {rhythmData.map(rd => {
+                    const barH = Math.round((rd.amt / maxRhythmAmount) * RHYTHM_BAR_H);
+                    const isHeaviest = rd.amt > 0 && rd.amt === Math.max(...rhythmData.map(r => r.amt));
+                    return (
+                      <View key={rd.day} style={st.barCol}>
+                        {/* Top Label (e.g. ₹244 or ₹0) */}
+                        {rd.showLabel ? (
+                          <AppText
+                            style={[
+                              st.barAmt,
+                              isHeaviest && st.barAmtHighlight,
+                              rd.amt === 0 && st.barAmtZero,
+                              { bottom: 24 + Math.max(barH + 4, 4) },
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {rd.labelText}
+                          </AppText>
+                        ) : null}
+
+                        {/* Bar Fill */}
+                        {rd.amt > 0 ? (
+                          <View
+                            style={[
+                              st.barFill,
+                              isHeaviest && st.barFillHighlight,
+                              { height: Math.max(barH, 4) },
+                            ]}
+                          />
+                        ) : null}
+
+                        {/* Day Label below axis */}
+                        <AppText style={[st.barDay, isHeaviest && st.barDayHighlight]}>
+                          {rd.day}
+                        </AppText>
+                      </View>
+                    );
+                  })}
+                </View>
+              </View>
+            </View>
+          </View>
+        )}
+
+        {/* ═══ CARD 4: VS LAST MONTH (Month-over-Month Comparison in 1M) ═══ */}
+        {timeHorizon === '1M' && (
+          <View style={st.card}>
+            <View style={st.rowBetween}>
+              <AppText style={st.cardLabel}>VS LAST MONTH</AppText>
+              <View style={st.legendRow}>
+                <View style={[st.legendSq, { backgroundColor: '#2C2D35' }]} />
+                <AppText style={st.legendTxt}>Last</AppText>
+                <View style={[st.legendSq, { backgroundColor: '#FFFFFF', marginLeft: 8 }]} />
+                <AppText style={st.legendTxt}>This</AppText>
+              </View>
+            </View>
+            {vsCategories.length === 0 ? (
+              <View style={{ paddingVertical: 18, alignItems: 'center' }}>
+                <AppText style={{ color: expenseColors.textMuted, fontSize: 12 }}>
+                  No category expenses recorded for comparison
+                </AppText>
+              </View>
+            ) : (
+              <View style={st.vsStack}>
+                {vsCategories.map(cat => (
+                  <View key={cat.id} style={st.vsItem}>
+                    {/* Top Row: [Dot + Name + Emoji] .............. [Comparison Badge + Amount] */}
+                    <View style={st.vsTopRow}>
+                      <View style={st.vsLeft}>
+                        <View style={[st.vsDot, { backgroundColor: cat.color }]} />
+                        <AppText style={st.vsCat}>
+                          {cat.name}
+                          {cat.emoji ? ` ${cat.emoji}` : ''}
+                        </AppText>
+                      </View>
+                      <View style={st.vsRight}>
+                        <View
+                          style={[
+                            st.newPill,
+                            !cat.isNew && (cat.isIncrease ? st.increasePill : st.decreasePill),
+                          ]}
+                        >
+                          <AppText
+                            style={[
+                              st.newTxt,
+                              !cat.isNew && (cat.isIncrease ? st.increaseTxt : st.decreaseTxt),
+                            ]}
+                          >
+                            {cat.changeBadge}
+                          </AppText>
+                        </View>
+                        <AppText style={st.vsAmt}>{cat.formatted}</AppText>
+                      </View>
+                    </View>
+
+                    {/* Dual Comparison Bar: Last Month (Grey) & This Month (Color) */}
+                    <View style={st.vsBarTrack}>
+                      {cat.lastPercent > 0 && (
+                        <View
+                          style={[
+                            st.vsLastBar,
+                            { width: `${cat.lastPercent}%` as any },
+                          ]}
+                        />
+                      )}
+                      {cat.thisPercent > 0 && (
+                        <View
+                          style={[
+                            st.vsFill,
+                            {
+                              backgroundColor: cat.color,
+                              width: `${cat.thisPercent}%` as any,
+                            },
+                          ]}
+                        />
+                      )}
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
 
         {/* ═══ CARD 5: SUBSCRIPTION AUDIT ═══ */}
         <View style={st.card}>
@@ -803,32 +1300,189 @@ const st = StyleSheet.create({
   },
   titleViz: { color: '#FFF', fontSize: 24, lineHeight: 30, fontWeight: '800', letterSpacing: 1.5 },
 
+  // ── Horizon Switcher ──
+  horizonContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginHorizontal: PAGE_M,
+    marginBottom: 14,
+    backgroundColor: '#161822',
+    padding: 4,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  horizonPill: {
+    flex: 1,
+    paddingVertical: 7,
+    alignItems: 'center',
+    borderRadius: 10,
+  },
+  horizonPillActive: {
+    backgroundColor: '#272224',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 157, 102, 0.4)',
+  },
+  horizonPillText: {
+    color: '#7C8092',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  horizonPillTextActive: {
+    color: '#FF9D66',
+    fontWeight: '800',
+  },
+
+  // ── Multi-Month Trend ──
+  trendChartContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    paddingTop: 16,
+    paddingBottom: 4,
+    minHeight: 140,
+  },
+  trendCol: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 6,
+  },
+  trendAmtLabel: {
+    color: '#8E919D',
+    fontSize: 9,
+    fontWeight: '600',
+  },
+  trendTrack: {
+    width: 22,
+    height: 110,
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderRadius: 5,
+  },
+  trendBar: {
+    width: '100%',
+    backgroundColor: '#383B4C',
+    borderRadius: 5,
+  },
+  trendBarCurrent: {
+    backgroundColor: '#FF9D66',
+  },
+  trendMonthLabel: {
+    color: '#7C8092',
+    fontSize: 10,
+    fontWeight: '600',
+    marginTop: 4,
+  },
+  trendMonthLabelCurrent: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+  },
+
+  // ── Weekend vs Weekday Contrast ──
+  weekendBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(255, 114, 94, 0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 114, 94, 0.25)',
+  },
+  weekendBadgeText: {
+    color: '#FF725E',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  contrastTrack: {
+    height: 8,
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 4,
+    overflow: 'hidden',
+    gap: 2,
+    marginBottom: 14,
+  },
+  contrastBarWeekday: {
+    height: '100%',
+    backgroundColor: '#9B8AFB',
+    borderRadius: 3,
+  },
+  contrastBarWeekend: {
+    height: '100%',
+    backgroundColor: '#FF725E',
+    borderRadius: 3,
+  },
+  contrastStatsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  contrastStatCol: {
+    flex: 1,
+    gap: 3,
+  },
+  contrastDivider: {
+    width: 1,
+    height: 36,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    marginHorizontal: 12,
+  },
+  statDotRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  miniDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  statLabel: {
+    color: '#8E919D',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  statAmount: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  statSub: {
+    color: '#7C8092',
+    fontSize: 10,
+    fontWeight: '500',
+  },
+
   card: {
     width: CARD_W,
     marginHorizontal: PAGE_M,
     backgroundColor: expenseColors.bgCard,
-    borderRadius: 20,
-    padding: 14,
-    marginBottom: 12,
+    borderRadius: 22,
+    padding: 18,
+    marginBottom: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
+    borderColor: 'rgba(255,255,255,0.07)',
   },
 
   compactCard: {
     width: CARD_W,
     marginHorizontal: PAGE_M,
     backgroundColor: expenseColors.bgCard,
-    borderRadius: 18,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    marginBottom: 12,
+    borderRadius: 22,
+    padding: 18,
+    marginBottom: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
+    borderColor: 'rgba(255,255,255,0.07)',
   },
 
-  rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
-  rowBetweenCompact: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
-  cardLabel: { color: '#FFF', fontSize: 12, lineHeight: 16, fontWeight: '800', letterSpacing: 1.2 },
+  rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
+  rowBetweenCompact: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  cardLabel: { color: '#FFF', fontSize: 13, lineHeight: 17, fontWeight: '800', letterSpacing: 1.2 },
   cardSub: { color: expenseColors.textMuted, fontSize: 10, lineHeight: 14, fontWeight: '600', letterSpacing: 0.6, marginTop: 2 },
 
   // ── Flow ──
@@ -837,7 +1491,9 @@ const st = StyleSheet.create({
   incomeLabel: { color: '#FFF', fontSize: 10, lineHeight: 14, fontWeight: '600' },
   labelSlot: { position: 'absolute', left: 8, right: 0, height: LABEL_H },
   catLabel: { fontSize: 10, lineHeight: 12, fontWeight: '700', letterSpacing: 0.2 },
+  catAmountRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   catAmt: { color: '#FFF', fontSize: 10, lineHeight: 12, fontWeight: '500' },
+  catPctText: { fontSize: 10, lineHeight: 12, fontWeight: '800', letterSpacing: 0.3 },
 
   // ── Calendar ──
   legendRow: { flexDirection: 'row', alignItems: 'center' },
@@ -982,6 +1638,10 @@ const st = StyleSheet.create({
     textAlign: 'center',
     width: 36,
   },
+  barAmtHighlight: {
+    color: '#FF9D66',
+    fontWeight: '800',
+  },
   barAmtZero: {
     color: expenseColors.textMuted,
   },
@@ -995,6 +1655,9 @@ const st = StyleSheet.create({
     borderBottomLeftRadius: 2,
     borderBottomRightRadius: 2,
   },
+  barFillHighlight: {
+    backgroundColor: '#FF8A4C',
+  },
   barDay: {
     position: 'absolute',
     bottom: 0,
@@ -1002,6 +1665,10 @@ const st = StyleSheet.create({
     fontSize: 11,
     lineHeight: 14,
     fontWeight: '500',
+  },
+  barDayHighlight: {
+    color: '#FFFFFF',
+    fontWeight: '700',
   },
 
   // ── VS Last Month ──
@@ -1050,11 +1717,49 @@ const st = StyleSheet.create({
     fontSize: 9,
     fontWeight: '800',
   },
+  increasePill: {
+    backgroundColor: 'rgba(255, 91, 91, 0.15)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  increaseTxt: {
+    color: '#FF5B5B',
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  decreasePill: {
+    backgroundColor: 'rgba(46, 204, 113, 0.15)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  decreaseTxt: {
+    color: '#2ECC71',
+    fontSize: 9,
+    fontWeight: '800',
+  },
   vsAmt: {
     color: '#FFFFFF',
     fontSize: 13,
     lineHeight: 17,
     fontWeight: '700',
+  },
+  vsBarTrack: {
+    height: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 3,
+    position: 'relative',
+    overflow: 'hidden',
+    justifyContent: 'center',
+  },
+  vsLastBar: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: '#2C2D35',
+    borderRadius: 3,
   },
   vsFill: {
     height: 6,

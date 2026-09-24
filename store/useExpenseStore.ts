@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@/utils/storage';
-import { ExpenseAccount, ExpenseCategory, ExpenseTransaction } from '@/types/expense';
+import { ExpenseAccount, ExpenseCategory, ExpenseTransaction, QuickExpensePreset } from '@/types/expense';
 import { expenseColors } from '@/constants/expenseColors';
 import { executeSmartQuery, SmartQueryResult } from '@/services/onDeviceAi';
 
@@ -19,6 +19,7 @@ interface ExpenseState {
   categories: ExpenseCategory[];
   accounts: ExpenseAccount[];
   transactions: ExpenseTransaction[];
+  quickPresets: QuickExpensePreset[];
   selectedTransactionIds: string[];
   activeAccountFilter: string; // 'All' or account id/name
   smartSearchQuery: string;
@@ -36,6 +37,10 @@ interface ExpenseState {
   toggleSelectTransaction: (id: string) => void;
   clearSelectedTransactions: () => void;
   selectAllTransactions: () => void;
+  settleTransaction: (txId: string, receivingAccountId?: string) => void;
+
+  addQuickPreset: (preset: Omit<QuickExpensePreset, 'id'>) => void;
+  deleteQuickPreset: (id: string) => void;
 
   categoryBudgets: Record<string, number>; // categoryId -> custom budget limit
 
@@ -155,6 +160,8 @@ const INITIAL_TRANSACTIONS: ExpenseTransaction[] = [
   { id: 'tx_10', amount: 25, type: 'expense', categoryId: 'cat_misc', accountId: 'acc_sbi', date: '2026-09-10', note: 'MISC CHAI' },
 ];
 
+const INITIAL_QUICK_PRESETS: QuickExpensePreset[] = [];
+
 export const useExpenseStore = create<ExpenseState>()(
   persist(
     (set, get) => ({
@@ -180,6 +187,7 @@ export const useExpenseStore = create<ExpenseState>()(
   categories: INITIAL_CATEGORIES,
   accounts: INITIAL_ACCOUNTS,
   transactions: INITIAL_TRANSACTIONS,
+  quickPresets: [],
   selectedTransactionIds: [],
   activeAccountFilter: 'All',
   smartSearchQuery: '',
@@ -296,6 +304,70 @@ export const useExpenseStore = create<ExpenseState>()(
   selectAllTransactions: () => {
     const allIds = get().getFilteredTransactions().map((t) => t.id);
     set({ selectedTransactionIds: allIds });
+  },
+
+  settleTransaction: (txId, receivingAccountId) => {
+    set((state) => {
+      const tx = state.transactions.find((t) => t.id === txId);
+      if (!tx) return state;
+
+      let amountToReceive = 0;
+      if (tx.type === 'debt_lend') {
+        amountToReceive = tx.amount;
+      } else if (tx.split && !tx.split.settled) {
+        amountToReceive = tx.split.friendsShare;
+      }
+
+      if (amountToReceive <= 0) return state;
+
+      const targetAccId = receivingAccountId || tx.accountId || state.accounts[0]?.id;
+
+      const updatedAccounts = state.accounts.map((acc) => {
+        if (acc.id === targetAccId) {
+          return {
+            ...acc,
+            balance: acc.balance + amountToReceive,
+            monthlyChange: acc.monthlyChange + amountToReceive,
+            txnCountThisMonth: acc.txnCountThisMonth + 1,
+          };
+        }
+        return acc;
+      });
+
+      const updatedTxs = state.transactions.map((t) => {
+        if (t.id === txId) {
+          if (t.type === 'debt_lend') {
+            return { ...t, isSettled: true };
+          }
+          if (t.split) {
+            return { ...t, split: { ...t.split, settled: true } };
+          }
+        }
+        return t;
+      });
+
+      return {
+        ...state,
+        accounts: updatedAccounts,
+        transactions: updatedTxs,
+      };
+    });
+  },
+
+  addQuickPreset: (preset) => {
+    const newPreset: QuickExpensePreset = {
+      ...preset,
+      id: `qp_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+    };
+    set((state) => ({
+      quickPresets: [newPreset, ...(state.quickPresets || [])],
+    }));
+  },
+
+  deleteQuickPreset: (id) => {
+    set((state) => ({
+      quickPresets: (state.quickPresets || []).filter((p) => p.id !== id),
+    }));
   },
 
   addAccount: (accData) => {

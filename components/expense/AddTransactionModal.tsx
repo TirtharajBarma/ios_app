@@ -25,7 +25,11 @@ import {
   HandCoins,
   AlertCircle,
   Plus,
+  Zap,
+  Sparkles,
+  Trash2,
 } from 'lucide-react-native';
+import * as Haptics from 'expo-haptics';
 import { AppText } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
 import { useSubscriptionStore } from '@/store/useSubscriptionStore';
@@ -34,7 +38,7 @@ import { CategoryIcon, getCategoryBgColor } from './CategoryIcon';
 import { DatePickerModal } from './DatePickerModal';
 import { EditAccountModal } from './EditAccountModal';
 import { format } from 'date-fns';
-import { ExpenseAccount } from '@/types/expense';
+import { ExpenseAccount, QuickExpensePreset } from '@/types/expense';
 
 interface AddTransactionModalProps {
   visible: boolean;
@@ -47,11 +51,117 @@ type BillingCycle = 'monthly' | 'yearly';
 
 const SUGGESTED_TAGS = ['🌴 Goa Trip', '🎉 Night Out', '💍 Wedding', '☕ Work Lunch', '🚗 Road Trip'];
 
+const VENDOR_CATEGORY_MAP: Record<string, string> = {
+  // Food & Dining
+  swiggy: 'cat_food',
+  zomato: 'cat_food',
+  starbucks: 'cat_food',
+  mcdonald: 'cat_food',
+  kfc: 'cat_food',
+  dominos: 'cat_food',
+  burger: 'cat_food',
+  pizza: 'cat_food',
+  chai: 'cat_food',
+  tea: 'cat_food',
+  coffee: 'cat_food',
+  cafe: 'cat_food',
+  lunch: 'cat_food',
+  dinner: 'cat_food',
+  breakfast: 'cat_food',
+  restaurant: 'cat_food',
+  subway: 'cat_food',
+  biryani: 'cat_food',
+
+  // Cigarettes & Tobacco
+  cig: 'cat_cig',
+  cigarette: 'cat_cig',
+  smoke: 'cat_cig',
+  tobacco: 'cat_cig',
+  pan: 'cat_cig',
+  goldflake: 'cat_cig',
+  marlboro: 'cat_cig',
+  advance: 'cat_cig',
+
+  // Transport & Travel
+  uber: 'cat_trans',
+  ola: 'cat_trans',
+  rapido: 'cat_trans',
+  metro: 'cat_trans',
+  auto: 'cat_trans',
+  cab: 'cat_trans',
+  petrol: 'cat_trans',
+  fuel: 'cat_trans',
+  diesel: 'cat_trans',
+  flight: 'cat_trans',
+  indigo: 'cat_trans',
+  irctc: 'cat_trans',
+  train: 'cat_trans',
+  toll: 'cat_trans',
+  parking: 'cat_trans',
+
+  // Shopping
+  amazon: 'cat_shop',
+  flipkart: 'cat_shop',
+  myntra: 'cat_shop',
+  blinkit: 'cat_shop',
+  zepto: 'cat_shop',
+  instamart: 'cat_shop',
+  zara: 'cat_shop',
+  hm: 'cat_shop',
+  grocery: 'cat_shop',
+  groceries: 'cat_shop',
+  supermarket: 'cat_shop',
+
+  // Entertainment
+  netflix: 'cat_ent',
+  spotify: 'cat_ent',
+  prime: 'cat_ent',
+  hotstar: 'cat_ent',
+  youtube: 'cat_ent',
+  movie: 'cat_ent',
+  cinema: 'cat_ent',
+  pvr: 'cat_ent',
+  inox: 'cat_ent',
+  game: 'cat_ent',
+  steam: 'cat_ent',
+  playstation: 'cat_ent',
+
+  // Health & Medical
+  pharmacy: 'cat_health',
+  medicine: 'cat_health',
+  apollo: 'cat_health',
+  hospital: 'cat_health',
+  doctor: 'cat_health',
+  gym: 'cat_health',
+  cult: 'cat_health',
+  meds: 'cat_health',
+
+  // Utilities
+  electricity: 'cat_util',
+  wifi: 'cat_util',
+  broadband: 'cat_util',
+  jio: 'cat_util',
+  airtel: 'cat_util',
+  recharge: 'cat_util',
+  water: 'cat_util',
+  gas: 'cat_util',
+  rent: 'cat_util',
+};
+
 export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   visible,
   onClose,
 }) => {
-  const { categories, accounts, addTransaction } = useExpenseStore();
+  const {
+    categories,
+    accounts,
+    addTransaction,
+    currencySymbol,
+    quickPresets,
+    addQuickPreset,
+    deleteQuickPreset,
+  } = useExpenseStore();
+  const sym = currencySymbol || '₹';
   const { addSubscription } = useSubscriptionStore();
 
   const [tabMode, setTabMode] = useState<TabMode>('expense');
@@ -89,6 +199,13 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
     return d;
   });
 
+  // Quick Preset creation modal
+  const [showAddPresetModal, setShowAddPresetModal] = useState<boolean>(false);
+  const [newPresetLabel, setNewPresetLabel] = useState<string>('');
+  const [newPresetEmoji, setNewPresetEmoji] = useState<string>('⚡');
+  const [newPresetAmount, setNewPresetAmount] = useState<string>('');
+  const [newPresetCatId, setNewPresetCatId] = useState<string>(categories[0]?.id || 'cat_shop');
+
   // Account Dropdown Picker Modal
   const [accountPickerSide, setAccountPickerSide] = useState<'from' | 'to' | null>(null);
   const [showAddAccountModal, setShowAddAccountModal] = useState<boolean>(false);
@@ -108,6 +225,50 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
     if (!isNaN(parsed) && parsed > 0 && isSplitEnabled && !yourShare) {
       setYourShare(Math.round(parsed / 2).toString());
     }
+  };
+
+  const handleMerchantChange = (text: string) => {
+    setMerchant(text);
+    if (tabMode === 'expense') {
+      const lower = text.toLowerCase().trim();
+      for (const [key, catId] of Object.entries(VENDOR_CATEGORY_MAP)) {
+        if (lower.includes(key)) {
+          if (categories.some((c) => c.id === catId)) {
+            setSelectedCategoryId(catId);
+            break;
+          }
+        }
+      }
+    }
+  };
+
+  const handleApplyPreset = (preset: QuickExpensePreset) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    setAmount(preset.amount.toString());
+    setSelectedCategoryId(preset.categoryId);
+    if (preset.accountId && accounts.some((a) => a.id === preset.accountId)) {
+      setSelectedAccountId(preset.accountId);
+    }
+    setMerchant(preset.note || preset.label);
+  };
+
+  const handleCreatePreset = () => {
+    const amt = parseFloat(newPresetAmount);
+    if (!newPresetLabel.trim() || isNaN(amt) || amt <= 0) {
+      Alert.alert('Invalid Preset', 'Please enter a valid label and amount.');
+      return;
+    }
+    addQuickPreset({
+      label: newPresetLabel.trim(),
+      emoji: newPresetEmoji.trim() || '⚡',
+      amount: amt,
+      categoryId: newPresetCatId,
+      note: newPresetLabel.trim(),
+    });
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    setShowAddPresetModal(false);
+    setNewPresetLabel('');
+    setNewPresetAmount('');
   };
 
   const handleSave = () => {
@@ -199,58 +360,49 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
           tag: finalTag || undefined,
         });
       }
-    } else {
-      // Income
+
+      if (isSubscription) {
+        const cat = categories.find((c) => c.id === selectedCategoryId);
+        addSubscription({
+          name: merchant.trim() || cat?.name || 'Subscription',
+          price: numAmount,
+          currency: 'INR' as any,
+          billingCycle: billingCycle,
+          category: (cat?.name as any) || 'Other',
+          paymentMethod: accounts.find((a) => a.id === selectedAccountId)?.name || 'Default',
+          color: cat?.color || '#FF6B6B',
+          nextBillingDate: format(nextBillDate, 'yyyy-MM-dd'),
+          reminderEnabled: false,
+          reminderDays: 1,
+          isTrial: false,
+        });
+      }
+    } else if (tabMode === 'income') {
       addTransaction({
         amount: numAmount,
         type: 'income',
         categoryId: selectedCategoryId,
         accountId: selectedAccountId,
         date: format(txDate, 'yyyy-MM-dd'),
-        note: finalNote || undefined,
+        note: finalNote || 'Income',
         tag: finalTag || undefined,
       });
     }
 
-    // If subscription toggle is ON, also add to Subscription Store
-    if (isSubscription && tabMode === 'expense') {
-      const selectedCat = categories.find((c) => c.id === selectedCategoryId);
-      addSubscription({
-        name: merchant.trim() || selectedCat?.name || 'Subscription',
-        price: numAmount,
-        currency: 'INR',
-        billingCycle: billingCycle === 'monthly' ? 'monthly' : 'yearly',
-        startDate: format(txDate, 'yyyy-MM-dd'),
-        nextBillingDate: format(nextBillDate, 'yyyy-MM-dd'),
-        color: selectedCat?.color || expenseColors.accentPeach,
-        category: 'other',
-        reminderEnabled: true,
-        reminderDays: 1,
-        isTrial: false,
-      }).catch(() => {});
-    }
-
-    // Reset & Close
-    setAmount('');
-    setMerchant('');
-    setNote('');
-    setSelectedTag('');
-    setCustomTagInput('');
-    setIsSplitEnabled(false);
-    setYourShare('');
-    setFriendNames('');
-    setDebtPerson('');
-    setIsSubscription(false);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     onClose();
   };
 
   const getAccountIcon = (name: string) => {
-    const lower = name.toLowerCase();
-    if (lower.includes('axis') || lower.includes('credit') || lower.includes('card') || lower.includes('slice')) {
+    const n = name.toLowerCase();
+    if (n.includes('card') || n.includes('myzone') || n.includes('neo') || n.includes('credit')) {
       return <CreditCard size={14} color="#FFFFFF" />;
     }
-    if (lower.includes('wallet') || lower.includes('pay')) {
+    if (n.includes('wallet') || n.includes('pay') || n.includes('slice')) {
       return <Wallet size={14} color="#FFFFFF" />;
+    }
+    if (n.includes('cash')) {
+      return <Banknote size={14} color="#FFFFFF" />;
     }
     return <Banknote size={14} color="#FFFFFF" />;
   };
@@ -258,6 +410,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   const fromAccObj = accounts.find((a) => a.id === selectedAccountId) || accounts[0];
   const toAccObj = accounts.find((a) => a.id === toAccountId) || accounts[1] || accounts[0];
   const isCreditCardPayment = toAccObj?.statusType === 'due' || toAccObj?.type === 'credit';
+
+  const modeThemeColor = expenseColors.accentPeach; // Consistent warm peach aesthetic across all modes
 
   return (
     <Modal
@@ -267,33 +421,39 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
       onRequestClose={onClose}
     >
       <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
         style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
       >
+        {/* iOS Drag Handle */}
+        <View style={styles.dragHandleContainer}>
+          <View style={styles.dragHandle} />
+        </View>
+
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-            <X size={22} color="#A0A5B5" />
+          <TouchableOpacity onPress={onClose} style={styles.closeBtn} activeOpacity={0.7}>
+            <X size={18} color="#A0A5B5" />
           </TouchableOpacity>
-          <AppText style={styles.headerTitle}>ADD TRANSACTION</AppText>
-          <View style={{ width: 32 }} />
+          <AppText style={styles.headerTitle}>New Transaction</AppText>
+          <TouchableOpacity onPress={handleSave} style={styles.headerDoneBtn} activeOpacity={0.7}>
+            <AppText style={styles.headerDoneText}>Save</AppText>
+          </TouchableOpacity>
         </View>
 
         <ScrollView
           style={styles.scroll}
-          contentContainerStyle={[styles.scrollContent, { paddingBottom: 220 }]}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: 100 }]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
-          automaticallyAdjustKeyboardInsets={true}
         >
-          {/* Segmented Type Control: 4 Clean Modes */}
+          {/* Segmented Type Control: 4 Clean Modes with Unified Peach Highlight */}
           <View style={styles.typeSegment}>
             <TouchableOpacity
               style={[
                 styles.typeBtn,
-                tabMode === 'expense' && styles.typeBtnExpenseActive,
+                tabMode === 'expense' && styles.typeBtnActive,
               ]}
               onPress={() => setTabMode('expense')}
             >
@@ -302,8 +462,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                   styles.typeBtnText,
                   tabMode === 'expense' && styles.typeBtnTextActive,
                 ]}
-                numberOfLines={1}
-                adjustsFontSizeToFit
               >
                 EXPENSE
               </AppText>
@@ -312,7 +470,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             <TouchableOpacity
               style={[
                 styles.typeBtn,
-                tabMode === 'income' && styles.typeBtnIncomeActive,
+                tabMode === 'income' && styles.typeBtnActive,
               ]}
               onPress={() => setTabMode('income')}
             >
@@ -321,8 +479,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                   styles.typeBtnText,
                   tabMode === 'income' && styles.typeBtnTextActive,
                 ]}
-                numberOfLines={1}
-                adjustsFontSizeToFit
               >
                 INCOME
               </AppText>
@@ -331,7 +487,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             <TouchableOpacity
               style={[
                 styles.typeBtn,
-                tabMode === 'transfer' && styles.typeBtnTransferActive,
+                tabMode === 'transfer' && styles.typeBtnActive,
               ]}
               onPress={() => setTabMode('transfer')}
             >
@@ -340,8 +496,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                   styles.typeBtnText,
                   tabMode === 'transfer' && styles.typeBtnTextActive,
                 ]}
-                numberOfLines={1}
-                adjustsFontSizeToFit
               >
                 TRANSFER
               </AppText>
@@ -350,7 +504,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             <TouchableOpacity
               style={[
                 styles.typeBtn,
-                tabMode === 'debt' && styles.typeBtnDebtActive,
+                tabMode === 'debt' && styles.typeBtnActive,
               ]}
               onPress={() => setTabMode('debt')}
             >
@@ -359,8 +513,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                   styles.typeBtnText,
                   tabMode === 'debt' && styles.typeBtnTextActive,
                 ]}
-                numberOfLines={1}
-                adjustsFontSizeToFit
               >
                 LEND/BORROW
               </AppText>
@@ -373,18 +525,16 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
               <TouchableOpacity
                 style={[
                   styles.debtSubBtn,
-                  debtType === 'lend' && styles.debtSubBtnLendActive,
+                  debtType === 'lend' && styles.debtSubBtnActive,
                 ]}
                 onPress={() => setDebtType('lend')}
               >
-                <HandCoins size={14} color={debtType === 'lend' ? '#FFFFFF' : '#A0A5B5'} />
+                <HandCoins size={14} color={debtType === 'lend' ? '#0D0E12' : '#A0A5B5'} />
                 <AppText
                   style={[
                     styles.debtSubBtnText,
                     debtType === 'lend' && styles.debtSubBtnTextActive,
                   ]}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
                 >
                   I LENT (THEY OWE)
                 </AppText>
@@ -393,18 +543,16 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
               <TouchableOpacity
                 style={[
                   styles.debtSubBtn,
-                  debtType === 'borrow' && styles.debtSubBtnBorrowActive,
+                  debtType === 'borrow' && styles.debtSubBtnActive,
                 ]}
                 onPress={() => setDebtType('borrow')}
               >
-                <Banknote size={14} color={debtType === 'borrow' ? '#FFFFFF' : '#A0A5B5'} />
+                <Banknote size={14} color={debtType === 'borrow' ? '#0D0E12' : '#A0A5B5'} />
                 <AppText
                   style={[
                     styles.debtSubBtnText,
                     debtType === 'borrow' && styles.debtSubBtnTextActive,
                   ]}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
                 >
                   I BORROWED (I OWE)
                 </AppText>
@@ -412,7 +560,37 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             </View>
           )}
 
-          {/* INTERACTIVE TRANSFER HERO CARD (With Dropdowns & Left-to-Right Arrow) */}
+          {/* QUICK-SELECT FREQUENT EXPENSES (Only shown when user has saved presets) */}
+          {tabMode === 'expense' && quickPresets && quickPresets.length > 0 && (
+            <View style={styles.presetSection}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.presetScroll}
+              >
+                {quickPresets.map((preset) => (
+                  <TouchableOpacity
+                    key={preset.id}
+                    style={styles.presetChip}
+                    activeOpacity={0.75}
+                    onPress={() => handleApplyPreset(preset)}
+                  >
+                    <AppText style={styles.presetEmoji}>{preset.emoji || '⚡'}</AppText>
+                    <View>
+                      <AppText style={styles.presetLabel} numberOfLines={1}>
+                        {preset.label}
+                      </AppText>
+                      <AppText style={styles.presetAmt}>
+                        {sym}{preset.amount.toLocaleString('en-IN')}
+                      </AppText>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          )}
+
+          {/* INTERACTIVE TRANSFER HERO CARD (With Dropdowns & Arrow) */}
           {tabMode === 'transfer' && (
             <View style={styles.transferHeroCard}>
               <View style={styles.transferHeroHeader}>
@@ -421,7 +599,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
               </View>
 
               <View style={styles.transferDropdownRow}>
-                {/* FROM ACCOUNT DROPDOWN BUTTON */}
+                {/* FROM ACCOUNT */}
                 <TouchableOpacity
                   style={styles.transferSelectBox}
                   activeOpacity={0.8}
@@ -439,12 +617,12 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                   </View>
                 </TouchableOpacity>
 
-                {/* LEFT TO RIGHT ARROW */}
+                {/* ARROW */}
                 <View style={styles.transferArrowWrap}>
-                  <ArrowRight size={20} color={expenseColors.accentPeach} />
+                  <ArrowRight size={20} color="#3B82F6" />
                 </View>
 
-                {/* TO ACCOUNT DROPDOWN BUTTON */}
+                {/* TO ACCOUNT */}
                 <TouchableOpacity
                   style={[
                     styles.transferSelectBox,
@@ -469,28 +647,30 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
               <View style={styles.transferHeroFooter}>
                 <AppText style={styles.transferExplainText}>
                   {isCreditCardPayment
-                    ? `💳 Pays credit card bill of ${toAccObj?.name}, reducing its due amount without inflating your monthly expense budget.`
+                    ? `💳 Pays credit card bill of ${toAccObj?.name}, reducing due balance without inflating monthly expense budget.`
                     : `💸 Moves funds from ${fromAccObj?.name} directly into ${toAccObj?.name}.`}
                 </AppText>
               </View>
             </View>
           )}
 
-          {/* AMOUNT INPUT */}
-          <View style={styles.section}>
-            <AppText style={styles.label}>
+          {/* HERO AMOUNT INPUT SECTION */}
+          <View style={styles.heroAmountCard}>
+            <AppText style={styles.heroAmountLabel}>
               {tabMode === 'expense' && isSplitEnabled
-                ? 'TOTAL BILL PAID'
+                ? 'TOTAL BILL AMOUNT'
                 : tabMode === 'debt'
-                ? 'AMOUNT LENT / BORROWED'
+                ? debtType === 'lend' ? 'AMOUNT LENT' : 'AMOUNT BORROWED'
+                : tabMode === 'income'
+                ? 'INCOME AMOUNT'
                 : 'AMOUNT'}
             </AppText>
-            <View style={styles.amountInputRow}>
-              <AppText style={styles.currencySymbol}>₹</AppText>
+            <View style={styles.heroAmountRow}>
+              <AppText style={styles.heroCurrency}>{sym}</AppText>
               <TextInput
-                style={styles.amountInput}
+                style={styles.heroAmountInput}
                 placeholder="0"
-                placeholderTextColor="#555866"
+                placeholderTextColor="rgba(255, 255, 255, 0.25)"
                 keyboardType="numeric"
                 value={amount}
                 onChangeText={handleAmountChange}
@@ -515,189 +695,43 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             </View>
           )}
 
-          {/* MERCHANT / DESCRIPTION */}
+          {/* MERCHANT / DESCRIPTION WITH AUTO-CATEGORIZATION */}
           {tabMode !== 'debt' && (
             <View style={styles.section}>
-              <AppText style={styles.label}>
-                {tabMode === 'transfer' ? 'TRANSFER REASON (OPTIONAL)' : 'MERCHANT / DESCRIPTION'}
-              </AppText>
+              <View style={styles.labelRowBetween}>
+                <AppText style={styles.label}>
+                  {tabMode === 'transfer' ? 'TRANSFER NOTE (OPTIONAL)' : 'MERCHANT / DESCRIPTION'}
+                </AppText>
+                {tabMode === 'expense' && (
+                  <View style={styles.aiTagPill}>
+                    <Sparkles size={11} color="#FF9D66" />
+                    <AppText style={styles.aiTagPillText}>Auto-categorizes</AppText>
+                  </View>
+                )}
+              </View>
               <TextInput
                 style={styles.textInput}
                 placeholder={
                   tabMode === 'transfer'
-                    ? 'e.g. Credit Card Bill, Wallet Top-up'
-                    : 'e.g. Swiggy, Amazon, Vishal Mega Mart'
+                    ? 'e.g. Credit Card Bill, Top-up'
+                    : 'e.g. Starbucks, Uber, Blinkit, Rent'
                 }
                 placeholderTextColor="#555866"
                 value={merchant}
-                onChangeText={setMerchant}
+                onChangeText={handleMerchantChange}
               />
             </View>
           )}
 
-          {/* ACCOUNT SELECTION (For Expense, Income, Debt) */}
-          {tabMode !== 'transfer' && (
-            <View style={styles.section}>
-              <AppText style={styles.label}>
-                {tabMode === 'income'
-                  ? 'RECEIVING ACCOUNT'
-                  : tabMode === 'debt' && debtType === 'borrow'
-                  ? 'RECEIVED IN ACCOUNT'
-                  : 'PAID FROM ACCOUNT'}
-              </AppText>
-              {accounts.length === 0 ? (
-                <View style={styles.noAccountWarningCard}>
-                  <AlertCircle size={18} color={expenseColors.accentPeach} />
-                  <View style={{ flex: 1 }}>
-                    <AppText style={styles.noAccountWarningTitle}>Account Required</AppText>
-                    <AppText style={styles.noAccountWarningSub}>
-                      You need at least one account (Bank, Card, or Cash) to record this transaction.
-                    </AppText>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.addAccountWarningBtn}
-                    onPress={() => setShowAddAccountModal(true)}
-                    activeOpacity={0.8}
-                  >
-                    <Plus size={14} color="#0F1015" />
-                    <AppText style={styles.addAccountWarningBtnText}>Add</AppText>
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.accountRow}
-                >
-                  {accounts.map((acc) => {
-                    const selected = selectedAccountId === acc.id;
-                    return (
-                      <TouchableOpacity
-                        key={acc.id}
-                        onPress={() => setSelectedAccountId(acc.id)}
-                        style={[
-                          styles.accountPill,
-                          selected && styles.accountPillSelected,
-                        ]}
-                      >
-                        {getAccountIcon(acc.name)}
-                        <AppText
-                          style={[
-                            styles.accountPillText,
-                            selected && styles.accountPillTextSelected,
-                          ]}
-                        >
-                          {acc.name.toUpperCase()}
-                        </AppText>
-                      </TouchableOpacity>
-                    );
-                  })}
-                  <TouchableOpacity
-                    style={styles.addAccountQuickPill}
-                    onPress={() => setShowAddAccountModal(true)}
-                    activeOpacity={0.8}
-                  >
-                    <Plus size={13} color={expenseColors.accentPeach} />
-                    <AppText style={styles.addAccountQuickPillText}>NEW</AppText>
-                  </TouchableOpacity>
-                </ScrollView>
-              )}
-            </View>
-          )}
-
-          {/* GROUP SPLIT TOGGLE INSIDE EXPENSE MODE */}
-          {tabMode === 'expense' && (
-            <View style={styles.splitToggleCard}>
-              <View style={styles.splitToggleHeaderRow}>
-                <View style={styles.splitToggleInfo}>
-                  <View style={styles.splitIconWrap}>
-                    <Users size={16} color={expenseColors.accentPeach} />
-                  </View>
-                  <View>
-                    <AppText style={styles.splitToggleTitle}>Split with Friends?</AppText>
-                    <AppText style={styles.splitToggleSubtitle}>
-                      Split total bill & track friends' share
-                    </AppText>
-                  </View>
-                </View>
-                <Switch
-                  value={isSplitEnabled}
-                  onValueChange={(val) => {
-                    setIsSplitEnabled(val);
-                    if (val && numAmount > 0 && !yourShare) {
-                      setYourShare(Math.round(numAmount / 2).toString());
-                    }
-                  }}
-                  trackColor={{
-                    false: '#2B2E3D',
-                    true: expenseColors.accentPeach,
-                  }}
-                  thumbColor="#FFFFFF"
-                />
-              </View>
-
-              {isSplitEnabled && (
-                <View style={styles.splitExpandedContainer}>
-                  <View style={styles.splitRow}>
-                    <View style={styles.splitCol}>
-                      <AppText style={styles.splitSubLabel}>YOUR EXPENSE</AppText>
-                      <View style={styles.splitInputRow}>
-                        <AppText style={styles.splitCurrency}>₹</AppText>
-                        <TextInput
-                          style={styles.splitInput}
-                          placeholder="0"
-                          placeholderTextColor="#555866"
-                          keyboardType="numeric"
-                          value={yourShare}
-                          onChangeText={setYourShare}
-                        />
-                      </View>
-                    </View>
-
-                    <View style={styles.splitCol}>
-                      <AppText style={styles.splitSubLabel}>FRIENDS OWE YOU</AppText>
-                      <View style={styles.splitFixedRow}>
-                        <AppText style={styles.splitFriendsAmount}>
-                          ₹{friendsShare.toLocaleString('en-IN')}
-                        </AppText>
-                      </View>
-                    </View>
-                  </View>
-
-                  <View style={{ marginTop: 10 }}>
-                    <AppText style={styles.splitSubLabel}>FRIENDS INVOLVED</AppText>
-                    <TextInput
-                      style={styles.textInput}
-                      placeholder="e.g. Rahul, Sneha, Amit"
-                      placeholderTextColor="#555866"
-                      value={friendNames}
-                      onChangeText={setFriendNames}
-                    />
-                  </View>
-                </View>
-              )}
-            </View>
-          )}
-
-          {/* DATE */}
-          <View style={[styles.section, { alignItems: 'center' }]}>
-            <AppText style={styles.label}>TRANSACTION DATE</AppText>
-            <TouchableOpacity
-              style={styles.dateBtn}
-              onPress={() => setShowTxDatePicker(true)}
-            >
-              <CalendarIcon size={16} color="#A0A5B5" />
-              <AppText style={styles.dateBtnText}>
-                {format(txDate, 'dd MMM yyyy')}
-              </AppText>
-            </TouchableOpacity>
-          </View>
-
-          {/* CATEGORY (For Expense & Income) */}
+          {/* CATEGORY (Click & Scroll) */}
           {(tabMode === 'expense' || tabMode === 'income') && (
             <View style={styles.section}>
               <AppText style={styles.label}>CATEGORY</AppText>
-              <View style={styles.categoryGrid}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.categoryScrollRow}
+              >
                 {categories.map((cat) => {
                   const selected = selectedCategoryId === cat.id;
                   const catBg = selected
@@ -708,20 +742,23 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                   return (
                     <TouchableOpacity
                       key={cat.id}
-                      onPress={() => setSelectedCategoryId(cat.id)}
+                      onPress={() => {
+                        Haptics.selectionAsync().catch(() => {});
+                        setSelectedCategoryId(cat.id);
+                      }}
                       style={[
                         styles.categoryPill,
                         {
                           backgroundColor: catBg,
                           borderColor: catBorder,
-                          borderWidth: selected ? 1.5 : 1,
+                          borderWidth: selected ? 2 : 1,
                         },
                       ]}
-                      activeOpacity={0.7}
+                      activeOpacity={0.75}
                     >
                       <CategoryIcon
                         category={cat}
-                        size={14}
+                        size={15}
                         color={cat.color}
                         strokeWidth={2}
                         fill={selected}
@@ -740,9 +777,107 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                     </TouchableOpacity>
                   );
                 })}
-              </View>
+              </ScrollView>
             </View>
           )}
+
+          {/* ACCOUNT SELECTION (Click & Scroll) */}
+          {tabMode !== 'transfer' && (
+            <View style={styles.section}>
+              <AppText style={styles.label}>
+                {tabMode === 'income'
+                  ? 'RECEIVING ACCOUNT'
+                  : tabMode === 'debt' && debtType === 'borrow'
+                  ? 'RECEIVED IN ACCOUNT'
+                  : 'PAID FROM ACCOUNT'}
+              </AppText>
+              {accounts.length === 0 ? (
+                <View style={styles.noAccountWarningCard}>
+                  <AlertCircle size={18} color={expenseColors.accentPeach} />
+                  <View style={{ flex: 1 }}>
+                    <AppText style={styles.noAccountWarningTitle}>Account Required</AppText>
+                    <AppText style={styles.noAccountWarningSub}>
+                      You need at least one account to record this transaction.
+                    </AppText>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.addAccountWarningBtn}
+                    onPress={() => setShowAddAccountModal(true)}
+                    activeOpacity={0.8}
+                  >
+                    <Plus size={14} color="#0F1015" />
+                    <AppText style={styles.addAccountWarningBtnText}>Add</AppText>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.accountScrollRow}
+                >
+                  {accounts.map((acc) => {
+                    const selected = selectedAccountId === acc.id;
+                    return (
+                      <TouchableOpacity
+                        key={acc.id}
+                        onPress={() => {
+                          Haptics.selectionAsync().catch(() => {});
+                          setSelectedAccountId(acc.id);
+                        }}
+                        style={[
+                          styles.accountPill,
+                          selected && styles.accountPillSelected,
+                        ]}
+                        activeOpacity={0.75}
+                      >
+                        <View style={[styles.accountIconWrap, selected && styles.accountIconWrapSelected]}>
+                          {getAccountIcon(acc.name)}
+                        </View>
+                        <View>
+                          <AppText style={[styles.accountPillText, selected && styles.accountPillTextSelected]}>
+                            {acc.name.toUpperCase()}
+                          </AppText>
+                          <AppText style={styles.accountPillBal}>
+                            {acc.statusType === 'due' ? `Due: ${sym}${acc.dueAmount || 0}` : `Bal: ${sym}${acc.balance}`}
+                          </AppText>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                  <TouchableOpacity
+                    style={styles.addAccountQuickPill}
+                    onPress={() => setShowAddAccountModal(true)}
+                    activeOpacity={0.8}
+                  >
+                    <Plus size={13} color={expenseColors.accentPeach} />
+                    <AppText style={styles.addAccountQuickPillText}>NEW</AppText>
+                  </TouchableOpacity>
+                </ScrollView>
+              )}
+            </View>
+          )}
+
+          {/* PROMINENT TRANSACTION DATE CARD */}
+          <TouchableOpacity
+            style={styles.dateCard}
+            activeOpacity={0.8}
+            onPress={() => setShowTxDatePicker(true)}
+          >
+            <View style={styles.dateCardLeft}>
+              <View style={styles.dateIconWrap}>
+                <CalendarIcon size={18} color={expenseColors.accentPeach} />
+              </View>
+              <View>
+                <AppText style={styles.dateCardSub}>TRANSACTION DATE</AppText>
+                <AppText style={styles.dateCardMain}>
+                  {format(txDate, 'EEEE, dd MMMM yyyy')}
+                </AppText>
+              </View>
+            </View>
+            <View style={styles.dateChangeBadge}>
+              <AppText style={styles.dateChangeBadgeText}>Change</AppText>
+            </View>
+          </TouchableOpacity>
 
           {/* TRIP / EVENT TAG / FOLDER BUNDLE */}
           {tabMode !== 'transfer' && (
@@ -786,24 +921,24 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
 
           {/* NOTES (OPTIONAL) */}
           <View style={styles.section}>
-            <AppText style={styles.label}>NOTES (OPTIONAL)</AppText>
+            <AppText style={styles.label}>EXTRA NOTES (OPTIONAL)</AppText>
             <TextInput
               style={styles.textInput}
-              placeholder="Add extra notes..."
+              placeholder="Add details..."
               placeholderTextColor="#555866"
               value={note}
               onChangeText={setNote}
             />
           </View>
 
-          {/* SUBSCRIPTION TOGGLE SECTION (For Expense Mode) */}
+          {/* SUBSCRIPTION TOGGLE (For Expense Mode) */}
           {tabMode === 'expense' && (
             <View style={styles.subscriptionCard}>
               <View style={styles.subHeaderRow}>
                 <View style={{ flex: 1 }}>
-                  <AppText style={styles.subTitle}>SUBSCRIPTION</AppText>
+                  <AppText style={styles.subTitle}>RECURRING SUBSCRIPTION</AppText>
                   <AppText style={styles.subSubtitle}>
-                    Mark as a recurring charge
+                    Auto-track renewal dates & cost
                   </AppText>
                 </View>
                 <Switch
@@ -819,7 +954,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
 
               {isSubscription && (
                 <View style={styles.subFieldsStack}>
-                  {/* Billing Cycle */}
                   <View style={styles.subFieldRow}>
                     <AppText style={styles.subFieldLabel}>BILLING CYCLE</AppText>
                     <View style={styles.cycleSegment}>
@@ -868,7 +1002,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                     </View>
                   </View>
 
-                  {/* Next Bill Date */}
                   <View style={styles.subFieldRow}>
                     <AppText style={styles.subFieldLabel}>NEXT BILL DATE</AppText>
                     <TouchableOpacity
@@ -886,15 +1019,105 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             </View>
           )}
 
-          {/* Bottom Save Button */}
+          {/* Bottom Action Save Button */}
           <TouchableOpacity
-            style={styles.saveBtn}
+            style={[styles.saveBtn, { backgroundColor: modeThemeColor }]}
             onPress={handleSave}
             activeOpacity={0.85}
           >
-            <AppText style={styles.saveBtnText}>Save Transaction</AppText>
+            <AppText style={styles.saveBtnText}>
+              {tabMode === 'expense'
+                ? 'Save Expense'
+                : tabMode === 'income'
+                ? 'Save Income'
+                : tabMode === 'transfer'
+                ? 'Execute Transfer'
+                : 'Record Debt'}
+            </AppText>
           </TouchableOpacity>
         </ScrollView>
+
+        {/* CREATE QUICK PRESET MODAL */}
+        <Modal
+          visible={showAddPresetModal}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowAddPresetModal(false)}
+        >
+          <TouchableOpacity
+            style={styles.modalBackdrop}
+            activeOpacity={1}
+            onPress={() => setShowAddPresetModal(false)}
+          >
+            <View style={styles.presetModalCard} onStartShouldSetResponder={() => true}>
+              <View style={styles.presetModalHeader}>
+                <AppText style={styles.presetModalTitle}>NEW QUICK PRESET</AppText>
+                <TouchableOpacity onPress={() => setShowAddPresetModal(false)}>
+                  <X size={18} color="#A0A5B5" />
+                </TouchableOpacity>
+              </View>
+
+              <AppText style={styles.modalFieldLabel}>PRESET LABEL</AppText>
+              <TextInput
+                style={styles.textInput}
+                placeholder="e.g. Cigarette Pack, Metro, Chai"
+                placeholderTextColor="#555866"
+                value={newPresetLabel}
+                onChangeText={setNewPresetLabel}
+              />
+
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+                <View style={{ flex: 1 }}>
+                  <AppText style={styles.modalFieldLabel}>EMOJI</AppText>
+                  <TextInput
+                    style={styles.textInput}
+                    placeholder="🚬"
+                    placeholderTextColor="#555866"
+                    value={newPresetEmoji}
+                    onChangeText={setNewPresetEmoji}
+                  />
+                </View>
+                <View style={{ flex: 2 }}>
+                  <AppText style={styles.modalFieldLabel}>AMOUNT ({sym})</AppText>
+                  <TextInput
+                    style={styles.textInput}
+                    placeholder="122"
+                    placeholderTextColor="#555866"
+                    keyboardType="numeric"
+                    value={newPresetAmount}
+                    onChangeText={setNewPresetAmount}
+                  />
+                </View>
+              </View>
+
+              <AppText style={[styles.modalFieldLabel, { marginTop: 12 }]}>CATEGORY</AppText>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, marginVertical: 6 }}>
+                {categories.map((c) => (
+                  <TouchableOpacity
+                    key={c.id}
+                    onPress={() => setNewPresetCatId(c.id)}
+                    style={[
+                      styles.modalCatChip,
+                      newPresetCatId === c.id && { borderColor: c.color, backgroundColor: `${c.color}25` },
+                    ]}
+                  >
+                    <AppText style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '700' }}>
+                      {c.name} {c.emoji || ''}
+                    </AppText>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              <TouchableOpacity
+                style={styles.presetModalSaveBtn}
+                activeOpacity={0.8}
+                onPress={handleCreatePreset}
+              >
+                <AppText style={styles.presetModalSaveBtnText}>Save Quick Preset</AppText>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </Modal>
 
         {/* ACCOUNT PICKER DROPDOWN MODAL FOR TRANSFER */}
         {accountPickerSide !== null && (
@@ -947,7 +1170,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                         }}
                       >
                         <View style={styles.pickerAccountLeft}>
-                          <View style={[styles.pickerIconCircle, isCurrent && { backgroundColor: expenseColors.accentPeach }]}>
+                          <View style={[styles.pickerIconCircle, isCurrent && { backgroundColor: '#3B82F6' }]}>
                             {getAccountIcon(acc.name)}
                           </View>
                           <View>
@@ -955,12 +1178,12 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                               {acc.name.toUpperCase()}
                             </AppText>
                             <AppText style={styles.pickerAccountType}>
-                              {acc.statusType === 'due' ? `Due: ₹${acc.dueAmount || 0}` : `Bal: ₹${acc.balance}`}
+                              {acc.statusType === 'due' ? `Due: ${sym}${acc.dueAmount || 0}` : `Bal: ${sym}${acc.balance}`}
                             </AppText>
                           </View>
                         </View>
 
-                        {isCurrent && <Check size={18} color={expenseColors.accentPeach} />}
+                        {isCurrent && <Check size={18} color="#3B82F6" />}
                         {isOpposite && (
                           <AppText style={styles.pickerOppositeNotice}>
                             Already {accountPickerSide === 'from' ? 'To' : 'From'}
@@ -1007,80 +1230,97 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F1015',
+    backgroundColor: '#0D0E12',
+  },
+  dragHandleContainer: {
+    alignItems: 'center',
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  dragHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 12,
+    paddingHorizontal: 18,
+    paddingTop: 8,
+    paddingBottom: 14,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
+    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
   },
   closeBtn: {
-    width: 36,
-    height: 36,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   headerTitle: {
     color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '800',
-    letterSpacing: 0.8,
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  headerDoneBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  headerDoneText: {
+    fontSize: 13,
+    fontWeight: '700',
   },
   scroll: {
     flex: 1,
   },
   scrollContent: {
     padding: 16,
-    paddingBottom: 40,
     gap: 16,
   },
+
+  // ── Mode Switcher Segment ──
   typeSegment: {
     flexDirection: 'row',
-    backgroundColor: '#1A1D27',
-    borderRadius: 14,
+    backgroundColor: '#161822',
+    borderRadius: 16,
     padding: 4,
     gap: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.05)',
   },
   typeBtn: {
     flex: 1,
-    paddingVertical: 9,
-    paddingHorizontal: 2,
+    paddingVertical: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 10,
+    borderRadius: 12,
   },
-  typeBtnExpenseActive: {
-    backgroundColor: expenseColors.accentRed,
-  },
-  typeBtnIncomeActive: {
-    backgroundColor: expenseColors.accentGreen,
-  },
-  typeBtnTransferActive: {
-    backgroundColor: expenseColors.accentBlue,
-  },
-  typeBtnDebtActive: {
-    backgroundColor: expenseColors.accentPeach,
+  typeBtnActive: {
+    backgroundColor: '#FF9D66',
   },
   typeBtnText: {
-    color: '#8E919D',
-    fontSize: 9.8,
+    color: '#7E8394',
+    fontSize: 10,
     fontWeight: '700',
-    letterSpacing: 0.1,
-    textAlign: 'center',
+    letterSpacing: 0.3,
   },
   typeBtnTextActive: {
-    color: '#0F1015',
+    color: '#0D0E12',
     fontWeight: '800',
   },
+
+  // ── Debt Subsegment ──
   debtSegment: {
     flexDirection: 'row',
-    backgroundColor: '#161922',
-    borderRadius: 12,
+    backgroundColor: '#161822',
+    borderRadius: 14,
     padding: 4,
     gap: 6,
   },
@@ -1089,34 +1329,107 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 5,
-    paddingVertical: 8,
-    paddingHorizontal: 4,
-    borderRadius: 8,
+    gap: 6,
+    paddingVertical: 9,
+    borderRadius: 10,
   },
-  debtSubBtnLendActive: {
-    backgroundColor: expenseColors.accentGreen,
-  },
-  debtSubBtnBorrowActive: {
-    backgroundColor: expenseColors.accentRed,
+  debtSubBtnActive: {
+    backgroundColor: '#FF9D66',
   },
   debtSubBtnText: {
-    color: '#8E919D',
+    color: '#7E8394',
     fontSize: 10,
     fontWeight: '700',
-    letterSpacing: 0.2,
-    textAlign: 'center',
   },
   debtSubBtnTextActive: {
-    color: '#0F1015',
+    color: '#0D0E12',
     fontWeight: '800',
   },
-  transferHeroCard: {
-    backgroundColor: '#161A29',
+
+  // ── Quick Log Presets Bar ──
+  presetSection: {
+    backgroundColor: '#141620',
     borderRadius: 18,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 157, 102, 0.15)',
+  },
+  presetScroll: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  presetChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#1E2130',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  presetEmoji: {
+    fontSize: 18,
+  },
+  presetLabel: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  presetAmt: {
+    color: '#FF9D66',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+
+  // ── Hero Amount Card ──
+  heroAmountCard: {
+    backgroundColor: '#141620',
+    borderRadius: 20,
+    paddingVertical: 20,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.07)',
+    alignItems: 'center',
+  },
+  heroAmountLabel: {
+    color: '#7E8394',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+    marginBottom: 8,
+  },
+  heroAmountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  heroCurrency: {
+    color: '#FF9D66',
+    fontSize: 30,
+    lineHeight: 38,
+    fontWeight: '800',
+    marginRight: 4,
+  },
+  heroAmountInput: {
+    color: '#FFFFFF',
+    fontSize: 38,
+    lineHeight: 46,
+    fontWeight: '800',
+    minWidth: 80,
+    textAlign: 'left',
+    paddingVertical: 0,
+  },
+
+  // ── Transfer Hero Card ──
+  transferHeroCard: {
+    backgroundColor: '#141A29',
+    borderRadius: 20,
     padding: 16,
     borderWidth: 1,
-    borderColor: 'rgba(74, 144, 226, 0.25)',
+    borderColor: 'rgba(255, 157, 102, 0.25)',
     gap: 12,
   },
   transferHeroHeader: {
@@ -1125,13 +1438,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   transferHeroTitle: {
-    color: '#4A90E2',
-    fontSize: 12,
+    color: '#FF9D66',
+    fontSize: 11,
     fontWeight: '800',
     letterSpacing: 0.8,
   },
   transferHeroSubtitle: {
-    color: '#8E919D',
+    color: '#7E8394',
     fontSize: 11,
   },
   transferDropdownRow: {
@@ -1142,17 +1455,17 @@ const styles = StyleSheet.create({
   },
   transferSelectBox: {
     flex: 1,
-    backgroundColor: '#1E2336',
-    borderRadius: 12,
+    backgroundColor: '#1B2338',
+    borderRadius: 14,
     padding: 10,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
   },
   creditCardSelectBox: {
-    borderColor: 'rgba(255, 107, 107, 0.4)',
+    borderColor: 'rgba(231, 76, 60, 0.4)',
   },
   transferBoxLabel: {
-    color: '#8E919D',
+    color: '#7E8394',
     fontSize: 9,
     fontWeight: '700',
     letterSpacing: 0.6,
@@ -1182,73 +1495,123 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: 'rgba(74, 144, 226, 0.15)',
+    backgroundColor: 'rgba(255, 157, 102, 0.15)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   transferHeroFooter: {
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.06)',
-    paddingTop: 10,
+    paddingTop: 8,
   },
   transferExplainText: {
-    color: '#A0A5B5',
+    color: '#9CA3AF',
     fontSize: 11,
     lineHeight: 16,
   },
+
+  // ── Sections & Inputs ──
   section: {
-    gap: 6,
+    gap: 8,
   },
   label: {
-    color: expenseColors.textSubtle,
+    color: '#8E919D',
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '800',
     letterSpacing: 0.8,
   },
-  amountInputRow: {
+  labelRowBetween: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1A1D27',
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    height: 60,
+    justifyContent: 'space-between',
   },
-  currencySymbol: {
-    color: '#FFFFFF',
-    fontSize: 26,
-    fontWeight: '700',
-    marginRight: 8,
+  aiTagPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(255, 157, 102, 0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
   },
-  amountInput: {
-    flex: 1,
-    color: '#FFFFFF',
-    fontSize: 26,
+  aiTagPillText: {
+    color: '#FF9D66',
+    fontSize: 10,
     fontWeight: '700',
   },
   textInput: {
-    backgroundColor: '#1A1D27',
+    backgroundColor: '#161822',
     borderRadius: 14,
-    paddingHorizontal: 16,
-    height: 52,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     color: '#FFFFFF',
-    fontSize: 15,
+    fontSize: 14,
+    fontWeight: '600',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.07)',
   },
-  accountRow: {
+
+  // ── Category Scroll ──
+  categoryScrollRow: {
     flexDirection: 'row',
     gap: 8,
-    paddingVertical: 4,
+    paddingVertical: 2,
+  },
+  categoryPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 14,
+  },
+  categoryPillSelected: {
+    backgroundColor: 'rgba(255, 157, 102, 0.2)',
+    borderColor: '#FF9D66',
+    borderWidth: 2,
+  },
+  categoryPillText: {
+    fontSize: 11,
+    color: '#A0A5B5',
+    letterSpacing: 0.4,
+  },
+  categoryPillTextSelected: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+  },
+
+  // ── Accounts Scroll ──
+  accountScrollRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingVertical: 2,
   },
   accountPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#1A1D27',
+    gap: 8,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    borderRadius: 12,
+    borderRadius: 14,
+    backgroundColor: '#161822',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
   },
   accountPillSelected: {
-    backgroundColor: expenseColors.accentPeach,
+    backgroundColor: '#272B3B',
+    borderColor: '#FF9D66',
+    borderWidth: 1.5,
+  },
+  accountIconWrap: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  accountIconWrapSelected: {
+    backgroundColor: '#FF9D66',
   },
   accountPillText: {
     color: '#8E919D',
@@ -1256,16 +1619,122 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   accountPillTextSelected: {
-    color: '#0F1015',
+    color: '#FFFFFF',
     fontWeight: '800',
   },
-  splitToggleCard: {
-    backgroundColor: '#191624',
+  accountPillBal: {
+    color: '#7C8092',
+    fontSize: 10,
+    fontWeight: '600',
+    marginTop: 1,
+  },
+  addAccountQuickPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 157, 102, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 157, 102, 0.3)',
+  },
+  addAccountQuickPillText: {
+    color: '#FF9D66',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  noAccountWarningCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#211816',
+    borderRadius: 14,
+    padding: 12,
+    gap: 10,
+  },
+  noAccountWarningTitle: {
+    color: '#FF9D66',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  noAccountWarningSub: {
+    color: '#A0A5B5',
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  addAccountWarningBtn: {
+    backgroundColor: '#FF9D66',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  addAccountWarningBtnText: {
+    color: '#0F1015',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+
+  // ── Prominent Date Card ──
+  dateCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#161822',
     borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  dateCardLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  dateIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(255, 157, 102, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dateCardSub: {
+    color: '#7E8394',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  dateCardMain: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  dateChangeBadge: {
+    backgroundColor: 'rgba(255, 157, 102, 0.12)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 157, 102, 0.25)',
+  },
+  dateChangeBadgeText: {
+    color: '#FF9D66',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+
+  // ── Split Bill Card ──
+  splitToggleCard: {
+    backgroundColor: '#161822',
+    borderRadius: 18,
     padding: 14,
     borderWidth: 1,
-    borderColor: 'rgba(155, 81, 224, 0.25)',
-    gap: 12,
+    borderColor: 'rgba(255, 255, 255, 0.07)',
   },
   splitToggleHeaderRow: {
     flexDirection: 'row',
@@ -1276,13 +1745,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    flex: 1,
   },
   splitIconWrap: {
     width: 32,
     height: 32,
-    borderRadius: 8,
-    backgroundColor: 'rgba(155, 81, 224, 0.2)',
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 157, 102, 0.15)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1292,14 +1760,14 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   splitToggleSubtitle: {
-    color: '#8E919D',
+    color: '#7E8394',
     fontSize: 11,
   },
   splitExpandedContainer: {
+    marginTop: 14,
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.06)',
     paddingTop: 12,
-    gap: 10,
   },
   splitRow: {
     flexDirection: 'row',
@@ -1307,113 +1775,100 @@ const styles = StyleSheet.create({
   },
   splitCol: {
     flex: 1,
-    gap: 6,
   },
   splitSubLabel: {
-    color: '#A0A5B5',
+    color: '#7E8394',
     fontSize: 10,
-    fontWeight: '700',
+    fontWeight: '800',
     letterSpacing: 0.6,
+    marginBottom: 6,
   },
   splitInputRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#221D32',
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    height: 44,
+    backgroundColor: '#1F2230',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
   },
   splitCurrency: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '700',
+    color: '#FF9D66',
+    fontSize: 14,
+    fontWeight: '800',
     marginRight: 4,
   },
   splitInput: {
-    flex: 1,
     color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 14,
+    fontWeight: '800',
+    flex: 1,
   },
   splitFixedRow: {
-    justifyContent: 'center',
-    backgroundColor: '#221D32',
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    height: 44,
+    backgroundColor: '#1F2230',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
   },
   splitFriendsAmount: {
     color: '#2ECC71',
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 14,
+    fontWeight: '800',
   },
+
+  // ── Date & Tags ──
   dateBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#1A1D27',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    backgroundColor: '#161822',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
   },
   dateBtnText: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '700',
-  },
-  categoryGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  categoryPill: {
-    backgroundColor: '#1A1D27',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  categoryPillText: {
-    color: '#8E919D',
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.4,
   },
   tagScrollRow: {
     flexDirection: 'row',
     gap: 8,
-    paddingVertical: 4,
   },
   tagChip: {
-    backgroundColor: '#1A1D27',
+    backgroundColor: '#161822',
     paddingHorizontal: 12,
     paddingVertical: 8,
-    borderRadius: 10,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
+    borderColor: 'rgba(255, 255, 255, 0.07)',
   },
   tagChipActive: {
-    backgroundColor: 'rgba(235, 178, 154, 0.2)',
-    borderColor: expenseColors.accentPeach,
+    backgroundColor: 'rgba(255, 157, 102, 0.15)',
+    borderColor: '#FF9D66',
   },
   tagChipText: {
     color: '#8E919D',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
   },
   tagChipTextActive: {
-    color: expenseColors.accentPeach,
-    fontWeight: '700',
+    color: '#FF9D66',
+    fontWeight: '800',
   },
+
+  // ── Subscription ──
   subscriptionCard: {
-    backgroundColor: '#16171E',
-    borderRadius: 16,
+    backgroundColor: '#161822',
+    borderRadius: 18,
     padding: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
-    gap: 12,
+    borderColor: 'rgba(255, 255, 255, 0.07)',
   },
   subHeaderRow: {
     flexDirection: 'row',
@@ -1422,20 +1877,20 @@ const styles = StyleSheet.create({
   },
   subTitle: {
     color: '#FFFFFF',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '800',
     letterSpacing: 0.6,
   },
   subSubtitle: {
-    color: expenseColors.textMuted,
+    color: '#7E8394',
     fontSize: 11,
-    marginTop: 2,
   },
   subFieldsStack: {
-    gap: 12,
-    paddingTop: 10,
+    marginTop: 12,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.05)',
+    borderTopColor: 'rgba(255, 255, 255, 0.06)',
+    paddingTop: 12,
+    gap: 12,
   },
   subFieldRow: {
     flexDirection: 'row',
@@ -1443,17 +1898,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   subFieldLabel: {
-    color: expenseColors.textSubtle,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.6,
+    color: '#7E8394',
+    fontSize: 10,
+    fontWeight: '800',
   },
   cycleSegment: {
     flexDirection: 'row',
-    backgroundColor: '#1F222E',
+    backgroundColor: '#1E2130',
     borderRadius: 10,
-    padding: 3,
-    gap: 2,
+    padding: 2,
   },
   cycleBtn: {
     paddingHorizontal: 12,
@@ -1461,69 +1914,126 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   cycleBtnActive: {
-    backgroundColor: '#2E3242',
+    backgroundColor: '#FF9D66',
   },
   cycleBtnText: {
-    color: '#8E919D',
-    fontSize: 12,
-    fontWeight: '600',
+    color: '#7E8394',
+    fontSize: 11,
+    fontWeight: '700',
   },
   cycleBtnTextActive: {
-    color: '#FFFFFF',
-    fontWeight: '700',
+    color: '#0F1015',
+    fontWeight: '800',
   },
   nextDateBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#1F222E',
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 10,
+    backgroundColor: '#1E2130',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
   },
   nextDateBtnText: {
     color: '#FFFFFF',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
   },
+
+  // ── Save Button ──
   saveBtn: {
-    backgroundColor: expenseColors.accentPeach,
-    height: 52,
-    borderRadius: 14,
+    borderRadius: 18,
+    paddingVertical: 16,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 8,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
   },
   saveBtnText: {
-    color: '#0F1015',
-    fontSize: 15,
+    color: '#0D0E12',
+    fontSize: 14,
     fontWeight: '800',
-    letterSpacing: 0.5,
+    letterSpacing: 0.8,
   },
+
+  // ── Modals & Sheets ──
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
     justifyContent: 'center',
-    padding: 20,
+    alignItems: 'center',
+    padding: 18,
   },
-  pickerModalContent: {
-    backgroundColor: '#1A1D27',
-    borderRadius: 20,
+  presetModalCard: {
+    width: '100%',
+    backgroundColor: '#161822',
+    borderRadius: 22,
     padding: 18,
     borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  presetModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+  },
+  presetModalTitle: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  modalFieldLabel: {
+    color: '#7E8394',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+    marginBottom: 4,
+  },
+  modalCatChip: {
+    backgroundColor: '#1E2130',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
+    borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
-    gap: 14,
+  },
+  presetModalSaveBtn: {
+    backgroundColor: '#FF9D66',
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 14,
+  },
+  presetModalSaveBtnText: {
+    color: '#0D0E12',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+
+  pickerModalContent: {
+    width: '100%',
+    backgroundColor: '#161822',
+    borderRadius: 22,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   pickerModalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    marginBottom: 14,
   },
   pickerModalTitle: {
     color: '#FFFFFF',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '800',
-    letterSpacing: 0.6,
   },
   pickerAccountList: {
     gap: 8,
@@ -1532,19 +2042,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#222533',
+    backgroundColor: '#1E2130',
     padding: 12,
-    borderRadius: 12,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'transparent',
+    borderColor: 'rgba(255, 255, 255, 0.06)',
   },
   pickerAccountItemCurrent: {
-    borderColor: expenseColors.accentPeach,
-    backgroundColor: 'rgba(235, 178, 154, 0.1)',
+    borderColor: '#3B82F6',
   },
   pickerAccountItemDisabled: {
     opacity: 0.4,
-    backgroundColor: '#181A22',
   },
   pickerAccountLeft: {
     flexDirection: 'row',
@@ -1554,77 +2062,23 @@ const styles = StyleSheet.create({
   pickerIconCircle: {
     width: 32,
     height: 32,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   pickerAccountName: {
     color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '700',
+    fontSize: 12,
+    fontWeight: '800',
   },
   pickerAccountType: {
-    color: '#8E919D',
+    color: '#7E8394',
     fontSize: 11,
-    marginTop: 2,
   },
   pickerOppositeNotice: {
-    color: '#8E919D',
+    color: '#7E8394',
     fontSize: 10,
     fontStyle: 'italic',
   },
-  noAccountWarningCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(235, 178, 154, 0.12)',
-    padding: 12,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(235, 178, 154, 0.3)',
-    gap: 10,
-  },
-  noAccountWarningTitle: {
-    color: expenseColors.accentPeach,
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  noAccountWarningSub: {
-    color: expenseColors.textSubtle,
-    fontSize: 11,
-    lineHeight: 15,
-    marginTop: 2,
-  },
-  addAccountWarningBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: expenseColors.accentPeach,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 8,
-  },
-  addAccountWarningBtnText: {
-    color: '#0F1015',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  addAccountQuickPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: '#1C1E28',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(235, 178, 154, 0.4)',
-    borderStyle: 'dashed',
-  },
-  addAccountQuickPillText: {
-    color: expenseColors.accentPeach,
-    fontSize: 11,
-    fontWeight: '800',
-  },
 });
-

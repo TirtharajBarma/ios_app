@@ -5,6 +5,7 @@ import {
   ScrollView,
   TouchableOpacity,
   TextInput,
+  Modal,
   Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,6 +22,7 @@ import {
   X,
   Mic,
   Cpu,
+  Check,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { AppText } from '@/components/ui';
@@ -36,9 +38,11 @@ export const ExpenseLedger: React.FC = () => {
   const {
     accounts,
     categories,
+    transactions,
     activeAccountFilter,
     smartSearchQuery,
     selectedTransactionIds,
+    currencySymbol,
     setActiveAccountFilter,
     setSmartSearchQuery,
     getFilteredTransactions,
@@ -47,9 +51,29 @@ export const ExpenseLedger: React.FC = () => {
     clearSelectedTransactions,
     selectAllTransactions,
     removeTransactions,
+    settleTransaction,
   } = useExpenseStore();
 
   const [isSelectMode, setIsSelectMode] = useState(false);
+  const [settlingTx, setSettlingTx] = useState<ExpenseTransaction | null>(null);
+  const [settleAccountId, setSettleAccountId] = useState<string>(accounts[0]?.id || 'acc_hdfc');
+  const sym = currencySymbol || '₹';
+
+  // Statistical Anomaly / Outlier Calculation (Z-Score approximation per category)
+  const categoryAverages = useMemo(() => {
+    const map: Record<string, { avg: number; stdDev: number }> = {};
+    categories.forEach((cat) => {
+      const catTxs = transactions.filter((t) => t.categoryId === cat.id && t.type === 'expense');
+      if (catTxs.length >= 2) {
+        const sum = catTxs.reduce((acc, t) => acc + t.amount, 0);
+        const avg = sum / catTxs.length;
+        const variance = catTxs.reduce((acc, t) => acc + Math.pow(t.amount - avg, 2), 0) / catTxs.length;
+        const stdDev = Math.sqrt(variance);
+        map[cat.id] = { avg, stdDev };
+      }
+    });
+    return map;
+  }, [categories, transactions]);
 
   const deviceAiInfo = useMemo(() => getDeviceAiEngineInfo(), []);
   const aiResult = getSmartSearchResult();
@@ -112,12 +136,24 @@ export const ExpenseLedger: React.FC = () => {
     const isExpense = tx.type === 'expense' || isSplit || tx.type === 'debt_lend';
     const isIncome = tx.type === 'income' || tx.type === 'debt_borrow';
 
-    let amountDisplay = `₹${tx.amount.toLocaleString('en-IN')}`;
-    if (tx.type === 'debt_lend') amountDisplay = `-₹${tx.amount.toLocaleString('en-IN')}`;
-    else if (tx.type === 'debt_borrow') amountDisplay = `+₹${tx.amount.toLocaleString('en-IN')}`;
-    else if (isExpense) amountDisplay = `-₹${tx.amount.toLocaleString('en-IN')}`;
-    else if (isIncome) amountDisplay = `+₹${tx.amount.toLocaleString('en-IN')}`;
-    else if (isTransfer) amountDisplay = `⇄ ₹${tx.amount.toLocaleString('en-IN')}`;
+    const sym = currencySymbol || '₹';
+    let amountDisplay = `${sym}${tx.amount.toLocaleString('en-IN')}`;
+    if (tx.type === 'debt_lend') amountDisplay = `-${sym}${tx.amount.toLocaleString('en-IN')}`;
+    else if (tx.type === 'debt_borrow') amountDisplay = `+${sym}${tx.amount.toLocaleString('en-IN')}`;
+    else if (isExpense) amountDisplay = `-${sym}${tx.amount.toLocaleString('en-IN')}`;
+    else if (isIncome) amountDisplay = `+${sym}${tx.amount.toLocaleString('en-IN')}`;
+    else if (isTransfer) amountDisplay = `⇄ ${sym}${tx.amount.toLocaleString('en-IN')}`;
+
+    const isDebtLend = tx.type === 'debt_lend';
+    const isSettled = isDebtLend ? tx.isSettled : tx.split?.settled;
+    const canSettle = (isDebtLend || (isSplit && (tx.split?.friendsShare || 0) > 0)) && !isSettled;
+
+    const catStats = categoryAverages[tx.categoryId];
+    const isOutlier =
+      tx.type === 'expense' &&
+      catStats &&
+      catStats.stdDev > 25 &&
+      tx.amount > catStats.avg + 1.8 * catStats.stdDev;
 
     return (
       <TouchableOpacity
@@ -208,6 +244,13 @@ export const ExpenseLedger: React.FC = () => {
               </View>
             )}
 
+            {/* Statistical Anomaly / Outlier Badge */}
+            {isOutlier && (
+              <View style={styles.outlierBadge}>
+                <AppText style={styles.outlierBadgeText}>⚠️ High</AppText>
+              </View>
+            )}
+
             <AppText style={styles.transactionDateText}>{formattedDate}</AppText>
           </View>
 
@@ -215,16 +258,16 @@ export const ExpenseLedger: React.FC = () => {
           {isSplit && tx.split && (
             <View style={styles.splitLedgerDetail}>
               <AppText style={styles.splitLedgerDetailText}>
-                Your share: <AppText style={{ color: '#FFFFFF', fontWeight: '700' }}>₹{tx.split.yourShare.toLocaleString('en-IN')}</AppText>
+                Your share: <AppText style={{ color: '#FFFFFF', fontWeight: '700' }}>{sym}{tx.split.yourShare.toLocaleString('en-IN')}</AppText>
                 {'  '}•{'  '}
-                Lent: <AppText style={{ color: expenseColors.accentGreen, fontWeight: '700' }}>₹{tx.split.friendsShare.toLocaleString('en-IN')}</AppText>
+                Lent: <AppText style={{ color: expenseColors.accentGreen, fontWeight: '700' }}>{sym}{tx.split.friendsShare.toLocaleString('en-IN')}</AppText>
                 {tx.split.friendNames ? ` (${tx.split.friendNames})` : ''}
               </AppText>
             </View>
           )}
         </View>
 
-        {/* Right: Amount */}
+        {/* Right: Amount & Settle Up action */}
         <View style={styles.amountCol}>
           <AppText
             style={[
@@ -239,6 +282,27 @@ export const ExpenseLedger: React.FC = () => {
           <AppText style={styles.accountSubText}>
             {getAccountName(tx.accountId)}
           </AppText>
+
+          {canSettle && (
+            <TouchableOpacity
+              style={styles.settleUpBtn}
+              onPress={(e) => {
+                e.stopPropagation();
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                setSettlingTx(tx);
+                setSettleAccountId(tx.accountId || accounts[0]?.id || 'acc_hdfc');
+              }}
+              activeOpacity={0.8}
+            >
+              <Check size={10} color="#2ECC71" strokeWidth={3} />
+              <AppText style={styles.settleUpBtnText}>Settle Up</AppText>
+            </TouchableOpacity>
+          )}
+          {isSettled && (
+            <View style={styles.settledBadge}>
+              <AppText style={styles.settledBadgeText}>✓ Settled</AppText>
+            </View>
+          )}
         </View>
       </TouchableOpacity>
     );
@@ -495,6 +559,98 @@ export const ExpenseLedger: React.FC = () => {
           ))
         )}
       </ScrollView>
+
+      {/* 1-TAP SETTLE UP MODAL */}
+      <Modal
+        visible={settlingTx !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSettlingTx(null)}
+      >
+        <TouchableOpacity
+          style={styles.modalBackdrop}
+          activeOpacity={1}
+          onPress={() => setSettlingTx(null)}
+        >
+          <View style={styles.settleModalCard} onStartShouldSetResponder={() => true}>
+            <View style={styles.settleModalHeader}>
+              <View style={styles.settleHeaderLeft}>
+                <Check size={16} color="#2ECC71" strokeWidth={3} />
+                <AppText style={styles.settleModalTitle}>SETTLE RECEIVABLE</AppText>
+              </View>
+              <TouchableOpacity onPress={() => setSettlingTx(null)}>
+                <X size={18} color="#A0A5B5" />
+              </TouchableOpacity>
+            </View>
+
+            {settlingTx && (
+              <>
+                <AppText style={styles.settleModalDesc}>
+                  Receive payment from{' '}
+                  <AppText style={{ color: '#FFFFFF', fontWeight: '800' }}>
+                    {settlingTx.borrowerOrLender || settlingTx.split?.friendNames || 'Friend'}
+                  </AppText>
+                </AppText>
+
+                <View style={styles.settleAmountHero}>
+                  <AppText style={styles.settleAmountHeroText}>
+                    {sym}
+                    {(
+                      settlingTx.type === 'debt_lend'
+                        ? settlingTx.amount
+                        : settlingTx.split?.friendsShare || 0
+                    ).toLocaleString('en-IN')}
+                  </AppText>
+                </View>
+
+                <AppText style={styles.modalFieldLabel}>RECEIVE INTO ACCOUNT</AppText>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ gap: 8, marginVertical: 8 }}
+                >
+                  {accounts.map((acc) => {
+                    const isSelected = settleAccountId === acc.id;
+                    return (
+                      <TouchableOpacity
+                        key={acc.id}
+                        onPress={() => setSettleAccountId(acc.id)}
+                        style={[
+                          styles.settleAccChip,
+                          isSelected && styles.settleAccChipSelected,
+                        ]}
+                      >
+                        <AppText
+                          style={[
+                            styles.settleAccChipText,
+                            isSelected && { color: '#FFFFFF', fontWeight: '800' },
+                          ]}
+                        >
+                          {acc.name.toUpperCase()}
+                        </AppText>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+
+                <TouchableOpacity
+                  style={styles.settleConfirmBtn}
+                  activeOpacity={0.85}
+                  onPress={() => {
+                    if (settlingTx) {
+                      settleTransaction(settlingTx.id, settleAccountId);
+                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+                      setSettlingTx(null);
+                    }
+                  }}
+                >
+                  <AppText style={styles.settleConfirmBtnText}>Confirm & Deposit</AppText>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {/* Fixed Bottom Navigation */}
       <FixedBottomNav activeTab="ledger" />
@@ -981,6 +1137,44 @@ const styles = StyleSheet.create({
   transferAmount: {
     color: '#4A90E2',
   },
+  outlierBadge: {
+    backgroundColor: 'rgba(255, 157, 102, 0.15)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  outlierBadgeText: {
+    color: '#FF9D66',
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  settleUpBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: 'rgba(46, 204, 113, 0.15)',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 6,
+    marginTop: 4,
+  },
+  settleUpBtnText: {
+    color: '#2ECC71',
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  settledBadge: {
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    marginTop: 4,
+  },
+  settledBadgeText: {
+    color: expenseColors.textMuted,
+    fontSize: 9,
+    fontWeight: '700',
+  },
   emptyStateContainer: {
     paddingVertical: 40,
     alignItems: 'center',
@@ -1023,5 +1217,94 @@ const styles = StyleSheet.create({
     color: expenseColors.accentPeach,
     fontSize: 13,
     fontWeight: '700',
+  },
+
+  // ── Settle Up Modal ──
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 18,
+  },
+  settleModalCard: {
+    width: '100%',
+    backgroundColor: '#161822',
+    borderRadius: 22,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  settleModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  settleHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  settleModalTitle: {
+    color: '#2ECC71',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  settleModalDesc: {
+    color: '#8E919D',
+    fontSize: 12,
+    marginBottom: 8,
+  },
+  settleAmountHero: {
+    backgroundColor: '#1E2130',
+    borderRadius: 16,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(46, 204, 113, 0.25)',
+  },
+  settleAmountHeroText: {
+    color: '#2ECC71',
+    fontSize: 28,
+    fontWeight: '800',
+  },
+  modalFieldLabel: {
+    color: '#7E8394',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+    marginBottom: 4,
+  },
+  settleAccChip: {
+    backgroundColor: '#1E2130',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  settleAccChipSelected: {
+    borderColor: '#2ECC71',
+    backgroundColor: 'rgba(46, 204, 113, 0.15)',
+  },
+  settleAccChipText: {
+    color: '#8E919D',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  settleConfirmBtn: {
+    backgroundColor: '#2ECC71',
+    borderRadius: 14,
+    paddingVertical: 13,
+    alignItems: 'center',
+    marginTop: 14,
+  },
+  settleConfirmBtnText: {
+    color: '#0D0E12',
+    fontSize: 13,
+    fontWeight: '800',
   },
 });

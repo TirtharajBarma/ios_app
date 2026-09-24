@@ -49,3 +49,13 @@ export interface ExpenseBudget {
   monthlyLimit: number;
   month: string; // e.g. "2026-09"
 }
+
+export interface QuickExpensePreset {
+  id: string;
+  label: string;
+  emoji?: string;
+  amount: number;
+  categoryId: string;
+  accountId?: string;
+  note?: string;
+}

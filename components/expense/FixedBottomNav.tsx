@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, usePathname } from 'expo-router';
 import { Home, ReceiptText, BarChart3, CloudDownload, Settings } from 'lucide-react-native';
+import * as Haptics from 'expo-haptics';
 import { AppText } from '@/components/ui';
 import { expenseColors } from '@/constants/expenseColors';
 
@@ -14,11 +15,21 @@ interface FixedBottomNavProps {
 }
 
 export const FixedBottomNav: React.FC<FixedBottomNavProps> = ({
-  activeTab = 'home',
+  activeTab,
   onTabPress,
 }) => {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const pathname = usePathname();
+
+  const currentTab: ExpenseTabType = useMemo(() => {
+    if (activeTab) return activeTab;
+    if (pathname?.includes('/ledger')) return 'ledger';
+    if (pathname?.includes('/visualizer')) return 'visualizer';
+    if (pathname?.includes('/import')) return 'import';
+    if (pathname?.includes('/settings')) return 'settings';
+    return 'home';
+  }, [activeTab, pathname]);
 
   const navItems: Array<{ id: ExpenseTabType; label: string; IconComponent: any }> = [
     { id: 'home', label: 'Home', IconComponent: Home },
@@ -29,6 +40,7 @@ export const FixedBottomNav: React.FC<FixedBottomNavProps> = ({
   ];
 
   const handlePress = (id: ExpenseTabType) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     if (onTabPress) {
       onTabPress(id);
     }
@@ -40,7 +52,7 @@ export const FixedBottomNav: React.FC<FixedBottomNavProps> = ({
     <View style={[styles.container, { paddingBottom: Math.max(insets.bottom, 10) }]}>
       <View style={styles.contentRow}>
         {navItems.map((item) => {
-          const isActive = activeTab === item.id;
+          const isActive = currentTab === item.id;
           const iconColor = isActive ? expenseColors.textPrimary : expenseColors.textMuted;
           const textColor = isActive ? expenseColors.textPrimary : expenseColors.textMuted;
 

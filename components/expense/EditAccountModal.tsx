@@ -39,7 +39,8 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
   account,
   onClose,
 }) => {
-  const { addAccount, updateAccount, deleteAccount, archiveAccount, transactions } = useExpenseStore();
+  const { addAccount, updateAccount, deleteAccount, archiveAccount, transactions, currencySymbol } = useExpenseStore();
+  const sym = currencySymbol || '₹';
 
   const [name, setName] = useState<string>('');
   const [type, setType] = useState<AccountType>('savings');
@@ -271,8 +272,8 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
                 Adjust Opening Balance
               </AppText>
               <AppText style={styles.balanceCardSub}>
-                Currently ₹{parseFloat(balance || '0').toLocaleString('en-IN')}
-                {parseFloat(dueAmount || '0') > 0 ? ` (Due: ₹${parseFloat(dueAmount).toLocaleString('en-IN')})` : ''}
+                Currently {sym}{parseFloat(balance || '0').toLocaleString('en-IN')}
+                {parseFloat(dueAmount || '0') > 0 ? ` (Due: ${sym}${parseFloat(dueAmount).toLocaleString('en-IN')})` : ''}
               </AppText>
             </View>
             <ChevronRight size={18} color="#8E919D" />
@@ -282,7 +283,7 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
           {showBalanceInput && (
             <View style={styles.balanceInputBlock}>
               <View style={styles.section}>
-                <AppText style={styles.label}>BALANCE AMOUNT (₹)</AppText>
+                <AppText style={styles.label}>BALANCE AMOUNT ({sym})</AppText>
                 <TextInput
                   style={styles.textInput}
                   placeholder="0"
@@ -295,7 +296,7 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
 
               {type === 'credit' && (
                 <View style={styles.section}>
-                  <AppText style={styles.label}>DUE AMOUNT (₹)</AppText>
+                  <AppText style={styles.label}>DUE AMOUNT ({sym})</AppText>
                   <TextInput
                     style={styles.textInput}
                     placeholder="0"

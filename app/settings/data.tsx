@@ -20,10 +20,12 @@ import {
   Sparkles,
   Cpu,
   Layers,
+  Printer,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
+import * as Print from 'expo-print';
 
 import { AppText } from '@/components/ui';
 import { expenseColors } from '@/constants/expenseColors';
@@ -54,7 +56,7 @@ export default function YourDataScreen() {
 
       const fileContent = csvHeader + csvRows;
       const docDir = (FileSystem as any).documentDirectory || (FileSystem as any).cacheDirectory || '';
-      const fileUri = `${docDir}subo_expenses_export.csv`;
+      const fileUri = `${docDir}expenses_export.csv`;
 
       await FileSystem.writeAsStringAsync(fileUri, fileContent, {
         encoding: FileSystem.EncodingType.UTF8,
@@ -63,7 +65,7 @@ export default function YourDataScreen() {
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(fileUri, {
           mimeType: 'text/csv',
-          dialogTitle: 'Export Your Data',
+          dialogTitle: 'Export Your Data (CSV)',
           UTI: 'public.comma-separated-values-text',
         });
       } else {
@@ -72,6 +74,158 @@ export default function YourDataScreen() {
     } catch (err) {
       console.warn('Export error:', err);
       Alert.alert('Export Failed', 'Could not export data.');
+    }
+  };
+
+  const handleExportPdf = async () => {
+    Haptics.selectionAsync();
+    try {
+      if (transactions.length === 0) {
+        Alert.alert('No Data', 'There are no transactions to generate a PDF financial report.');
+        return;
+      }
+
+      const totalSpent = transactions
+        .filter((t) => t.type === 'expense')
+        .reduce((sum, t) => sum + (t.split ? t.split.yourShare : t.amount), 0);
+      const totalIncome = transactions
+        .filter((t) => t.type === 'income')
+        .reduce((sum, t) => sum + t.amount, 0);
+      const netSavings = totalIncome - totalSpent;
+
+      const categoryRows = categories
+        .filter((c) => c.id !== 'cat_income')
+        .map((cat) => {
+          const catSpent = transactions
+            .filter((t) => t.type === 'expense' && t.categoryId === cat.id)
+            .reduce((sum, t) => sum + (t.split ? t.split.yourShare : t.amount), 0);
+          if (catSpent === 0) return '';
+          const pct = totalSpent > 0 ? ((catSpent / totalSpent) * 100).toFixed(1) : '0';
+          return `
+            <tr>
+              <td><strong>${cat.name} ${cat.emoji || ''}</strong></td>
+              <td style="text-align: right; color: #E84040; font-weight: 600;">₹${catSpent.toLocaleString('en-IN')}</td>
+              <td style="text-align: right; color: #555;">${pct}%</td>
+            </tr>
+          `;
+        })
+        .filter(Boolean)
+        .join('');
+
+      const txRows = transactions
+        .slice(0, 300)
+        .map((t) => {
+          const cat = categories.find((c) => c.id === t.categoryId);
+          const acc = accounts.find((a) => a.id === t.accountId);
+          const sign = t.type === 'income' ? '+' : t.type === 'transfer' ? '⇄' : '-';
+          const color = t.type === 'income' ? '#2ECC71' : t.type === 'transfer' ? '#3498DB' : '#E74C3C';
+          const displayAmt = t.split ? t.split.yourShare : t.amount;
+          return `
+            <tr>
+              <td>${new Date(t.date).toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
+              <td>${cat?.name || 'Expense'} ${cat?.emoji || ''}</td>
+              <td>${acc?.name || 'Account'}</td>
+              <td>${t.note || (t.split ? `Split (${t.split.friendNames})` : '-')}</td>
+              <td style="text-align: right; font-weight: bold; color: ${color};">${sign}₹${displayAmt.toLocaleString('en-IN')}</td>
+            </tr>
+          `;
+        })
+        .join('');
+
+      const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; padding: 32px; color: #1c1c1e; background: #ffffff; line-height: 1.4; }
+            .header { border-bottom: 2px solid #111; padding-bottom: 12px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-end; }
+            h1 { font-size: 24px; margin: 0; text-transform: uppercase; letter-spacing: 0.6px; color: #111; }
+            .meta { font-size: 11px; color: #666; margin-top: 4px; }
+            .summary-cards { display: flex; gap: 14px; margin-bottom: 24px; }
+            .card { flex: 1; padding: 14px; border: 1px solid #e2e4e8; border-radius: 10px; background: #f8f9fa; }
+            .card-title { font-size: 11px; text-transform: uppercase; color: #777; font-weight: 700; margin-bottom: 6px; }
+            .card-val { font-size: 20px; font-weight: 800; color: #111; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 12px; }
+            th { text-align: left; padding: 9px 10px; background: #f1f2f4; border-bottom: 2px solid #ccc; text-transform: uppercase; font-size: 10px; color: #555; }
+            td { padding: 9px 10px; border-bottom: 1px solid #eee; }
+            .section-title { font-size: 13px; font-weight: 800; text-transform: uppercase; margin: 24px 0 10px 0; border-left: 4px solid #FF9D66; padding-left: 8px; color: #222; }
+            .footer { font-size: 10px; color: #999; text-align: center; margin-top: 36px; border-top: 1px solid #eee; padding-top: 12px; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div>
+              <h1>Financial Statement Report</h1>
+              <div class="meta">Export Period: ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</div>
+            </div>
+          </div>
+
+          <div class="summary-cards">
+            <div class="card">
+              <div class="card-title">Total Income</div>
+              <div class="card-val" style="color: #2ECC71;">+₹${totalIncome.toLocaleString('en-IN')}</div>
+            </div>
+            <div class="card">
+              <div class="card-title">Total Expenses</div>
+              <div class="card-val" style="color: #E74C3C;">-₹${totalSpent.toLocaleString('en-IN')}</div>
+            </div>
+            <div class="card">
+              <div class="card-title">Net Balance</div>
+              <div class="card-val" style="color: ${netSavings >= 0 ? '#2ECC71' : '#E74C3C'};">${netSavings >= 0 ? '+' : '-'}₹${Math.abs(netSavings).toLocaleString('en-IN')}</div>
+            </div>
+          </div>
+
+          <div class="section-title">Category Spending Distribution</div>
+          <table>
+            <thead>
+              <tr>
+                <th>Category</th>
+                <th style="text-align: right;">Amount Spent</th>
+                <th style="text-align: right;">Share (%)</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${categoryRows || '<tr><td colspan="3" style="text-align: center; color: #888;">No expenses recorded</td></tr>'}
+            </tbody>
+          </table>
+
+          <div class="section-title">Transaction Ledger Log (${transactions.length} total)</div>
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Category</th>
+                <th>Account</th>
+                <th>Note / Merchant</th>
+                <th style="text-align: right;">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${txRows}
+            </tbody>
+          </table>
+
+          <div class="footer">
+            Personal & Confidential • 100% On-Device Financial Record • Zero Cloud Telemetry
+          </div>
+        </body>
+        </html>
+      `;
+
+      const { uri } = await Print.printToFileAsync({ html });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, {
+          mimeType: 'application/pdf',
+          dialogTitle: 'Export Financial Report (PDF)',
+          UTI: '.pdf',
+        });
+      } else {
+        Alert.alert('PDF Export Complete', `Saved financial report to ${uri}`);
+      }
+    } catch (err) {
+      console.warn('PDF export error:', err);
+      Alert.alert('Export Failed', 'Could not generate PDF report.');
     }
   };
 
@@ -139,7 +293,7 @@ export default function YourDataScreen() {
         <View style={styles.infoBanner}>
           <ShieldCheck size={20} color={expenseColors.accentGreen} />
           <AppText style={styles.infoBannerText}>
-            Subo is built local-first. Your financial data, accounts, budgets, and transactions belong exclusively to you and stay private on your device.
+            This application is built local-first. Your financial data, accounts, budgets, and transactions belong exclusively to you and stay private on your device.
           </AppText>
         </View>
 
@@ -272,7 +426,7 @@ export default function YourDataScreen() {
             <View style={styles.tcItem}>
               <AppText style={styles.tcNumber}>1. Acceptance of Terms</AppText>
               <AppText style={styles.tcBody}>
-                By accessing or using the Subo expense and subscription tracking application, you agree to be bound by these Terms and Conditions. If you disagree with any part of these terms, please discontinue use.
+                By accessing or using this expense and subscription tracking application, you agree to be bound by these Terms and Conditions. If you disagree with any part of these terms, please discontinue use.
               </AppText>
             </View>
 
@@ -281,7 +435,7 @@ export default function YourDataScreen() {
             <View style={styles.tcItem}>
               <AppText style={styles.tcNumber}>2. User Data Ownership & Portability</AppText>
               <AppText style={styles.tcBody}>
-                You retain complete, exclusive ownership of all transactions, custom categories, account names, and financial records logged within Subo. You may export your entire transaction history to CSV at any time without restriction or fees.
+                You retain complete, exclusive ownership of all transactions, custom categories, account names, and financial records logged within this application. You may export your entire transaction history to CSV or PDF at any time without restriction or fees.
               </AppText>
             </View>
 
@@ -290,7 +444,7 @@ export default function YourDataScreen() {
             <View style={styles.tcItem}>
               <AppText style={styles.tcNumber}>3. Non-Financial Advisory Disclaimer</AppText>
               <AppText style={styles.tcBody}>
-                Subo is an informational personal utility designed to assist with manual expense logging, budgeting, and recurring subscription visualization. It does not provide certified financial, investment, legal, tax, or accounting advice. You are solely responsible for your financial decisions.
+                This application is an informational personal utility designed to assist with manual expense logging, budgeting, and recurring subscription visualization. It does not provide certified financial, investment, legal, tax, or accounting advice. You are solely responsible for your financial decisions.
               </AppText>
             </View>
 
@@ -299,7 +453,7 @@ export default function YourDataScreen() {
             <View style={styles.tcItem}>
               <AppText style={styles.tcNumber}>4. Local Storage & Backup Responsibility</AppText>
               <AppText style={styles.tcBody}>
-                Because Subo uses local-first on-device storage, deleting the application or clearing device storage without generating a CSV backup may result in irreversible data loss. Users are encouraged to utilize the built-in CSV export function regularly.
+                Because this application uses local-first on-device storage, deleting the application or clearing device storage without generating an export backup may result in irreversible data loss. Users are encouraged to utilize the built-in CSV/PDF export function regularly.
               </AppText>
             </View>
 
@@ -327,6 +481,25 @@ export default function YourDataScreen() {
         <View style={styles.sectionContainer}>
           <AppText style={styles.sectionTitle}>DATA CONTROLS</AppText>
           <View style={styles.card}>
+            {/* PDF Export */}
+            <TouchableOpacity
+              style={styles.actionRow}
+              activeOpacity={0.7}
+              onPress={handleExportPdf}
+            >
+              <View style={styles.actionLeft}>
+                <Printer size={18} color={expenseColors.accentGreen} />
+                <View>
+                  <AppText style={styles.actionTitle}>Export Financial Report (PDF)</AppText>
+                  <AppText style={styles.actionSub}>Formatted monthly statement & breakdowns</AppText>
+                </View>
+              </View>
+              <AppText style={[styles.actionBtnText, { color: expenseColors.accentGreen }]}>Export</AppText>
+            </TouchableOpacity>
+
+            <View style={styles.divider} />
+
+            {/* CSV Export */}
             <TouchableOpacity
               style={styles.actionRow}
               activeOpacity={0.7}
@@ -336,7 +509,7 @@ export default function YourDataScreen() {
                 <Share2 size={18} color={expenseColors.accentPeach} />
                 <View>
                   <AppText style={styles.actionTitle}>Export Data to CSV</AppText>
-                  <AppText style={styles.actionSub}>Download all your transactions</AppText>
+                  <AppText style={styles.actionSub}>Download raw spreadsheet transactions</AppText>
                 </View>
               </View>
               <AppText style={styles.actionBtnText}>Export</AppText>
