@@ -1,10 +1,31 @@
-import React, { useState } from 'react';
-import { View, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, StyleSheet, TouchableOpacity, Animated, LayoutAnimation, Platform, UIManager } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import { AppText } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
 import { expenseColors } from '@/constants/expenseColors';
 import { ExpenseCategory } from '@/types/expense';
 import { CategoryIcon } from './CategoryIcon';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+const customSpringLayout = {
+  duration: 320,
+  create: {
+    type: LayoutAnimation.Types.easeInEaseOut,
+    property: LayoutAnimation.Properties.opacity,
+  },
+  update: {
+    type: LayoutAnimation.Types.spring,
+    springDamping: 0.72,
+  },
+  delete: {
+    type: LayoutAnimation.Types.easeInEaseOut,
+    property: LayoutAnimation.Properties.opacity,
+  },
+};
 
 interface MonthSummaryProps {
   onCategorySelect?: (categoryId: string) => void;
@@ -13,18 +34,35 @@ interface MonthSummaryProps {
 export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) => {
   const {
     selectedMonth,
-    categories,
-    transactions,
+    currencySymbol,
+    monthlyBudget,
     getTotalBalance,
-    getNetBalance,
+    getTotalSpent,
+    getRemainingBudget,
     getCategoryBreakdown,
+    hasInitialAppLoaded,
+    setHasInitialAppLoaded,
   } = useExpenseStore();
 
+  const sym = currencySymbol || '₹';
   const [selectedCatId, setSelectedCatId] = useState<string | null>(null);
 
+  // Animated values for left balance and right arc staggered cascade
+  const balanceAnim = useRef(new Animated.Value(hasInitialAppLoaded ? 1 : 0)).current;
+  const chipFadeAnim = useRef(new Animated.Value(hasInitialAppLoaded ? 1 : 0)).current;
+  const arcAnimValues = useRef<Animated.Value[]>([]).current;
+
   const totalBalance = getTotalBalance();
-  const netBalance = getNetBalance();
+  const totalSpent = getTotalSpent();
+  const remainingBudget = getRemainingBudget();
   const breakdown = getCategoryBreakdown();
+
+  // ── Predictive Runway Algorithm ──
+  const now = new Date();
+  const currentDay = Math.max(now.getDate(), 1);
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const remainingDays = Math.max(daysInMonth - currentDay, 1);
+  const safeDailyAllowance = remainingBudget > 0 ? Math.round(remainingBudget / remainingDays) : 0;
 
   // Filter categories excluding income, prioritizing categories with spend sorted descending
   const categoriesWithSpend = breakdown
@@ -62,7 +100,6 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
       },
     ];
   } else {
-    // 6 or fewer categories with spend: display all active, backfill with zero-spend if < 6
     const candidates = [...categoriesWithSpend, ...categoriesZeroSpend];
     arcItems = candidates.slice(0, 6);
   }
@@ -74,14 +111,57 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
     null;
 
   const currentSelectedId = currentCategoryInfo?.category.id || null;
-
-  const formattedBalance = `\u20B9${totalBalance.toLocaleString('en-IN')}`;
-  const isNetNegative = netBalance < 0;
-  const formattedNet = `${isNetNegative ? '-' : '+'}\u20B9${Math.abs(netBalance).toLocaleString('en-IN')}`;
-
   const totalArcCount = arcItems.length;
 
-  // Center alignment along the smooth arc curve (bowing outward towards right edge at middle)
+  // Ensure arcAnimValues has enough animated values
+  while (arcAnimValues.length < totalArcCount) {
+    arcAnimValues.push(new Animated.Value(hasInitialAppLoaded ? 1 : 0));
+  }
+
+  useEffect(() => {
+    if (hasInitialAppLoaded) {
+      balanceAnim.setValue(1);
+      chipFadeAnim.setValue(1);
+      arcAnimValues.forEach((anim) => anim.setValue(1));
+      return;
+    }
+
+    // Left balance entrance on app load
+    balanceAnim.setValue(0);
+    chipFadeAnim.setValue(0);
+
+    Animated.parallel([
+      Animated.timing(balanceAnim, {
+        toValue: 1,
+        duration: 500,
+        useNativeDriver: true,
+      }),
+      Animated.timing(chipFadeAnim, {
+        toValue: 1,
+        duration: 400,
+        delay: 200,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    // Staggered arc cascade animation on app load
+    arcAnimValues.forEach((anim) => anim.setValue(0));
+    const animations = arcAnimValues.slice(0, totalArcCount).map((anim, i) => {
+      return Animated.spring(anim, {
+        toValue: 1,
+        tension: 55,
+        friction: 7,
+        delay: i * 45,
+        useNativeDriver: true,
+      });
+    });
+
+    Animated.parallel(animations).start(() => {
+      setHasInitialAppLoaded(true);
+    });
+  }, [hasInitialAppLoaded, totalArcCount]);
+
+  // Center alignment along the smooth arc curve
   const getArcMarginRight = (index: number, total: number, isSelected: boolean) => {
     if (total <= 1) return isSelected ? 2 : 8;
     const t = index / (total - 1);
@@ -94,74 +174,99 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
   };
 
   const handleCategoryPress = (catId: string) => {
+    Haptics.selectionAsync().catch(() => {});
+    LayoutAnimation.configureNext(customSpringLayout);
     setSelectedCatId(catId);
     onCategorySelect?.(catId);
+
+    // Quick chip bump
+    chipFadeAnim.setValue(0.3);
+    Animated.spring(chipFadeAnim, {
+      toValue: 1,
+      tension: 70,
+      friction: 8,
+      useNativeDriver: true,
+    }).start();
   };
 
   return (
     <View style={styles.container}>
-      {/* Left Column: Date, Balance, Net, Category Highlight */}
-      <View style={styles.leftColumn}>
+      {/* Left Column: Date, Total Liquid Balance, Budget Runway, Category Highlight */}
+      <Animated.View
+        style={[
+          styles.leftColumn,
+          {
+            opacity: balanceAnim,
+            transform: [
+              {
+                translateY: balanceAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [14, 0],
+                }),
+              },
+            ],
+          },
+        ]}
+      >
         {/* Month Label */}
         <AppText style={styles.monthLabel}>{selectedMonth}</AppText>
 
-        {/* Total Balance */}
+        {/* Primary Focus: Total Liquid Wealth Across Accounts */}
         <View style={styles.balanceSection}>
-          <AppText style={styles.balanceTitle}>Total balance</AppText>
+          <AppText style={styles.balanceTitle}>TOTAL BALANCE</AppText>
+
           <AppText style={styles.balanceAmount} numberOfLines={1}>
-            {formattedBalance}
+            {sym}{totalBalance.toLocaleString('en-IN')}
           </AppText>
+
+          {/* Budget Allowance Subtext */}
+          {monthlyBudget > 0 && (
+            <View style={styles.budgetRow}>
+              <View style={styles.paceBadge} />
+              <AppText style={styles.budgetSub}>
+                {sym}{remainingBudget.toLocaleString('en-IN')} budget left
+              </AppText>
+            </View>
+          )}
         </View>
 
-        {/* Net Badge */}
-        <View style={styles.netPill}>
-          <AppText style={styles.netLabel}>Net </AppText>
-          <AppText style={styles.netValue}>
-            {formattedNet}
-          </AppText>
-        </View>
-
-        {/* Divider */}
-        <View style={styles.divider} />
-
-        {/* Selected or Top Category Highlight */}
-        {currentCategoryInfo ? (
-          <View style={styles.topCategorySection}>
-            <View style={styles.topCategoryHeader}>
-              <View
-                style={[
-                  styles.categoryDot,
-                  { backgroundColor: currentCategoryInfo.category.color },
-                ]}
-              />
-              <AppText style={styles.topCategoryName}>
-                {currentCategoryInfo.category.name.toUpperCase()}{' '}
-                {currentCategoryInfo.category.emoji || ''}
-              </AppText>
-            </View>
-
-            <View style={styles.topCategoryValues}>
-              <AppText style={styles.topCategoryAmount}>
-                {`\u20B9${currentCategoryInfo.amount.toLocaleString('en-IN')}`}
-              </AppText>
-              <AppText style={styles.topCategoryPercentage}>
-                {`${currentCategoryInfo.percentage}%`}
-              </AppText>
-            </View>
-          </View>
-        ) : (
-          <View style={styles.topCategorySection}>
-            <View style={styles.topCategoryHeader}>
-              <View style={[styles.categoryDot, { backgroundColor: expenseColors.textMuted }]} />
-              <AppText style={styles.topCategoryName}>NO EXPENSES</AppText>
-            </View>
-            <View style={styles.topCategoryValues}>
-              <AppText style={styles.topCategoryAmount}>{`\u20B90`}</AppText>
-              <AppText style={styles.topCategoryPercentage}>0%</AppText>
-            </View>
-          </View>
-        )}
-      </View>
+        {/* Selected Category Highlight Chip */}
+        {currentCategoryInfo && currentCategoryInfo.amount > 0 ? (
+          <Animated.View
+            style={[
+              styles.categoryChip,
+              {
+                borderColor: `${currentCategoryInfo.category.color}44`,
+                opacity: chipFadeAnim,
+                transform: [
+                  {
+                    scale: chipFadeAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.94, 1],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.categoryDot,
+                { backgroundColor: currentCategoryInfo.category.color },
+              ]}
+            />
+            <AppText style={styles.categoryChipName} numberOfLines={1}>
+              {currentCategoryInfo.category.name} {currentCategoryInfo.category.emoji || ''}
+            </AppText>
+            <AppText style={styles.categoryChipAmount}>
+              {sym}{currentCategoryInfo.amount.toLocaleString('en-IN')}
+            </AppText>
+            <AppText style={styles.categoryChipPct}>
+              ({currentCategoryInfo.percentage}%)
+            </AppText>
+          </Animated.View>
+        ) : null}
+      </Animated.View>
 
       {/* Right Column: Dynamic Floating Overlapping Category Arc */}
       <View style={styles.floatingMenuContainer}>
@@ -173,41 +278,63 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
             item.category.iconName === 'Star' ||
             item.category.iconName === 'Heart';
 
+          const anim = arcAnimValues[index] || new Animated.Value(1);
+
           return (
-            <TouchableOpacity
+            <Animated.View
               key={item.category.id}
-              style={[
-                isSelected
-                  ? [
-                      styles.selectedMenuCircle,
-                      {
-                        backgroundColor: item.category.color,
-                        marginRight,
-                        shadowColor: item.category.color,
-                        marginTop: index === 0 ? 0 : -6,
-                        zIndex: 30,
-                      },
-                    ]
-                  : [
-                      styles.menuCircle,
-                      {
-                        marginRight,
-                        marginTop: index === 0 ? 0 : -6,
-                        zIndex: 10 - index,
-                      },
-                    ],
-              ]}
-              activeOpacity={0.8}
-              onPress={() => handleCategoryPress(item.category.id)}
+              style={{
+                opacity: anim,
+                transform: [
+                  {
+                    scale: anim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.35, 1],
+                    }),
+                  },
+                  {
+                    translateX: anim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [30, 0],
+                    }),
+                  },
+                ],
+              }}
             >
-              <CategoryIcon
-                category={item.category}
-                size={isSelected ? 26 : 18}
-                color={isSelected ? '#0F1015' : item.category.color}
-                strokeWidth={isSelected ? 2.5 : 2}
-                fill={isFilled}
-              />
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  isSelected
+                    ? [
+                        styles.selectedMenuCircle,
+                        {
+                          backgroundColor: item.category.color,
+                          marginRight,
+                          shadowColor: item.category.color,
+                          marginTop: index === 0 ? 0 : -6,
+                          zIndex: 30,
+                        },
+                      ]
+                    : [
+                        styles.menuCircle,
+                        {
+                          marginRight,
+                          marginTop: index === 0 ? 0 : -6,
+                          zIndex: 10 - index,
+                        },
+                      ],
+                ]}
+                activeOpacity={0.8}
+                onPress={() => handleCategoryPress(item.category.id)}
+              >
+                <CategoryIcon
+                  category={item.category}
+                  size={isSelected ? 26 : 18}
+                  color={isSelected ? '#0F1015' : item.category.color}
+                  strokeWidth={isSelected ? 2.5 : 2}
+                  fill={isFilled}
+                />
+              </TouchableOpacity>
+            </Animated.View>
           );
         })}
       </View>
@@ -220,8 +347,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    marginTop: 14,
-    marginBottom: 36,
+    marginTop: 18,
+    marginBottom: 32,
   },
   leftColumn: {
     flex: 1,
@@ -229,102 +356,94 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   monthLabel: {
-    color: expenseColors.textMuted,
+    color: '#9CA3AF',
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+    marginBottom: 10,
+    textTransform: 'uppercase',
+  },
+  balanceSection: {
+    marginBottom: 14,
+  },
+  balanceTitle: {
+    color: '#8E95A5',
     fontSize: 12,
     lineHeight: 16,
     fontWeight: '700',
-    letterSpacing: 1.4,
-    marginBottom: 14,
-  },
-  balanceSection: {
-    marginBottom: 8,
-  },
-  balanceTitle: {
-    color: expenseColors.textSubtle,
-    fontSize: 13,
-    lineHeight: 17,
-    fontWeight: '500',
+    letterSpacing: 0.8,
     marginBottom: 4,
   },
   balanceAmount: {
     color: expenseColors.textPrimary,
     fontSize: 44,
     lineHeight: 50,
-    fontWeight: '700',
-    letterSpacing: -0.5,
+    fontWeight: '800',
+    letterSpacing: -0.6,
   },
-  netPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    backgroundColor: '#1C1F2A',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 14,
-    marginTop: 12,
-    marginBottom: 20,
-  },
-  netLabel: {
-    color: expenseColors.textSubtle,
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: '500',
-  },
-  netValue: {
-    color: expenseColors.textPrimary,
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: '700',
-  },
-  divider: {
-    height: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    width: 140,
-    marginBottom: 20,
-  },
-  topCategorySection: {
-    gap: 6,
-  },
-  topCategoryHeader: {
+  budgetRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    marginTop: 6,
+  },
+  paceBadge: {
+    backgroundColor: 'rgba(52, 211, 153, 0.14)',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  paceBadgeText: {
+    color: '#34D399',
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '700',
+  },
+  budgetSub: {
+    color: '#707587',
+    fontSize: 12,
+    lineHeight: 15,
+    fontWeight: '600',
+  },
+  categoryChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignSelf: 'flex-start',
+    marginTop: 10,
   },
   categoryDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
-  topCategoryName: {
-    color: expenseColors.textSecondary,
-    fontSize: 13,
-    lineHeight: 17,
-    fontWeight: '700',
-    letterSpacing: 0.9,
-  },
-  topCategoryValues: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 10,
-  },
-  topCategoryAmount: {
-    color: expenseColors.textPrimary,
-    fontSize: 28,
-    lineHeight: 32,
-    fontWeight: '700',
-  },
-  topCategoryPercentage: {
-    color: expenseColors.textMuted,
-    fontSize: 14,
-    lineHeight: 19,
+  categoryChipName: {
+    color: '#D1D5DB',
+    fontSize: 12,
     fontWeight: '600',
+  },
+  categoryChipAmount: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  categoryChipPct: {
+    color: '#8E95A5',
+    fontSize: 11,
+    fontWeight: '500',
   },
   floatingMenuContainer: {
     alignItems: 'flex-end',
     justifyContent: 'center',
-    paddingTop: 6,
-    paddingBottom: 6,
-    width: 92,
+    paddingTop: 8,
+    paddingBottom: 8,
+    width: 96,
   },
   selectedMenuCircle: {
     width: 56,
@@ -333,7 +452,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2.5,
-    borderColor: '#12141C',
+    borderColor: '#101114',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.35,
     shadowRadius: 10,
@@ -345,7 +464,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     backgroundColor: '#202430',
     borderWidth: 2,
-    borderColor: '#12141C',
+    borderColor: '#101114',
     alignItems: 'center',
     justifyContent: 'center',
   },

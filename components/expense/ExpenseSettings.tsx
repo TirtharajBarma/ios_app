@@ -14,6 +14,7 @@ import {
   useWindowDimensions,
   LayoutAnimation,
   UIManager,
+  Keyboard,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -43,6 +44,19 @@ import {
   Camera,
   Wrench,
   Leaf,
+  Coffee,
+  Shield,
+  Tag,
+  Sparkles,
+  Smile,
+  Briefcase,
+  Laptop,
+  Flame,
+  Coins,
+  Activity,
+  Wifi,
+  Smartphone,
+  PiggyBank,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import * as Sharing from 'expo-sharing';
@@ -82,7 +96,7 @@ const customSpringLayout = {
   },
 };
 
-// Reference icons shown in settings category creator (6x2 grid)
+// Rich collection of icons for categories
 const AVAILABLE_ICONS = [
   { name: 'Star', component: Star },
   { name: 'Heart', component: Heart },
@@ -90,30 +104,42 @@ const AVAILABLE_ICONS = [
   { name: 'Car', component: Car },
   { name: 'Plane', component: Plane },
   { name: 'Gift', component: Gift },
-  { name: 'BookOpen', component: BookOpen },
-  { name: 'Music', component: Music },
-  { name: 'Gamepad2', component: Gamepad2 },
-  { name: 'Camera', component: Camera },
-  { name: 'Wrench', component: Wrench },
-  { name: 'Leaf', component: Leaf },
-  // Extra row supporting default categories
+  { name: 'Coffee', component: Coffee },
   { name: 'ShoppingBag', component: ShoppingBag },
-  { name: 'Tv', component: Tv },
-  { name: 'Zap', component: Zap },
-  { name: 'Banknote', component: Banknote },
   { name: 'UtensilsCrossed', component: UtensilsCrossed },
-  { name: 'MoreHorizontal', component: MoreHorizontal },
+  { name: 'Tv', component: Tv },
+  { name: 'Gamepad2', component: Gamepad2 },
+  { name: 'Music', component: Music },
+  { name: 'BookOpen', component: BookOpen },
+  { name: 'Briefcase', component: Briefcase },
+  { name: 'Laptop', component: Laptop },
+  { name: 'Banknote', component: Banknote },
+  { name: 'Coins', component: Coins },
+  { name: 'PiggyBank', component: PiggyBank },
+  { name: 'Zap', component: Zap },
+  { name: 'Flame', component: Flame },
+  { name: 'Shield', component: Shield },
+  { name: 'Leaf', component: Leaf },
+  { name: 'Tag', component: Tag },
+  { name: 'Sparkles', component: Sparkles },
 ];
 
-// Reference palette matching reference image copy 3
+// Rich pastel palette for custom categories
 const AVAILABLE_COLORS = [
-  '#F472B6', // Pink
-  '#60A5FA', // Blue
-  '#4ADE80', // Mint Green
-  '#C084FC', // Lilac
-  '#FDBA74', // Peach / Orange
-  '#D8B4FE', // Lavender
-  '#38BDF8', // Cyan
+  '#F472B6', // Pastel Pink
+  '#FB7185', // Pastel Rose
+  '#FDBA74', // Pastel Peach
+  '#FBBF24', // Pastel Amber
+  '#4ADE80', // Pastel Mint Green
+  '#34D399', // Pastel Emerald
+  '#2DD4BF', // Pastel Teal
+  '#38BDF8', // Pastel Sky Cyan
+  '#60A5FA', // Pastel Soft Blue
+  '#818CF8', // Pastel Indigo
+  '#A78BFA', // Pastel Violet
+  '#C084FC', // Pastel Lilac
+  '#D8B4FE', // Pastel Lavender
+  '#94A3B8', // Pastel Slate Gray
 ];
 
 export const ExpenseSettings: React.FC = () => {
@@ -166,6 +192,15 @@ export const ExpenseSettings: React.FC = () => {
   // ── Glitch-free Animated Values for Category Modal ──
   const categoryTranslateY = useRef(new Animated.Value(screenHeight)).current;
   const categoryBackdropOpacity = useRef(new Animated.Value(0)).current;
+
+  // Settings Cards Animated Values
+  const animHeader = useRef(new Animated.Value(1)).current;
+  const animAppearance = useRef(new Animated.Value(1)).current;
+  const animCurrency = useRef(new Animated.Value(1)).current;
+  const animCategories = useRef(new Animated.Value(1)).current;
+  const animBudget = useRef(new Animated.Value(1)).current;
+  const animData = useRef(new Animated.Value(1)).current;
+  const animProfile = useRef(new Animated.Value(1)).current;
 
   const currentCurrency = useMemo(() => {
     return (
@@ -474,12 +509,42 @@ export const ExpenseSettings: React.FC = () => {
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
-        <View style={styles.headerContainer}>
+        <Animated.View
+          style={[
+            styles.headerContainer,
+            {
+              opacity: animHeader,
+              transform: [
+                {
+                  translateY: animHeader.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [12, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
           <AppText style={styles.headerTitle}>SETTINGS</AppText>
-        </View>
+        </Animated.View>
 
         {/* 1. Appearance Card */}
-        <View style={styles.cardContainer}>
+        <Animated.View
+          style={[
+            styles.cardContainer,
+            {
+              opacity: animAppearance,
+              transform: [
+                {
+                  translateY: animAppearance.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [14, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
           <AppText style={styles.cardTitle}>APPEARANCE</AppText>
           <View style={styles.themeGrid}>
             {themeOptions.map((opt) => {
@@ -505,30 +570,59 @@ export const ExpenseSettings: React.FC = () => {
               );
             })}
           </View>
-        </View>
+        </Animated.View>
 
         {/* 2. Currency Card */}
-        <TouchableOpacity
-          style={styles.cardContainer}
-          activeOpacity={0.7}
-          onPress={openCurrencyModal}
+        <Animated.View
+          style={{
+            opacity: animCurrency,
+            transform: [
+              {
+                translateY: animCurrency.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [14, 0],
+                }),
+              },
+            ],
+          }}
         >
-          <View style={styles.cardRowBetween}>
-            <View>
-              <AppText style={styles.cardTitle}>CURRENCY</AppText>
-              <AppText style={styles.settingMainValue}>
-                {currentCurrency.symbol} {currentCurrency.code} — {currentCurrency.name}
-              </AppText>
-              <AppText style={styles.settingSubValue}>
-                Preview: {currentCurrency.symbol}12,345
-              </AppText>
+          <TouchableOpacity
+            style={styles.cardContainer}
+            activeOpacity={0.7}
+            onPress={openCurrencyModal}
+          >
+            <View style={styles.cardRowBetween}>
+              <View>
+                <AppText style={styles.cardTitle}>CURRENCY</AppText>
+                <AppText style={styles.settingMainValue}>
+                  {currentCurrency.symbol} {currentCurrency.code} — {currentCurrency.name}
+                </AppText>
+                <AppText style={styles.settingSubValue}>
+                  Preview: {currentCurrency.symbol}12,345
+                </AppText>
+              </View>
+              <ChevronRight size={18} color={expenseColors.textSubtle} />
             </View>
-            <ChevronRight size={18} color={expenseColors.textSubtle} />
-          </View>
-        </TouchableOpacity>
+          </TouchableOpacity>
+        </Animated.View>
 
         {/* 3. Compact Categories Card (Reduced Height, Compact Spacing, Hold & Drag) */}
-        <View style={styles.categoriesCard}>
+        <Animated.View
+          style={[
+            styles.categoriesCard,
+            {
+              opacity: animCategories,
+              transform: [
+                {
+                  translateY: animCategories.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [16, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
           <View style={styles.categoriesCardHeader}>
             <View>
               <AppText style={styles.cardTitleCompact}>CATEGORIES</AppText>
@@ -576,52 +670,95 @@ export const ExpenseSettings: React.FC = () => {
               setIsDraggingAny={setIsDraggingAnyTile}
             />
           </View>
-        </View>
+        </Animated.View>
 
         {/* 4. Monthly Budget Card */}
-        <TouchableOpacity
-          style={styles.cardContainer}
-          activeOpacity={0.7}
-          onPress={() => router.push('/settings/budget')}
+        <Animated.View
+          style={{
+            opacity: animBudget,
+            transform: [
+              {
+                translateY: animBudget.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [16, 0],
+                }),
+              },
+            ],
+          }}
         >
-          <View style={styles.cardRowBetween}>
-            <View>
-              <AppText style={styles.cardTitle}>MONTHLY BUDGET</AppText>
-              <AppText style={styles.settingMainValue}>
-                {`${currentCurrency.symbol}${monthlyBudget.toLocaleString('en-IN')}`}
-              </AppText>
-              <AppText style={styles.settingSubValue}>
-                {customBudgetCount} {customBudgetCount === 1 ? 'category' : 'categories'} with custom budgets
-              </AppText>
-            </View>
-            <ChevronRight size={18} color={expenseColors.textSubtle} />
-          </View>
-        </TouchableOpacity>
-
-        {/* 5. Your Data Card */}
-        <TouchableOpacity
-          style={styles.cardContainer}
-          activeOpacity={0.7}
-          onPress={() => router.push('/settings/data')}
-        >
-          <View style={styles.cardRowBetween}>
-            <View style={styles.iconRowLeft}>
-              <View style={styles.orangeIconCircle}>
-                <Lock size={16} color={expenseColors.accentPeach} />
-              </View>
+          <TouchableOpacity
+            style={styles.cardContainer}
+            activeOpacity={0.7}
+            onPress={() => router.push('/settings/budget')}
+          >
+            <View style={styles.cardRowBetween}>
               <View>
-                <AppText style={styles.cardTitle}>YOUR DATA</AppText>
+                <AppText style={styles.cardTitle}>MONTHLY BUDGET</AppText>
+                <AppText style={styles.settingMainValue}>
+                  {`${currentCurrency.symbol}${monthlyBudget.toLocaleString('en-IN')}`}
+                </AppText>
                 <AppText style={styles.settingSubValue}>
-                  How your data is stored and secured
+                  {customBudgetCount} {customBudgetCount === 1 ? 'category' : 'categories'} with custom budgets
                 </AppText>
               </View>
+              <ChevronRight size={18} color={expenseColors.textSubtle} />
             </View>
-            <ChevronRight size={18} color={expenseColors.textSubtle} />
-          </View>
-        </TouchableOpacity>
+          </TouchableOpacity>
+        </Animated.View>
+
+        {/* 5. Your Data Card */}
+        <Animated.View
+          style={{
+            opacity: animData,
+            transform: [
+              {
+                translateY: animData.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [16, 0],
+                }),
+              },
+            ],
+          }}
+        >
+          <TouchableOpacity
+            style={styles.cardContainer}
+            activeOpacity={0.7}
+            onPress={() => router.push('/settings/data')}
+          >
+            <View style={styles.cardRowBetween}>
+              <View style={styles.iconRowLeft}>
+                <View style={styles.orangeIconCircle}>
+                  <Lock size={16} color={expenseColors.accentPeach} />
+                </View>
+                <View>
+                  <AppText style={styles.cardTitle}>YOUR DATA</AppText>
+                  <AppText style={styles.settingSubValue}>
+                    How your data is stored and secured
+                  </AppText>
+                </View>
+              </View>
+              <ChevronRight size={18} color={expenseColors.textSubtle} />
+            </View>
+          </TouchableOpacity>
+        </Animated.View>
 
         {/* 7. Profile Card */}
-        <View style={styles.cardContainer}>
+        <Animated.View
+          style={[
+            styles.cardContainer,
+            {
+              opacity: animProfile,
+              transform: [
+                {
+                  translateY: animProfile.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [18, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
           <AppText style={styles.cardTitle}>PROFILE</AppText>
 
           <View style={styles.profileRow}>
@@ -649,7 +786,7 @@ export const ExpenseSettings: React.FC = () => {
           <TouchableOpacity style={styles.destructiveActionRow} onPress={handleDeleteAccount}>
             <AppText style={styles.destructiveActionText}>Delete Account</AppText>
           </TouchableOpacity>
-        </View>
+        </Animated.View>
       </ScrollView>
 
       {/* ══════════════════════════════════════════════
@@ -845,14 +982,32 @@ export const ExpenseSettings: React.FC = () => {
                 placeholder="Search currency..."
                 placeholderTextColor="#5A5E6D"
                 style={styles.searchInput}
+                returnKeyType="done"
+                blurOnSubmit={true}
+                onSubmitEditing={() => Keyboard.dismiss()}
               />
+              {currencySearch.length > 0 && (
+                <TouchableOpacity
+                  onPress={() => {
+                    Haptics.selectionAsync().catch(() => {});
+                    setCurrencySearch('');
+                  }}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  style={{ padding: 4 }}
+                >
+                  <X size={15} color="#8E919D" />
+                </TouchableOpacity>
+              )}
             </View>
 
             {/* Currencies List */}
             <ScrollView
               showsVerticalScrollIndicator={false}
-              contentContainerStyle={{ paddingBottom: insets.bottom + 24, backgroundColor: '#1A1C24' }}
-              style={{ backgroundColor: '#1A1C24' }}
+              keyboardDismissMode="on-drag"
+              keyboardShouldPersistTaps="handled"
+              onScrollBeginDrag={() => Keyboard.dismiss()}
+              contentContainerStyle={{ paddingBottom: insets.bottom + 24, backgroundColor: '#1A1D23' }}
+              style={{ backgroundColor: '#1A1D23' }}
             >
               {filteredCurrencies.map((item) => {
                 const isSelected = currencyCode === item.code;
@@ -1275,7 +1430,7 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     padding: 18,
     marginHorizontal: 16,
-    marginBottom: 14,
+    marginBottom: 16,
     borderWidth: 1,
     borderColor: expenseColors.borderCard,
   },
@@ -1285,7 +1440,7 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     fontWeight: '800',
     letterSpacing: 1.5,
-    marginBottom: 8,
+    marginBottom: 10,
   },
   cardRowBetween: {
     flexDirection: 'row',
@@ -1311,7 +1466,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 20,
     fontWeight: '700',
-    marginBottom: 2,
+    marginBottom: 4,
   },
   settingSubValue: {
     color: expenseColors.textMuted,
@@ -1379,10 +1534,10 @@ const styles = StyleSheet.create({
   categoriesCard: {
     backgroundColor: expenseColors.bgCard,
     borderRadius: 20,
-    paddingVertical: 14,
+    paddingVertical: 16,
     paddingHorizontal: 14,
     marginHorizontal: 16,
-    marginBottom: 14,
+    marginBottom: 16,
     borderWidth: 1,
     borderColor: expenseColors.borderCard,
   },
@@ -1390,7 +1545,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 10,
+    marginBottom: 12,
   },
   cardTitleCompact: {
     color: expenseColors.textPrimary,
@@ -1540,7 +1695,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.65)',
   },
   modalSheet: {
-    backgroundColor: '#1A1C24',
+    backgroundColor: '#1A1D23',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingHorizontal: 20,

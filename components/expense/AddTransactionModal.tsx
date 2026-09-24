@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -9,6 +9,7 @@ import {
   Switch,
   Platform,
   KeyboardAvoidingView,
+  Keyboard,
   Alert,
 } from 'react-native';
 import {
@@ -28,8 +29,18 @@ import {
   Zap,
   Sparkles,
   Trash2,
+  Briefcase,
+  Laptop,
+  TrendingUp,
+  Gift,
+  Home,
+  RefreshCw,
+  Coins,
+  Shield,
+  PiggyBank,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
+import { MenuAction } from '@expo/ui/community/menu';
 import { AppText, NativeLiquidMenu } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
 import { useSubscriptionStore } from '@/store/useSubscriptionStore';
@@ -38,7 +49,7 @@ import { CategoryIcon, getCategoryBgColor } from './CategoryIcon';
 import { DatePickerModal } from './DatePickerModal';
 import { EditAccountModal } from './EditAccountModal';
 import { format } from 'date-fns';
-import { ExpenseAccount, QuickExpensePreset } from '@/types/expense';
+import { ExpenseAccount, ExpenseCategory, QuickExpensePreset, SavingsVault } from '@/types/expense';
 
 interface AddTransactionModalProps {
   visible: boolean;
@@ -50,6 +61,16 @@ type DebtType = 'lend' | 'borrow';
 type BillingCycle = 'monthly' | 'yearly';
 
 const SUGGESTED_TAGS = ['🌴 Goa Trip', '🎉 Night Out', '💍 Wedding', '☕ Work Lunch', '🚗 Road Trip'];
+
+export const INCOME_CATEGORIES: ExpenseCategory[] = [
+  { id: 'cat_salary', name: 'Salary', emoji: '💼', color: '#34D399', iconName: 'Briefcase' },
+  { id: 'cat_freelance', name: 'Freelance', emoji: '💻', color: '#60A5FA', iconName: 'Laptop' },
+  { id: 'cat_invest', name: 'Investments', emoji: '📈', color: '#FBBF24', iconName: 'TrendingUp' },
+  { id: 'cat_bonus', name: 'Bonus', emoji: '🎁', color: '#F472B6', iconName: 'Gift' },
+  { id: 'cat_rental', name: 'Rental', emoji: '🏠', color: '#A78BFA', iconName: 'Home' },
+  { id: 'cat_refund', name: 'Refund', emoji: '🔄', color: '#38BDF8', iconName: 'RefreshCw' },
+  { id: 'cat_other_inc', name: 'Other Income', emoji: '💰', color: '#818CF8', iconName: 'Coins' },
+];
 
 const VENDOR_CATEGORY_MAP: Record<string, string> = {
   // Food & Dining
@@ -196,7 +217,12 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   const {
     categories,
     accounts,
+    savingsVaults,
+    eventFolders,
+    addEventFolder,
     addTransaction,
+    depositToVault,
+    addSavingsVault,
     currencySymbol,
     quickPresets,
     addQuickPreset,
@@ -210,6 +236,9 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   const [amount, setAmount] = useState<string>('');
   const [merchant, setMerchant] = useState<string>('');
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
+  const [selectedGoalId, setSelectedGoalId] = useState<string>('');
+  const [goalAllocationAmount, setGoalAllocationAmount] = useState<string>('');
+  const [selectedFolderId, setSelectedFolderId] = useState<string>('');
   const [toAccountId, setToAccountId] = useState<string>(
     accounts[1]?.id || accounts[0]?.id || 'acc_slice'
   );
@@ -219,10 +248,12 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   const [selectedTag, setSelectedTag] = useState<string>('');
   const [customTagInput, setCustomTagInput] = useState<string>('');
 
-  // Group Split inside Expense Mode
+  // Multi-Friend Split in Expense Mode
   const [isSplitEnabled, setIsSplitEnabled] = useState<boolean>(false);
   const [yourShare, setYourShare] = useState<string>('');
-  const [friendNames, setFriendNames] = useState<string>('');
+  const [splitFriends, setSplitFriends] = useState<Array<{ id: string; name: string; amount: string }>>([
+    { id: 'f_1', name: '', amount: '' },
+  ]);
 
   // Debt Person Name
   const [debtPerson, setDebtPerson] = useState<string>('');
@@ -235,6 +266,18 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
     d.setMonth(d.getMonth() + 1);
     return d;
   });
+
+  // Goal creation sheet
+  const [showNewGoalSheet, setShowNewGoalSheet] = useState<boolean>(false);
+  const [inlineGoalName, setInlineGoalName] = useState<string>('');
+  const [inlineGoalTarget, setInlineGoalTarget] = useState<string>('');
+  const [inlineGoalEmoji, setInlineGoalEmoji] = useState<string>('🛡️');
+  const [inlineGoalColor, setInlineGoalColor] = useState<string>('#34D399');
+
+  // Event Folder creation sheet
+  const [showNewFolderModal, setShowNewFolderModal] = useState<boolean>(false);
+  const [newFolderName, setNewFolderName] = useState<string>('');
+  const [newFolderEmoji, setNewFolderEmoji] = useState<string>('🌴');
 
   // Quick Preset creation modal
   const [showAddPresetModal, setShowAddPresetModal] = useState<boolean>(false);
@@ -251,10 +294,63 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   const [showTxDatePicker, setShowTxDatePicker] = useState<boolean>(false);
   const [showNextBillDatePicker, setShowNextBillDatePicker] = useState<boolean>(false);
 
+  // Reset all fields whenever the modal is freshly opened
+  useEffect(() => {
+    if (visible) {
+      setTabMode('expense');
+      setDebtType('lend');
+      setAmount('');
+      setMerchant('');
+      setSelectedAccountId('');
+      setSelectedGoalId('');
+      setGoalAllocationAmount('');
+      setSelectedFolderId('');
+      setSelectedCategoryId('');
+      setTxDate(new Date(2026, 8, 23));
+      setNote('');
+      setSelectedTag('');
+      setCustomTagInput('');
+      setIsSplitEnabled(false);
+      setYourShare('');
+      setSplitFriends([{ id: `f_${Date.now()}`, name: '', amount: '' }]);
+      setDebtPerson('');
+      setIsSubscription(false);
+    }
+  }, [visible]);
+
+  const scrollViewRef = useRef<ScrollView>(null);
+  const [keyboardHeight, setKeyboardHeight] = useState<number>(0);
+
+  const handleInputFocus = (offset: number) => {
+    setTimeout(() => {
+      scrollViewRef.current?.scrollTo({ y: offset, animated: true });
+    }, 120);
+  };
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      (e) => {
+        setKeyboardHeight(e.endCoordinates.height);
+      }
+    );
+    const hideSub = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => {
+        setKeyboardHeight(0);
+      }
+    );
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
   // Auto-calculate friend share
   const numAmount = parseFloat(amount) || 0;
   const numYourShare = parseFloat(yourShare) || (numAmount > 0 ? Math.round(numAmount / 2) : 0);
-  const friendsShare = Math.max(0, numAmount - numYourShare);
+  const totalFriendsEntered = splitFriends.reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0);
+  const friendsShare = totalFriendsEntered > 0 ? totalFriendsEntered : Math.max(0, numAmount - numYourShare);
 
   const handleAmountChange = (text: string) => {
     setAmount(text);
@@ -262,6 +358,27 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
     if (!isNaN(parsed) && parsed > 0 && isSplitEnabled && !yourShare) {
       setYourShare(Math.round(parsed / 2).toString());
     }
+  };
+
+  const handleSplitRemainingEqually = () => {
+    if (numAmount <= 0) return;
+    const remainingForFriends = Math.max(0, numAmount - (parseFloat(yourShare) || 0));
+    const activeFriends = splitFriends.length;
+    if (activeFriends === 0) return;
+    const perFriend = (remainingForFriends / activeFriends).toFixed(0);
+    setSplitFriends(splitFriends.map((f) => ({ ...f, amount: perFriend })));
+    Haptics.selectionAsync().catch(() => {});
+  };
+
+  const handleAddSplitFriend = () => {
+    setSplitFriends([...splitFriends, { id: `f_${Date.now()}_${Math.random().toString(36).substr(2, 3)}`, name: '', amount: '' }]);
+    Haptics.selectionAsync().catch(() => {});
+  };
+
+  const handleRemoveSplitFriend = (id: string) => {
+    if (splitFriends.length <= 1) return;
+    setSplitFriends(splitFriends.filter((f) => f.id !== id));
+    Haptics.selectionAsync().catch(() => {});
   };
 
   const handleMerchantChange = (text: string) => {
@@ -287,6 +404,21 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
       setSelectedAccountId(preset.accountId);
     }
     setMerchant(preset.note || preset.label);
+  };
+
+  const handleCreateFolder = () => {
+    if (!newFolderName.trim()) {
+      Alert.alert('Invalid Name', 'Please enter a folder name.');
+      return;
+    }
+    const created = addEventFolder({
+      name: newFolderName.trim(),
+      emoji: newFolderEmoji || '📁',
+    });
+    setSelectedFolderId(created.id);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    setShowNewFolderModal(false);
+    setNewFolderName('');
   };
 
   const handleCreatePreset = () => {
@@ -343,7 +475,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
       return;
     }
 
-    const finalTag = customTagInput.trim() ? customTagInput.trim() : selectedTag;
+    const selectedFolderObj = eventFolders.find((f) => f.id === selectedFolderId);
+    const finalTag = selectedFolderObj?.name || (customTagInput.trim() ? customTagInput.trim() : selectedTag);
     const finalNote = merchant.trim() ? `${merchant.trim()}${note.trim() ? ` - ${note.trim()}` : ''}` : note.trim();
 
     if (tabMode === 'transfer') {
@@ -370,19 +503,34 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
       });
     } else if (tabMode === 'expense') {
       if (isSplitEnabled) {
+        const mappedFriends = splitFriends
+          .filter((f) => f.name.trim() && (parseFloat(f.amount) || 0) > 0)
+          .map((f) => ({
+            id: f.id,
+            name: f.name.trim(),
+            amount: parseFloat(f.amount) || 0,
+            settled: false,
+          }));
+
+        const friendNamesStr = mappedFriends.map((f) => f.name).join(', ') || 'Friends';
+        const totalFriendsSum = mappedFriends.reduce((sum, f) => sum + f.amount, 0);
+
         addTransaction({
           amount: numAmount,
           type: 'expense',
           categoryId: selectedCategoryId,
           accountId: selectedAccountId,
+          folderId: selectedFolderId || undefined,
+          folderName: selectedFolderObj?.name || undefined,
           date: format(txDate, 'yyyy-MM-dd'),
-          note: finalNote || `Split bill with ${friendNames || 'friends'}`,
+          note: finalNote || `Split with ${friendNamesStr}`,
           tag: finalTag || undefined,
           split: {
             totalPaid: numAmount,
             yourShare: numYourShare,
-            friendsShare: friendsShare,
-            friendNames: friendNames.trim() || undefined,
+            friendsShare: totalFriendsSum > 0 ? totalFriendsSum : friendsShare,
+            friendNames: friendNamesStr,
+            friends: mappedFriends.length > 0 ? mappedFriends : undefined,
             settled: false,
           },
         });
@@ -392,6 +540,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
           type: 'expense',
           categoryId: selectedCategoryId,
           accountId: selectedAccountId,
+          folderId: selectedFolderId || undefined,
+          folderName: selectedFolderObj?.name || undefined,
           date: format(txDate, 'yyyy-MM-dd'),
           note: finalNote || undefined,
           tag: finalTag || undefined,
@@ -418,19 +568,25 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
       addTransaction({
         amount: numAmount,
         type: 'income',
-        categoryId: selectedCategoryId,
-        accountId: selectedAccountId,
+        categoryId: selectedCategoryId || 'cat_income',
+        accountId: selectedAccountId || accounts[0]?.id || 'acc_primary',
         date: format(txDate, 'yyyy-MM-dd'),
         note: finalNote || 'Income',
         tag: finalTag || undefined,
       });
+
+      if (selectedGoalId) {
+        const alloc = parseFloat(goalAllocationAmount) || numAmount;
+        depositToVault(selectedGoalId, Math.min(alloc, numAmount), selectedAccountId || accounts[0]?.id);
+      }
     }
 
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     onClose();
   };
 
-  const selectedCatObj = categories.find((c) => c.id === selectedCategoryId) || null;
+  const activeCategories = tabMode === 'income' ? INCOME_CATEGORIES : categories;
+  const selectedCatObj = activeCategories.find((c) => c.id === selectedCategoryId) || null;
   const fromAccObj = accounts.find((a) => a.id === selectedAccountId) || null;
   const toAccObj = accounts.find((a) => a.id === toAccountId) || accounts[1] || accounts[0];
   const isCreditCardPayment = toAccObj?.statusType === 'due' || toAccObj?.type === 'credit';
@@ -444,29 +600,46 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
     !primaryCategories.some((p) => p.id === c.id)
   );
 
-  const categoryActions = [
-    ...primaryCategories.map((cat) => ({
-      id: cat.id,
-      title: `${cat.name}${cat.emoji ? ` ${cat.emoji}` : ''}`,
-      image: getCategorySfSymbol(cat.id, cat.name) as any,
-      state: (selectedCategoryId === cat.id ? 'on' : 'off') as 'on' | 'off',
-    })),
-    ...(otherCategories.length > 0
-      ? [
-          {
-            id: '__MORE_CATEGORIES__',
-            title: 'More Categories...',
-            image: 'ellipsis.circle' as any,
-            subactions: otherCategories.map((cat) => ({
-              id: cat.id,
-              title: `${cat.name}${cat.emoji ? ` ${cat.emoji}` : ''}`,
-              image: getCategorySfSymbol(cat.id, cat.name) as any,
-              state: (selectedCategoryId === cat.id ? 'on' : 'off') as 'on' | 'off',
-            })),
-          },
-        ]
-      : []),
-  ];
+  const categoryActions = tabMode === 'income'
+    ? INCOME_CATEGORIES.map((cat) => ({
+        id: cat.id,
+        title: `${cat.name}${cat.emoji ? ` ${cat.emoji}` : ''}`,
+        image: (cat.id === 'cat_salary'
+          ? 'briefcase.fill'
+          : cat.id === 'cat_freelance'
+          ? 'laptopcomputer'
+          : cat.id === 'cat_invest'
+          ? 'chart.line.uptrend.xyaxis'
+          : cat.id === 'cat_bonus'
+          ? 'gift.fill'
+          : cat.id === 'cat_rental'
+          ? 'house.fill'
+          : 'banknote.fill') as any,
+        state: (selectedCategoryId === cat.id ? 'on' : 'off') as 'on' | 'off',
+      }))
+    : [
+        ...primaryCategories.map((cat) => ({
+          id: cat.id,
+          title: `${cat.name}${cat.emoji ? ` ${cat.emoji}` : ''}`,
+          image: getCategorySfSymbol(cat.id, cat.name) as any,
+          state: (selectedCategoryId === cat.id ? 'on' : 'off') as 'on' | 'off',
+        })),
+        ...(otherCategories.length > 0
+          ? [
+              {
+                id: '__MORE_CATEGORIES__',
+                title: 'More Categories...',
+                image: 'ellipsis.circle' as any,
+                subactions: otherCategories.map((cat) => ({
+                  id: cat.id,
+                  title: `${cat.name}${cat.emoji ? ` ${cat.emoji}` : ''}`,
+                  image: getCategorySfSymbol(cat.id, cat.name) as any,
+                  state: (selectedCategoryId === cat.id ? 'on' : 'off') as 'on' | 'off',
+                })),
+              },
+            ]
+          : []),
+      ];
 
   const accountActions = [
     ...accounts.map((acc) => ({
@@ -482,7 +655,35 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
     },
   ];
 
-  const modeThemeColor = expenseColors.accentPeach; // Consistent warm peach aesthetic across all modes
+  const sortedFolders = useMemo(
+    () => [...(eventFolders || [])].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+    [eventFolders]
+  );
+  const selectedFolderObj = eventFolders.find((f) => f.id === selectedFolderId);
+
+  const folderActions: MenuAction[] = [
+    { id: '', title: 'None (Regular Daily Expense)', image: 'folder' as any },
+    ...sortedFolders.map((f) => ({
+      id: f.id,
+      title: `${f.emoji ? `${f.emoji} ` : ''}${f.name}`,
+      image: 'folder.fill' as any,
+      state: (selectedFolderId === f.id ? 'on' : 'off') as 'on' | 'off',
+    })),
+    { id: '__NEW_FOLDER__', title: '+ Create New Event Folder...', image: 'plus.circle.fill' as any },
+  ];
+
+  const goalActions: MenuAction[] = [
+    { id: '', title: 'None (Keep 100% in Bank Account)', image: 'xmark.circle' as any },
+    ...savingsVaults.map((vault) => ({
+      id: vault.id,
+      title: `${vault.emoji} ${vault.name} • Saved: ${sym}${vault.currentAmount.toLocaleString('en-IN')} / ${sym}${vault.targetAmount.toLocaleString('en-IN')}`,
+      image: 'shield.fill' as any,
+      state: (selectedGoalId === vault.id ? 'on' : 'off') as 'on' | 'off',
+    })),
+    { id: '__CREATE_GOAL__', title: '+ Create New Goal...', image: 'plus.circle.fill' as any },
+  ];
+
+  const modeThemeColor = expenseColors.accentPeach;
 
   return (
     <Modal
@@ -493,7 +694,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
     >
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 0}
         style={styles.container}
       >
         {/* iOS Drag Handle */}
@@ -513,11 +714,17 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
         </View>
 
         <ScrollView
+          ref={scrollViewRef}
           style={styles.scroll}
-          contentContainerStyle={[styles.scrollContent, { paddingBottom: 100 }]}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingBottom: Platform.OS === 'ios' ? 32 : 24 },
+          ]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
+          keyboardDismissMode="interactive"
+          bounces={true}
+          overScrollMode="never"
         >
           {/* Segmented Type Control: 4 Clean Modes with Unified Peach Highlight */}
           <View style={styles.typeSegment}>
@@ -730,6 +937,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                 placeholderTextColor="#555866"
                 value={debtPerson}
                 onChangeText={setDebtPerson}
+                onFocus={() => handleInputFocus(80)}
               />
             </View>
           )}
@@ -758,6 +966,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                 placeholderTextColor="#555866"
                 value={merchant}
                 onChangeText={handleMerchantChange}
+                onFocus={() => handleInputFocus(100)}
               />
             </View>
           )}
@@ -888,65 +1097,185 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             </View>
           ) : null}
 
-          {/* PROMINENT TRANSACTION DATE CARD */}
-          <TouchableOpacity
-            style={styles.dateCard}
-            activeOpacity={0.8}
-            onPress={() => setShowTxDatePicker(true)}
-          >
-            <View style={styles.dateCardLeft}>
-              <View style={styles.dateIconWrap}>
-                <CalendarIcon size={18} color={expenseColors.accentPeach} />
-              </View>
-              <View>
-                <AppText style={styles.dateCardSub}>TRANSACTION DATE</AppText>
-                <AppText style={styles.dateCardMain}>
-                  {format(txDate, 'EEEE, dd MMMM yyyy')}
-                </AppText>
-              </View>
-            </View>
-            <View style={styles.dateChangeBadge}>
-              <AppText style={styles.dateChangeBadgeText}>Change</AppText>
-            </View>
-          </TouchableOpacity>
-
-          {/* TRIP / EVENT TAG / FOLDER BUNDLE */}
-          {tabMode !== 'transfer' && (
+          {/* ── EVENT / TRIP FOLDER SELECTOR (Only in Expense Mode, Hidden in Debt Mode) ── */}
+          {tabMode === 'expense' && (
             <View style={styles.section}>
-              <AppText style={styles.label}>TRIP / EVENT FOLDER (OPTIONAL)</AppText>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.tagScrollRow}
-              >
-                {SUGGESTED_TAGS.map((tag) => {
-                  const isSelected = selectedTag === tag;
-                  return (
-                    <TouchableOpacity
-                      key={tag}
-                      style={[styles.tagChip, isSelected && styles.tagChipActive]}
-                      onPress={() => {
-                        setSelectedTag(isSelected ? '' : tag);
-                        setCustomTagInput('');
-                      }}
-                    >
-                      <AppText style={[styles.tagChipText, isSelected && styles.tagChipTextActive]}>
-                        {tag}
-                      </AppText>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-              <TextInput
-                style={[styles.textInput, { marginTop: 8 }]}
-                placeholder="Or type custom event/trip name..."
-                placeholderTextColor="#555866"
-                value={customTagInput}
-                onChangeText={(text) => {
-                  setCustomTagInput(text);
-                  setSelectedTag('');
+              <AppText style={styles.label}>EVENT / TRIP FOLDER (OPTIONAL)</AppText>
+              <NativeLiquidMenu
+                title="Event / Trip Folder"
+                actions={folderActions}
+                onSelect={(folderId) => {
+                  if (folderId === '__NEW_FOLDER__') {
+                    setShowNewFolderModal(true);
+                  } else {
+                    Haptics.selectionAsync().catch(() => {});
+                    setSelectedFolderId(folderId);
+                  }
                 }}
-              />
+                style={{ width: '100%' }}
+              >
+                <View style={styles.dropdownTrigger}>
+                  <View style={styles.dropdownTriggerLeft}>
+                    <AppText style={styles.dropdownTriggerValue} numberOfLines={1}>
+                      {selectedFolderObj
+                        ? `${selectedFolderObj.emoji ? `${selectedFolderObj.emoji} ` : ''}${selectedFolderObj.name}`
+                        : 'None (Regular Daily Expense)'}
+                    </AppText>
+                  </View>
+                  <ChevronDown size={15} color="#7E8394" />
+                </View>
+              </NativeLiquidMenu>
+            </View>
+          )}
+
+          {/* ── MULTI-FRIEND SPLIT BILL (Expense Mode) ── */}
+          {tabMode === 'expense' && (
+            <View style={styles.splitBillContainer}>
+              <View style={styles.splitToggleRow}>
+                <View style={{ flex: 1 }}>
+                  <AppText style={styles.splitToggleTitle}>SPLIT WITH FRIENDS</AppText>
+                  <AppText style={styles.splitToggleSubtitle}>
+                    I paid full bill, record friends' shares
+                  </AppText>
+                </View>
+                <Switch
+                  value={isSplitEnabled}
+                  onValueChange={(val) => {
+                    setIsSplitEnabled(val);
+                    if (val && !yourShare && numAmount > 0) {
+                      setYourShare(Math.round(numAmount / 2).toString());
+                    }
+                  }}
+                  trackColor={{ false: '#2B2E3D', true: expenseColors.accentPeach }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
+
+              {isSplitEnabled && (
+                <View style={styles.splitBody}>
+                  {/* Your Share Row */}
+                  <View style={styles.splitShareRow}>
+                    <AppText style={styles.splitShareLabel}>MY SHARE ({sym})</AppText>
+                    <TextInput
+                      style={styles.splitShareInput}
+                      placeholder="0"
+                      placeholderTextColor="#555866"
+                      keyboardType="numeric"
+                      value={yourShare}
+                      onChangeText={setYourShare}
+                      onFocus={() => handleInputFocus(220)}
+                    />
+                  </View>
+
+                  <View style={styles.splitFriendsHeader}>
+                    <AppText style={styles.splitFriendsLabel}>FRIENDS BREAKDOWN</AppText>
+                    <TouchableOpacity onPress={handleSplitRemainingEqually} style={styles.splitEquallyBtn}>
+                      <Zap size={11} color="#FF9D66" />
+                      <AppText style={styles.splitEquallyText}>Split Remaining Equally</AppText>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Friends List */}
+                  {splitFriends.map((friend, idx) => (
+                    <View key={friend.id} style={styles.splitFriendRow}>
+                      <TextInput
+                        style={styles.splitFriendNameInput}
+                        placeholder={`Friend ${idx + 1} Name`}
+                        placeholderTextColor="#555866"
+                        value={friend.name}
+                        onChangeText={(t) => {
+                          setSplitFriends(splitFriends.map((f) => f.id === friend.id ? { ...f, name: t } : f));
+                        }}
+                        onFocus={() => handleInputFocus(260 + idx * 40)}
+                      />
+                      <View style={styles.splitFriendAmtWrap}>
+                        <AppText style={styles.splitFriendAmtSym}>{sym}</AppText>
+                        <TextInput
+                          style={styles.splitFriendAmtInput}
+                          placeholder="0"
+                          placeholderTextColor="#555866"
+                          keyboardType="numeric"
+                          value={friend.amount}
+                          onChangeText={(t) => {
+                            setSplitFriends(splitFriends.map((f) => f.id === friend.id ? { ...f, amount: t } : f));
+                          }}
+                          onFocus={() => handleInputFocus(260 + idx * 40)}
+                        />
+                      </View>
+                      {splitFriends.length > 1 && (
+                        <TouchableOpacity
+                          onPress={() => handleRemoveSplitFriend(friend.id)}
+                          style={styles.splitFriendRemoveBtn}
+                        >
+                          <X size={14} color="#FF725E" />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  ))}
+
+                  {/* Add Friend Button */}
+                  <TouchableOpacity
+                    style={styles.addFriendRowBtn}
+                    onPress={handleAddSplitFriend}
+                    activeOpacity={0.7}
+                  >
+                    <Plus size={13} color="#FF9D66" strokeWidth={2.5} />
+                    <AppText style={styles.addFriendRowBtnText}>Add Another Friend</AppText>
+                  </TouchableOpacity>
+
+                  {/* Split Summary Pill */}
+                  <View style={styles.splitSummaryBox}>
+                    <AppText style={styles.splitSummaryText}>
+                      Total: {sym}{numAmount.toLocaleString('en-IN')}  •  My Share: {sym}{numYourShare.toLocaleString('en-IN')}  •  Friends: {sym}{friendsShare.toLocaleString('en-IN')}
+                    </AppText>
+                  </View>
+                </View>
+              )}
+            </View>
+          )}
+
+          {/* ALLOCATE TO SAVINGS GOAL (For Income Mode) */}
+          {tabMode === 'income' && (
+            <View style={styles.section}>
+              <AppText style={styles.label}>ALLOCATE TO SAVINGS GOAL (OPTIONAL)</AppText>
+              <NativeLiquidMenu
+                title="Savings Goal"
+                actions={goalActions}
+                onSelect={(goalId) => {
+                  if (goalId === '__CREATE_GOAL__') {
+                    setShowNewGoalSheet(true);
+                  } else {
+                    Haptics.selectionAsync().catch(() => {});
+                    setSelectedGoalId(goalId);
+                  }
+                }}
+                style={{ width: '100%' }}
+              >
+                <View style={styles.dropdownTrigger}>
+                  <View style={styles.dropdownTriggerLeft}>
+                    <AppText style={styles.dropdownTriggerValue} numberOfLines={1}>
+                      {selectedGoalId
+                        ? `${savingsVaults.find((v) => v.id === selectedGoalId)?.emoji} ${savingsVaults.find((v) => v.id === selectedGoalId)?.name}`
+                        : 'None (Keep 100% in Bank as Operating Cash)'}
+                    </AppText>
+                  </View>
+                  <ChevronDown size={15} color="#7E8394" />
+                </View>
+              </NativeLiquidMenu>
+
+              {selectedGoalId !== '' && (
+                <View style={{ marginTop: 10 }}>
+                  <AppText style={styles.label}>SAVE AMOUNT TO GOAL (DEFAULT: 100%)</AppText>
+                  <TextInput
+                    style={styles.textInput}
+                    placeholder={`e.g. ${amount || '3000'}`}
+                    placeholderTextColor="#555866"
+                    keyboardType="numeric"
+                    value={goalAllocationAmount}
+                    onChangeText={setGoalAllocationAmount}
+                  />
+                </View>
+              )}
             </View>
           )}
 
@@ -959,6 +1288,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
               placeholderTextColor="#555866"
               value={note}
               onChangeText={setNote}
+              onFocus={() => handleInputFocus(180)}
             />
           </View>
 
@@ -1253,6 +1583,328 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
           account={null}
           onClose={() => setShowAddAccountModal(false)}
         />
+
+        {/* Inline Create Goal Sheet Modal */}
+        <Modal
+          visible={showNewGoalSheet}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setShowNewGoalSheet(false)}
+        >
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.75)', justifyContent: 'flex-end' }}
+          >
+            <TouchableOpacity
+              style={StyleSheet.absoluteFill}
+              activeOpacity={1}
+              onPress={() => setShowNewGoalSheet(false)}
+            />
+            <View
+              style={{
+                backgroundColor: '#1A1D23',
+                borderTopLeftRadius: 24,
+                borderTopRightRadius: 24,
+                padding: 20,
+                paddingBottom: Platform.OS === 'ios' ? 36 : 24,
+                borderTopWidth: 1,
+                borderTopColor: 'rgba(255, 255, 255, 0.08)',
+              }}
+            >
+              <View
+                style={{
+                  width: 36,
+                  height: 4,
+                  borderRadius: 2,
+                  backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                  alignSelf: 'center',
+                  marginBottom: 16,
+                }}
+              />
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: 16,
+                }}
+              >
+                <AppText style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '800' }}>
+                  Create Savings Goal
+                </AppText>
+                <TouchableOpacity
+                  onPress={() => setShowNewGoalSheet(false)}
+                  style={{
+                    width: 30,
+                    height: 30,
+                    borderRadius: 15,
+                    backgroundColor: '#202330',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <X size={16} color="#A0A5B5" />
+                </TouchableOpacity>
+              </View>
+
+              <View style={{ marginBottom: 14 }}>
+                <AppText
+                  style={{
+                    color: '#7E8394',
+                    fontSize: 10,
+                    fontWeight: '800',
+                    letterSpacing: 0.8,
+                    marginBottom: 6,
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  GOAL NAME
+                </AppText>
+                <TextInput
+                  style={{
+                    backgroundColor: '#202330',
+                    borderRadius: 14,
+                    paddingHorizontal: 14,
+                    height: 48,
+                    color: '#FFFFFF',
+                    fontSize: 14,
+                    fontWeight: '600',
+                    borderWidth: 1,
+                    borderColor: 'rgba(255, 255, 255, 0.08)',
+                  }}
+                  placeholder="e.g. Emergency Fund, Goa Trip, MacBook"
+                  placeholderTextColor="#555866"
+                  value={inlineGoalName}
+                  onChangeText={setInlineGoalName}
+                />
+              </View>
+
+              <View style={{ marginBottom: 16 }}>
+                <AppText
+                  style={{
+                    color: '#7E8394',
+                    fontSize: 10,
+                    fontWeight: '800',
+                    letterSpacing: 0.8,
+                    marginBottom: 6,
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  TARGET AMOUNT ({sym})
+                </AppText>
+                <TextInput
+                  style={{
+                    backgroundColor: '#202330',
+                    borderRadius: 14,
+                    paddingHorizontal: 14,
+                    height: 48,
+                    color: '#FFFFFF',
+                    fontSize: 14,
+                    fontWeight: '600',
+                    borderWidth: 1,
+                    borderColor: 'rgba(255, 255, 255, 0.08)',
+                  }}
+                  placeholder="e.g. 50000"
+                  placeholderTextColor="#555866"
+                  keyboardType="numeric"
+                  value={inlineGoalTarget}
+                  onChangeText={setInlineGoalTarget}
+                />
+              </View>
+
+              <TouchableOpacity
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  backgroundColor: '#FF9D66',
+                  paddingVertical: 14,
+                  borderRadius: 16,
+                }}
+                onPress={() => {
+                  const target = parseFloat(inlineGoalTarget);
+                  if (!inlineGoalName.trim() || isNaN(target) || target <= 0) {
+                    Alert.alert('Invalid Goal', 'Please enter a goal name and target amount.');
+                    return;
+                  }
+                  addSavingsVault({
+                    name: inlineGoalName.trim(),
+                    emoji: inlineGoalEmoji,
+                    targetAmount: target,
+                    color: inlineGoalColor,
+                  });
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+                  setShowNewGoalSheet(false);
+                  setInlineGoalName('');
+                  setInlineGoalTarget('');
+                }}
+                activeOpacity={0.85}
+              >
+                <Sparkles size={16} color="#0D0E12" />
+                <AppText style={{ color: '#0D0E12', fontSize: 14, fontWeight: '800' }}>
+                  Save Goal
+                </AppText>
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
+
+        {/* Inline Create Event Folder Sheet Modal */}
+        <Modal
+          visible={showNewFolderModal}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setShowNewFolderModal(false)}
+        >
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.75)', justifyContent: 'flex-end' }}
+          >
+            <TouchableOpacity
+              style={StyleSheet.absoluteFill}
+              activeOpacity={1}
+              onPress={() => setShowNewFolderModal(false)}
+            />
+            <View
+              style={{
+                backgroundColor: '#1A1D23',
+                borderTopLeftRadius: 24,
+                borderTopRightRadius: 24,
+                padding: 20,
+                paddingBottom: Platform.OS === 'ios' ? 36 : 24,
+                borderTopWidth: 1,
+                borderTopColor: 'rgba(255, 255, 255, 0.08)',
+              }}
+            >
+              <View
+                style={{
+                  width: 36,
+                  height: 4,
+                  borderRadius: 2,
+                  backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                  alignSelf: 'center',
+                  marginBottom: 16,
+                }}
+              />
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: 16,
+                }}
+              >
+                <AppText style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '800' }}>
+                  Create Event / Trip Folder
+                </AppText>
+                <TouchableOpacity
+                  onPress={() => setShowNewFolderModal(false)}
+                  style={{
+                    width: 30,
+                    height: 30,
+                    borderRadius: 15,
+                    backgroundColor: '#202330',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <X size={16} color="#A0A5B5" />
+                </TouchableOpacity>
+              </View>
+
+              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16 }}>
+                <View style={{ width: 64 }}>
+                  <AppText
+                    style={{
+                      color: '#656A7B',
+                      fontSize: 10,
+                      fontWeight: '800',
+                      letterSpacing: 1,
+                      marginBottom: 6,
+                    }}
+                  >
+                    EMOJI
+                  </AppText>
+                  <TextInput
+                    style={{
+                      backgroundColor: '#101114',
+                      borderRadius: 14,
+                      paddingHorizontal: 12,
+                      paddingVertical: 12,
+                      color: '#FFFFFF',
+                      fontSize: 18,
+                      textAlign: 'center',
+                      borderWidth: 1,
+                      borderColor: 'rgba(255, 255, 255, 0.06)',
+                    }}
+                    value={newFolderEmoji}
+                    onChangeText={setNewFolderEmoji}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <AppText
+                    style={{
+                      color: '#656A7B',
+                      fontSize: 10,
+                      fontWeight: '800',
+                      letterSpacing: 1,
+                      marginBottom: 6,
+                    }}
+                  >
+                    FOLDER / TRIP NAME
+                  </AppText>
+                  <TextInput
+                    style={{
+                      backgroundColor: '#101114',
+                      borderRadius: 14,
+                      paddingHorizontal: 14,
+                      paddingVertical: 12,
+                      color: '#FFFFFF',
+                      fontSize: 13,
+                      borderWidth: 1,
+                      borderColor: 'rgba(255, 255, 255, 0.06)',
+                    }}
+                    placeholder="e.g. Goa Trip, Birthday Bash, Hackathon"
+                    placeholderTextColor="#555866"
+                    value={newFolderName}
+                    onChangeText={setNewFolderName}
+                  />
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  backgroundColor: '#FF9D66',
+                  paddingVertical: 14,
+                  borderRadius: 16,
+                }}
+                onPress={() => {
+                  if (!newFolderName.trim()) {
+                    Alert.alert('Invalid Folder', 'Please enter a folder name.');
+                    return;
+                  }
+                  const folder = addEventFolder({ name: newFolderName.trim(), emoji: newFolderEmoji.trim() || '📁' });
+                  setSelectedFolderId(folder.id);
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+                  setShowNewFolderModal(false);
+                  setNewFolderName('');
+                  setNewFolderEmoji('🌴');
+                }}
+                activeOpacity={0.85}
+              >
+                <Sparkles size={16} color="#0D0E12" />
+                <AppText style={{ color: '#0D0E12', fontSize: 14, fontWeight: '800' }}>
+                  Create & Select Folder
+                </AppText>
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
       </KeyboardAvoidingView>
     </Modal>
   );
@@ -1319,7 +1971,7 @@ const styles = StyleSheet.create({
   // ── Mode Switcher Segment ──
   typeSegment: {
     flexDirection: 'row',
-    backgroundColor: '#1A1C24',
+    backgroundColor: '#1A1D23',
     borderRadius: 16,
     padding: 4,
     gap: 4,
@@ -1350,7 +2002,7 @@ const styles = StyleSheet.create({
   // ── Debt Subsegment ──
   debtSegment: {
     flexDirection: 'row',
-    backgroundColor: '#1A1C24',
+    backgroundColor: '#1A1D23',
     borderRadius: 14,
     padding: 4,
     gap: 6,
@@ -1379,7 +2031,7 @@ const styles = StyleSheet.create({
 
   // ── Quick Log Presets Bar ──
   presetSection: {
-    backgroundColor: '#1A1C24',
+    backgroundColor: '#1A1D23',
     borderRadius: 18,
     padding: 10,
     borderWidth: 1,
@@ -1416,7 +2068,7 @@ const styles = StyleSheet.create({
 
   // ── Hero Amount Card ──
   heroAmountCard: {
-    backgroundColor: '#1A1C24',
+    backgroundColor: '#1A1D23',
     borderRadius: 20,
     paddingVertical: 20,
     paddingHorizontal: 16,
@@ -1436,13 +2088,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 12,
+    paddingVertical: 4,
+    minHeight: 52,
   },
   heroCurrency: {
     color: '#FF9D66',
-    fontSize: 30,
-    lineHeight: 38,
+    fontSize: 32,
+    lineHeight: 40,
     fontWeight: '800',
-    marginRight: 4,
+    marginRight: 6,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
+    paddingTop: 2,
   },
   heroAmountInput: {
     color: '#FFFFFF',
@@ -1452,11 +2109,15 @@ const styles = StyleSheet.create({
     minWidth: 80,
     textAlign: 'left',
     paddingVertical: 0,
+    paddingTop: 0,
+    paddingBottom: 0,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
 
   // ── Transfer Hero Card ──
   transferHeroCard: {
-    backgroundColor: '#1A1C24',
+    backgroundColor: '#1A1D23',
     borderRadius: 20,
     padding: 16,
     borderWidth: 1,
@@ -1571,7 +2232,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   textInput: {
-    backgroundColor: '#1A1C24',
+    backgroundColor: '#1A1D23',
     borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -1597,7 +2258,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#161822',
+    backgroundColor: '#1A1D23',
     borderRadius: 14,
     paddingHorizontal: 12,
     borderWidth: 1,
@@ -1674,7 +2335,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#1A1C24',
+    backgroundColor: '#1A1D23',
     borderRadius: 16,
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -1721,8 +2382,20 @@ const styles = StyleSheet.create({
   },
 
   // ── Split Bill Card ──
+  splitBillContainer: {
+    backgroundColor: '#1A1D23',
+    borderRadius: 18,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.07)',
+  },
+  splitToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   splitToggleCard: {
-    backgroundColor: '#1A1C24',
+    backgroundColor: '#1A1D23',
     borderRadius: 18,
     padding: 14,
     borderWidth: 1,
@@ -1755,60 +2428,141 @@ const styles = StyleSheet.create({
     color: '#7E8394',
     fontSize: 11,
   },
-  splitExpandedContainer: {
+  splitBody: {
     marginTop: 14,
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.06)',
     paddingTop: 12,
-  },
-  splitRow: {
-    flexDirection: 'row',
     gap: 12,
   },
-  splitCol: {
-    flex: 1,
+  splitShareRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#232633',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
   },
-  splitSubLabel: {
+  splitShareLabel: {
+    color: '#FF9D66',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+  },
+  splitShareInput: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+    minWidth: 80,
+    textAlign: 'right',
+    paddingVertical: 0,
+  },
+  splitFriendsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 4,
+  },
+  splitFriendsLabel: {
     color: '#7E8394',
     fontSize: 10,
     fontWeight: '800',
     letterSpacing: 0.6,
-    marginBottom: 6,
   },
-  splitInputRow: {
+  splitEquallyBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#232633',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    gap: 4,
+    backgroundColor: 'rgba(255, 157, 102, 0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
   },
-  splitCurrency: {
+  splitEquallyText: {
     color: '#FF9D66',
-    fontSize: 14,
-    fontWeight: '800',
-    marginRight: 4,
+    fontSize: 10,
+    fontWeight: '700',
   },
-  splitInput: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '800',
+  splitFriendRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  splitFriendNameInput: {
     flex: 1,
-  },
-  splitFixedRow: {
     backgroundColor: '#232633',
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
   },
-  splitFriendsAmount: {
+  splitFriendAmtWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#232633',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    width: 100,
+  },
+  splitFriendAmtSym: {
     color: '#2ECC71',
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '800',
+    marginRight: 4,
+  },
+  splitFriendAmtInput: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+    paddingVertical: 0,
+    textAlign: 'right',
+  },
+  splitFriendRemoveBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 114, 94, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addFriendRowBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: 'rgba(255, 157, 102, 0.4)',
+    backgroundColor: 'rgba(255, 157, 102, 0.05)',
+  },
+  addFriendRowBtnText: {
+    color: '#FF9D66',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  splitSummaryBox: {
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderRadius: 10,
+    padding: 8,
+    alignItems: 'center',
+  },
+  splitSummaryText: {
+    color: '#A0A5B5',
+    fontSize: 10,
+    fontWeight: '600',
   },
 
   // ── Date & Tags ──
@@ -1816,7 +2570,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#1A1C24',
+    backgroundColor: '#1A1D23',
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 12,
@@ -1833,7 +2587,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   tagChip: {
-    backgroundColor: '#1A1C24',
+    backgroundColor: '#1A1D23',
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 12,
@@ -1856,7 +2610,7 @@ const styles = StyleSheet.create({
 
   // ── Subscription ──
   subscriptionCard: {
-    backgroundColor: '#1A1C24',
+    backgroundColor: '#1A1D23',
     borderRadius: 18,
     padding: 14,
     borderWidth: 1,
@@ -1962,7 +2716,7 @@ const styles = StyleSheet.create({
   },
   presetModalCard: {
     width: '100%',
-    backgroundColor: '#1A1C24',
+    backgroundColor: '#1A1D23',
     borderRadius: 22,
     padding: 18,
     borderWidth: 1,
@@ -2010,7 +2764,7 @@ const styles = StyleSheet.create({
 
   pickerModalContent: {
     width: '100%',
-    backgroundColor: '#1A1C24',
+    backgroundColor: '#1A1D23',
     borderRadius: 22,
     padding: 18,
     borderWidth: 1,

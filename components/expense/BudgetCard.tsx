@@ -34,15 +34,46 @@ export const BudgetCard: React.FC = () => {
     categoryBudgets,
     transactions,
     categories,
+    hasInitialAppLoaded,
   } = useExpenseStore();
 
   const sym = currencySymbol || '₹';
 
   const [selectedCatId, setSelectedCatId] = useState<string | null>(null);
+  const [sweepProgress, setSweepProgress] = useState<number>(hasInitialAppLoaded ? 1 : 0);
 
   // Animations
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const slideAnim = useRef(new Animated.Value(0)).current;
+  const chartProgress = useRef(new Animated.Value(hasInitialAppLoaded ? 1 : 0)).current;
+
+  useEffect(() => {
+    if (hasInitialAppLoaded) {
+      setSweepProgress(1);
+      chartProgress.setValue(1);
+      return;
+    }
+
+    // Initial chart sweep draw animation on app load
+    chartProgress.setValue(0);
+    const listenerId = chartProgress.addListener(({ value }) => {
+      setSweepProgress(value);
+    });
+
+    Animated.timing(chartProgress, {
+      toValue: 1,
+      duration: 850,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start(() => {
+      chartProgress.removeListener(listenerId);
+      setSweepProgress(1);
+    });
+
+    return () => {
+      chartProgress.removeListener(listenerId);
+    };
+  }, [hasInitialAppLoaded]);
 
   useEffect(() => {
     // Smooth transition when selection changes
@@ -232,11 +263,11 @@ export const BudgetCard: React.FC = () => {
               const segRadius = isSelected ? radius + 1.5 : radius;
               const segStrokeWidth = isSelected ? strokeWidth + 4 : strokeWidth;
               const segCircumference = 2 * Math.PI * segRadius;
-              const segDashlength = seg.percentage * segCircumference;
+              const segDashlength = seg.percentage * segCircumference * sweepProgress;
 
               // Subtle, hairline gap between segments
               const gap = segments.length > 1 ? 1.5 : 0;
-              const visibleDashLength = Math.max(segDashlength - gap, 1);
+              const visibleDashLength = Math.max(segDashlength - gap, 0.1);
               const segOffset = (seg.offset / circumference) * segCircumference + gap / 2;
 
               return (
@@ -263,7 +294,7 @@ export const BudgetCard: React.FC = () => {
               r={innerRadius}
               stroke="rgba(255, 255, 255, 0.08)"
               strokeWidth={innerStrokeWidth}
-              fill="#1A1C24"
+              fill="#1A1D23"
             />
             {overallBudgetDash > 0 && (
               <Circle
@@ -273,7 +304,7 @@ export const BudgetCard: React.FC = () => {
                 stroke={expenseColors.accentGreen}
                 strokeWidth={innerStrokeWidth}
                 fill="transparent"
-                strokeDasharray={`${overallBudgetDash} ${innerCircumference - overallBudgetDash}`}
+                strokeDasharray={`${overallBudgetDash * sweepProgress} ${innerCircumference - (overallBudgetDash * sweepProgress)}`}
                 strokeDashoffset={0}
                 strokeLinecap="round"
               />
@@ -449,12 +480,12 @@ export const BudgetCard: React.FC = () => {
 const styles = StyleSheet.create({
   cardContainer: {
     backgroundColor: expenseColors.bgCard,
-    borderRadius: 22,
-    paddingTop: 16,
-    paddingBottom: 16,
-    paddingHorizontal: 16,
+    borderRadius: 24,
+    paddingTop: 20,
+    paddingBottom: 20,
+    paddingHorizontal: 20,
     marginHorizontal: 16,
-    marginBottom: 16,
+    marginBottom: 20,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.05)',
     alignItems: 'center',
@@ -465,7 +496,7 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     fontWeight: '800',
     letterSpacing: 1.5,
-    marginBottom: 8,
+    marginBottom: 12,
     textAlign: 'center',
   },
   chartContainer: {
@@ -474,7 +505,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
-    marginBottom: 12,
+    marginBottom: 16,
   },
   centerOverlay: {
     position: 'absolute',
@@ -487,13 +518,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
     fontWeight: '600',
-    marginBottom: 1,
+    marginBottom: 4,
     textAlign: 'center',
   },
   centerMainAmount: {
     color: '#FFFFFF',
-    fontSize: 34,
-    lineHeight: 38,
+    fontSize: 36,
+    lineHeight: 40,
     fontWeight: '800',
     letterSpacing: -0.5,
     textAlign: 'center',
@@ -503,14 +534,14 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
     fontWeight: '600',
-    marginTop: -1,
-    marginBottom: 3,
+    marginTop: 2,
+    marginBottom: 6,
     textAlign: 'center',
   },
   centerSubText: {
     color: '#656978',
-    fontSize: 11,
-    lineHeight: 15,
+    fontSize: 12,
+    lineHeight: 16,
     fontWeight: '600',
     textAlign: 'center',
   },
@@ -518,18 +549,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     width: '100%',
     justifyContent: 'space-between',
-    gap: 16,
+    gap: 20,
     paddingHorizontal: 4,
   },
   legendColumn: {
     flex: 1,
-    gap: 8,
+    gap: 10,
   },
   legendRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 2.5,
+    paddingVertical: 4,
   },
   legendLeft: {
     flexDirection: 'row',
@@ -538,21 +569,21 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   legendDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
   legendCategoryName: {
     color: '#8E919D',
-    fontSize: 12,
-    lineHeight: 16,
+    fontSize: 13,
+    lineHeight: 17,
     fontWeight: '500',
     flex: 1,
   },
   legendAmount: {
     color: '#A0A5B5',
-    fontSize: 12,
-    lineHeight: 16,
+    fontSize: 13,
+    lineHeight: 17,
     fontWeight: '700',
   },
   selectedDetailWrapper: {
@@ -565,35 +596,35 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     width: '100%',
     backgroundColor: '#232633',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
   },
   selectedLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
     flex: 1,
   },
   selectedDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
   selectedTextGroup: {
-    gap: 1,
+    gap: 2,
   },
   selectedName: {
     color: '#FFFFFF',
-    fontSize: 13,
-    lineHeight: 16,
+    fontSize: 14,
+    lineHeight: 18,
     fontWeight: '700',
   },
   selectedSpentLine: {
-    fontSize: 11,
-    lineHeight: 14,
+    fontSize: 12,
+    lineHeight: 16,
   },
   selectedSpentAmount: {
     color: '#FFFFFF',
@@ -609,8 +640,8 @@ const styles = StyleSheet.create({
   },
   selectedRemainingValue: {
     color: '#FFFFFF',
-    fontSize: 15,
-    lineHeight: 18,
+    fontSize: 16,
+    lineHeight: 20,
     fontWeight: '800',
   },
   selectedUnbudgetedValue: {
@@ -621,18 +652,18 @@ const styles = StyleSheet.create({
   },
   selectedRemainingLabel: {
     color: '#8E919D',
-    fontSize: 10,
-    lineHeight: 13,
+    fontSize: 11,
+    lineHeight: 14,
     fontWeight: '500',
   },
   emptyLegendNotice: {
-    paddingVertical: 14,
+    paddingVertical: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
   emptyLegendText: {
     color: expenseColors.textMuted,
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '500',
     textAlign: 'center',
   },

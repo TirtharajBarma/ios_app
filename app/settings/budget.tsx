@@ -446,7 +446,7 @@ export default function MonthlyBudgetScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#0F1015',
+    backgroundColor: '#101114',
   },
   topHeader: {
     flexDirection: 'row',
@@ -520,7 +520,7 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   card: {
-    backgroundColor: '#16171E',
+    backgroundColor: '#1A1D23',
     borderRadius: 20,
     padding: 18,
     borderWidth: 1,
@@ -642,7 +642,7 @@ const styles = StyleSheet.create({
 
   // By Category View
   allocationStatusCard: {
-    backgroundColor: '#16171E',
+    backgroundColor: '#1A1D23',
     borderRadius: 16,
     padding: 16,
     borderWidth: 1,
@@ -668,7 +668,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   categoryBudgetCard: {
-    backgroundColor: '#16171E',
+    backgroundColor: '#1A1D23',
     borderRadius: 16,
     padding: 14,
     borderWidth: 1,
@@ -776,7 +776,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: '#0F1015',
+    backgroundColor: '#101114',
     paddingHorizontal: 16,
     paddingTop: 10,
     borderTopWidth: 1,

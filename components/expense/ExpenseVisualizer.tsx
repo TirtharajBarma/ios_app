@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
   View,
   StyleSheet,
@@ -8,6 +8,8 @@ import {
   Dimensions,
   Animated,
   Easing,
+  LayoutAnimation,
+  UIManager,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path, Rect } from 'react-native-svg';
@@ -18,6 +20,26 @@ import { useExpenseStore } from '@/store/useExpenseStore';
 import { useSubscriptionStore } from '@/store/useSubscriptionStore';
 import { FixedBottomNav } from './FixedBottomNav';
 import { expenseColors } from '@/constants/expenseColors';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+const customSpringLayout = {
+  duration: 300,
+  create: {
+    type: LayoutAnimation.Types.easeInEaseOut,
+    property: LayoutAnimation.Properties.opacity,
+  },
+  update: {
+    type: LayoutAnimation.Types.spring,
+    springDamping: 0.75,
+  },
+  delete: {
+    type: LayoutAnimation.Types.easeInEaseOut,
+    property: LayoutAnimation.Properties.opacity,
+  },
+};
 import { formatCompactCurrency } from './MoneyFlowCard';
 
 export type TimeHorizon = '1W' | '1M' | '6M' | '1Y' | 'ALL';
@@ -27,8 +49,8 @@ const SW = Dimensions.get('window').width;
 // ─────────────────────────────────────────────
 // ALL SIZES ARE COMPUTED FROM SCREEN WIDTH
 // ─────────────────────────────────────────────
-const PAGE_M   = 14;           // page horizontal margin
-const CARD_P   = 12;           // compact card inner padding
+const PAGE_M   = 16;           // page horizontal margin
+const CARD_P   = 14;           // compact card inner padding
 const CARD_W   = SW - PAGE_M * 2;
 const INNER_W  = CARD_W - CARD_P * 2;
 
@@ -203,6 +225,37 @@ export const ExpenseVisualizer: React.FC = () => {
   // Animated values for professional expand/collapse and smooth cross-fade
   const expandAnim = useRef(new Animated.Value(0)).current;
   const contentFadeAnim = useRef(new Animated.Value(1)).current;
+
+  // Staggered page entrance animations
+  const animHeader = useRef(new Animated.Value(1)).current;
+  const animTrend = useRef(new Animated.Value(1)).current;
+  const animContrast = useRef(new Animated.Value(1)).current;
+  const animFlow = useRef(new Animated.Value(1)).current;
+  const animCalendar = useRef(new Animated.Value(1)).current;
+  const animRhythm = useRef(new Animated.Value(1)).current;
+  const animVs = useRef(new Animated.Value(1)).current;
+  const animAudit = useRef(new Animated.Value(1)).current;
+
+  // Dynamic bar growth animation for user-triggered horizon changes
+  const barGrowAnim = useRef(new Animated.Value(1)).current;
+  const isFirstRender = useRef(true);
+
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      barGrowAnim.setValue(1);
+      return;
+    }
+
+    // Smooth bar growth when user switches time horizon
+    barGrowAnim.setValue(0);
+    Animated.timing(barGrowAnim, {
+      toValue: 1,
+      duration: 450,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [timeHorizon]);
 
   // dynamic breakdown & total spent
   const totalSpent = getTotalSpent();
@@ -676,37 +729,67 @@ export const ExpenseVisualizer: React.FC = () => {
         showsVerticalScrollIndicator={false}
       >
 
-        {/* TITLE */}
-        <View style={st.titleRow}>
-          <AppText style={st.titleThe}>THE </AppText>
-          <AppText style={st.titleViz}>VISUALIZER</AppText>
-        </View>
+        {/* TITLE & MULTI-HORIZON TIME SWITCHER */}
+        <Animated.View
+          style={{
+            opacity: animHeader,
+            transform: [
+              {
+                translateY: animHeader.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [14, 0],
+                }),
+              },
+            ],
+          }}
+        >
+          <View style={st.titleRow}>
+            <AppText style={st.titleThe}>THE </AppText>
+            <AppText style={st.titleViz}>VISUALIZER</AppText>
+          </View>
 
-        {/* ═══ MULTI-HORIZON TIME SWITCHER ═══ */}
-        <View style={st.horizonContainer}>
-          {(['1W', '1M', '6M', '1Y', 'ALL'] as TimeHorizon[]).map((hz) => {
-            const isSelected = timeHorizon === hz;
-            return (
-              <TouchableOpacity
-                key={hz}
-                style={[st.horizonPill, isSelected && st.horizonPillActive]}
-                onPress={() => {
-                  Haptics.selectionAsync().catch(() => {});
-                  setTimeHorizon(hz);
-                }}
-                activeOpacity={0.75}
-              >
-                <AppText style={[st.horizonPillText, isSelected && st.horizonPillTextActive]}>
-                  {hz}
-                </AppText>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+          {/* ═══ MULTI-HORIZON TIME SWITCHER ═══ */}
+          <View style={st.horizonContainer}>
+            {(['1W', '1M', '6M', '1Y', 'ALL'] as TimeHorizon[]).map((hz) => {
+              const isSelected = timeHorizon === hz;
+              return (
+                <TouchableOpacity
+                  key={hz}
+                  style={[st.horizonPill, isSelected && st.horizonPillActive]}
+                  onPress={() => {
+                    Haptics.selectionAsync().catch(() => {});
+                    LayoutAnimation.configureNext(customSpringLayout);
+                    setTimeHorizon(hz);
+                  }}
+                  activeOpacity={0.75}
+                >
+                  <AppText style={[st.horizonPillText, isSelected && st.horizonPillTextActive]}>
+                    {hz}
+                  </AppText>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </Animated.View>
 
         {/* ═══ MULTI-MONTH TREND (6M / 1Y / ALL) ═══ */}
         {(timeHorizon === '6M' || timeHorizon === '1Y' || timeHorizon === 'ALL') && (
-          <View style={st.card}>
+          <Animated.View
+            style={[
+              st.card,
+              {
+                opacity: animTrend,
+                transform: [
+                  {
+                    translateY: animTrend.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [18, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
             <View style={st.rowBetween}>
               <View>
                 <AppText style={st.cardLabel}>MULTI-MONTH TREND</AppText>
@@ -732,10 +815,15 @@ export const ExpenseVisualizer: React.FC = () => {
                       <View style={{ height: 14 }} />
                     )}
                     <View style={st.trendTrack}>
-                      <View
+                      <Animated.View
                         style={[
                           st.trendBar,
-                          { height: barH },
+                          {
+                            height: barGrowAnim.interpolate({
+                              inputRange: [0, 1],
+                              outputRange: [4, barH],
+                            }),
+                          },
                           item.isCurrent && st.trendBarCurrent,
                         ]}
                       />
@@ -747,11 +835,26 @@ export const ExpenseVisualizer: React.FC = () => {
                 );
               })}
             </View>
-          </View>
+          </Animated.View>
         )}
 
         {/* ═══ WEEKEND VS WEEKDAY CONTRAST CARD ═══ */}
-        <View style={st.card}>
+        <Animated.View
+          style={[
+            st.card,
+            {
+              opacity: animContrast,
+              transform: [
+                {
+                  translateY: animContrast.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [18, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
           <View style={st.rowBetween}>
             <View>
               <AppText style={st.cardLabel}>WEEKEND VS WEEKDAY</AppText>
@@ -769,16 +872,26 @@ export const ExpenseVisualizer: React.FC = () => {
 
           {/* Dual Split Bar */}
           <View style={st.contrastTrack}>
-            <View
+            <Animated.View
               style={[
                 st.contrastBarWeekday,
-                { width: `${Math.max(weekendVsWeekday.weekdayPct, 4)}%` as any },
+                {
+                  width: barGrowAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: ['0%', `${Math.max(weekendVsWeekday.weekdayPct, 4)}%`],
+                  }) as any,
+                },
               ]}
             />
-            <View
+            <Animated.View
               style={[
                 st.contrastBarWeekend,
-                { width: `${Math.max(weekendVsWeekday.weekendPct, 4)}%` as any },
+                {
+                  width: barGrowAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: ['0%', `${Math.max(weekendVsWeekday.weekendPct, 4)}%`],
+                  }) as any,
+                },
               ]}
             />
           </View>
@@ -805,10 +918,25 @@ export const ExpenseVisualizer: React.FC = () => {
               <AppText style={st.statSub}>~{sym}{Math.round(weekendVsWeekday.avgWeekend).toLocaleString('en-IN')}/day</AppText>
             </View>
           </View>
-        </View>
+        </Animated.View>
 
         {/* ═══ CARD 1: CATEGORY FLOW ═══ */}
-        <View style={st.card}>
+        <Animated.View
+          style={[
+            st.card,
+            {
+              opacity: animFlow,
+              transform: [
+                {
+                  translateY: animFlow.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [18, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
 
           {(() => {
             const selectedStream = streams.find(s => s.cat.id === selectedBandId);
@@ -950,11 +1078,26 @@ export const ExpenseVisualizer: React.FC = () => {
 
             </View>
           )}
-        </View>
+        </Animated.View>
 
         {/* ═══ CARD 2: SPENDING CALENDAR (Active in 1M view) ═══ */}
         {timeHorizon === '1M' && (
-          <View style={st.compactCard}>
+          <Animated.View
+            style={[
+              st.compactCard,
+              {
+                opacity: animCalendar,
+                transform: [
+                  {
+                    translateY: animCalendar.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [18, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
 
             {/* header */}
             <View style={st.rowBetweenCompact}>
@@ -1077,12 +1220,27 @@ export const ExpenseVisualizer: React.FC = () => {
               )}
             </Animated.View>
 
-          </View>
+          </Animated.View>
         )}
 
         {/* ═══ CARD 3: WEEKLY RHYTHM (1M and 1W views) ═══ */}
         {(timeHorizon === '1M' || timeHorizon === '1W') && (
-          <View style={st.card}>
+          <Animated.View
+            style={[
+              st.card,
+              {
+                opacity: animRhythm,
+                transform: [
+                  {
+                    translateY: animRhythm.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [18, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
             <View style={st.rowBetween}>
               <AppText style={st.cardLabel}>WEEKLY RHYTHM</AppText>
               {avgRhythmAmount > 0 && (
@@ -1150,11 +1308,16 @@ export const ExpenseVisualizer: React.FC = () => {
 
                         {/* Bar Fill */}
                         {rd.amt > 0 ? (
-                          <View
+                          <Animated.View
                             style={[
                               st.barFill,
                               isHeaviest && st.barFillHighlight,
-                              { height: Math.max(barH, 4) },
+                              {
+                                height: barGrowAnim.interpolate({
+                                  inputRange: [0, 1],
+                                  outputRange: [4, Math.max(barH, 4)],
+                                }),
+                              },
                             ]}
                           />
                         ) : null}
@@ -1169,12 +1332,27 @@ export const ExpenseVisualizer: React.FC = () => {
                 </View>
               </View>
             </View>
-          </View>
+          </Animated.View>
         )}
 
         {/* ═══ CARD 4: VS LAST MONTH (Month-over-Month Comparison in 1M) ═══ */}
         {timeHorizon === '1M' && (
-          <View style={st.card}>
+          <Animated.View
+            style={[
+              st.card,
+              {
+                opacity: animVs,
+                transform: [
+                  {
+                    translateY: animVs.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [18, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
             <View style={st.rowBetween}>
               <AppText style={st.cardLabel}>VS LAST MONTH</AppText>
               <View style={st.legendRow}>
@@ -1226,20 +1404,28 @@ export const ExpenseVisualizer: React.FC = () => {
                     {/* Dual Comparison Bar: Last Month (Grey) & This Month (Color) */}
                     <View style={st.vsBarTrack}>
                       {cat.lastPercent > 0 && (
-                        <View
+                        <Animated.View
                           style={[
                             st.vsLastBar,
-                            { width: `${cat.lastPercent}%` as any },
+                            {
+                              width: barGrowAnim.interpolate({
+                                inputRange: [0, 1],
+                                outputRange: ['0%', `${cat.lastPercent}%`],
+                              }) as any,
+                            },
                           ]}
                         />
                       )}
                       {cat.thisPercent > 0 && (
-                        <View
+                        <Animated.View
                           style={[
                             st.vsFill,
                             {
                               backgroundColor: cat.color,
-                              width: `${cat.thisPercent}%` as any,
+                              width: barGrowAnim.interpolate({
+                                inputRange: [0, 1],
+                                outputRange: ['0%', `${cat.thisPercent}%`],
+                              }) as any,
                             },
                           ]}
                         />
@@ -1249,11 +1435,26 @@ export const ExpenseVisualizer: React.FC = () => {
                 ))}
               </View>
             )}
-          </View>
+          </Animated.View>
         )}
 
         {/* ═══ CARD 5: SUBSCRIPTION AUDIT ═══ */}
-        <View style={st.card}>
+        <Animated.View
+          style={[
+            st.card,
+            {
+              opacity: animAudit,
+              transform: [
+                {
+                  translateY: animAudit.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [18, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
           <View style={st.rowBetween}>
             <AppText style={st.cardLabel}>SUBSCRIPTION AUDIT</AppText>
             <TouchableOpacity style={st.addBtn}>
@@ -1276,7 +1477,7 @@ export const ExpenseVisualizer: React.FC = () => {
               </AppText>
             </View>
           )}
-        </View>
+        </Animated.View>
 
       </ScrollView>
     </View>
@@ -1305,8 +1506,8 @@ const st = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     marginHorizontal: PAGE_M,
-    marginBottom: 14,
-    backgroundColor: '#1A1C24',
+    marginBottom: 16,
+    backgroundColor: '#1A1D23',
     padding: 4,
     borderRadius: 14,
     borderWidth: 1,
@@ -1442,17 +1643,17 @@ const st = StyleSheet.create({
   },
   statLabel: {
     color: '#8E919D',
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '600',
   },
   statAmount: {
     color: '#FFFFFF',
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '800',
   },
   statSub: {
     color: '#7C8092',
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '500',
   },
 
@@ -1462,7 +1663,7 @@ const st = StyleSheet.create({
     backgroundColor: expenseColors.bgCard,
     borderRadius: 22,
     padding: 18,
-    marginBottom: 16,
+    marginBottom: 20,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.07)',
   },
@@ -1473,15 +1674,15 @@ const st = StyleSheet.create({
     backgroundColor: expenseColors.bgCard,
     borderRadius: 22,
     padding: 18,
-    marginBottom: 16,
+    marginBottom: 20,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.07)',
   },
 
-  rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
-  rowBetweenCompact: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 },
+  rowBetweenCompact: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
   cardLabel: { color: '#FFF', fontSize: 13, lineHeight: 17, fontWeight: '800', letterSpacing: 1.2 },
-  cardSub: { color: expenseColors.textMuted, fontSize: 10, lineHeight: 14, fontWeight: '600', letterSpacing: 0.6, marginTop: 2 },
+  cardSub: { color: expenseColors.textMuted, fontSize: 11, lineHeight: 15, fontWeight: '600', letterSpacing: 0.6, marginTop: 2 },
 
   // ── Flow ──
   flowAmt: { color: '#FFF', fontSize: 22, lineHeight: 28, fontWeight: '800' },
@@ -1521,12 +1722,12 @@ const st = StyleSheet.create({
     overflow: 'hidden',
   },
   dayDetailCard: {
-    backgroundColor: '#1A1C24',
-    borderRadius: 12,
+    backgroundColor: '#1A1D23',
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.06)',
-    padding: 10,
-    marginTop: 8,
+    padding: 12,
+    marginTop: 10,
   },
   dayDetailDate: {
     color: '#FFFFFF',
@@ -1671,11 +1872,11 @@ const st = StyleSheet.create({
 
   // ── VS Last Month ──
   vsStack: {
-    gap: 14,
+    gap: 16,
     marginTop: 4,
   },
   vsItem: {
-    gap: 6,
+    gap: 8,
   },
   vsTopRow: {
     flexDirection: 'row',
@@ -1694,8 +1895,8 @@ const st = StyleSheet.create({
   },
   vsCat: {
     color: '#FFFFFF',
-    fontSize: 12,
-    lineHeight: 16,
+    fontSize: 13,
+    lineHeight: 17,
     fontWeight: '700',
     letterSpacing: 0.6,
   },
@@ -1739,8 +1940,8 @@ const st = StyleSheet.create({
   },
   vsAmt: {
     color: '#FFFFFF',
-    fontSize: 13,
-    lineHeight: 17,
+    fontSize: 14,
+    lineHeight: 18,
     fontWeight: '700',
   },
   vsBarTrack: {

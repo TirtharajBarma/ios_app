@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, StatusBar, TouchableOpacity } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, StyleSheet, ScrollView, StatusBar, TouchableOpacity, Animated } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -31,13 +31,61 @@ import { ExpenseAccount } from '@/types/expense';
 export const ExpenseDashboard: React.FC = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { transactions, accounts, monthlyBudget, currencySymbol } = useExpenseStore();
+  const { transactions, accounts, monthlyBudget, currencySymbol, hasInitialAppLoaded } = useExpenseStore();
   const [dismissOnboarding, setDismissOnboarding] = useState<boolean>(false);
 
   const [showAddTxModal, setShowAddTxModal] = useState<boolean>(false);
   const [showAccountsModal, setShowAccountsModal] = useState<boolean>(false);
   const [selectedAccountForEdit, setSelectedAccountForEdit] = useState<ExpenseAccount | null>(null);
   const [showEditAccountModal, setShowEditAccountModal] = useState<boolean>(false);
+
+  // Staggered load animation values
+  const headerAnim = useRef(new Animated.Value(hasInitialAppLoaded ? 1 : 0)).current;
+  const flowAnim = useRef(new Animated.Value(hasInitialAppLoaded ? 1 : 0)).current;
+  const budgetAnim = useRef(new Animated.Value(hasInitialAppLoaded ? 1 : 0)).current;
+  const accountsAnim = useRef(new Animated.Value(hasInitialAppLoaded ? 1 : 0)).current;
+
+  useEffect(() => {
+    if (hasInitialAppLoaded) {
+      headerAnim.setValue(1);
+      flowAnim.setValue(1);
+      budgetAnim.setValue(1);
+      accountsAnim.setValue(1);
+      return;
+    }
+
+    headerAnim.setValue(0);
+    flowAnim.setValue(0);
+    budgetAnim.setValue(0);
+    accountsAnim.setValue(0);
+
+    Animated.stagger(70, [
+      Animated.spring(headerAnim, {
+        toValue: 1,
+        tension: 60,
+        friction: 8,
+        useNativeDriver: true,
+      }),
+      Animated.spring(flowAnim, {
+        toValue: 1,
+        tension: 60,
+        friction: 8,
+        useNativeDriver: true,
+      }),
+      Animated.spring(budgetAnim, {
+        toValue: 1,
+        tension: 60,
+        friction: 8,
+        useNativeDriver: true,
+      }),
+      Animated.spring(accountsAnim, {
+        toValue: 1,
+        tension: 60,
+        friction: 8,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [hasInitialAppLoaded]);
 
   const handleAddPress = () => {
     setShowAddTxModal(true);
@@ -58,10 +106,10 @@ export const ExpenseDashboard: React.FC = () => {
 
   return (
     <View style={styles.screenContainer}>
-      <StatusBar barStyle="light-content" backgroundColor="#0F1015" translucent />
+      <StatusBar barStyle="light-content" backgroundColor="#101114" translucent />
 
       {/* Top Safe Area Background Fill */}
-      <View style={{ height: insets.top, backgroundColor: '#0F1015', zIndex: 10 }} />
+      <View style={{ height: insets.top, backgroundColor: '#101114', zIndex: 10 }} />
 
       {/* Main Vertically Scrollable Content */}
       <ScrollView
@@ -75,14 +123,26 @@ export const ExpenseDashboard: React.FC = () => {
         ]}
         showsVerticalScrollIndicator={false}
       >
-        {/* Top Header */}
-        <ExpenseHeader
-          onAddPress={handleAddPress}
-          onFilterPress={handleFilterPress}
-        />
-
-        {/* Month Summary & Quick Category Actions */}
-        <MonthSummary onCategorySelect={handleCategorySelect} />
+        {/* Top Header & Month Summary */}
+        <Animated.View
+          style={{
+            opacity: headerAnim,
+            transform: [
+              {
+                translateY: headerAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [14, 0],
+                }),
+              },
+            ],
+          }}
+        >
+          <ExpenseHeader
+            onAddPress={handleAddPress}
+            onFilterPress={handleFilterPress}
+          />
+          <MonthSummary onCategorySelect={handleCategorySelect} />
+        </Animated.View>
 
         {/* First-Time User Onboarding Guide Checklist */}
         {transactions.length === 0 && !dismissOnboarding && (
@@ -228,13 +288,55 @@ export const ExpenseDashboard: React.FC = () => {
         )}
 
         {/* Money Flow Card */}
-        <MoneyFlowCard />
+        <Animated.View
+          style={{
+            opacity: flowAnim,
+            transform: [
+              {
+                translateY: flowAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [18, 0],
+                }),
+              },
+            ],
+          }}
+        >
+          <MoneyFlowCard />
+        </Animated.View>
 
         {/* Budget Card with Donut Chart */}
-        <BudgetCard />
+        <Animated.View
+          style={{
+            opacity: budgetAnim,
+            transform: [
+              {
+                translateY: budgetAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [22, 0],
+                }),
+              },
+            ],
+          }}
+        >
+          <BudgetCard />
+        </Animated.View>
 
         {/* Accounts Section */}
-        <AccountsSection onAccountPress={handleAccountPress} />
+        <Animated.View
+          style={{
+            opacity: accountsAnim,
+            transform: [
+              {
+                translateY: accountsAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [26, 0],
+                }),
+              },
+            ],
+          }}
+        >
+          <AccountsSection onAccountPress={handleAccountPress} />
+        </Animated.View>
       </ScrollView>
 
       {/* Add Transaction Modal */}
@@ -262,7 +364,7 @@ export const ExpenseDashboard: React.FC = () => {
 const styles = StyleSheet.create({
   screenContainer: {
     flex: 1,
-    backgroundColor: '#0F1015',
+    backgroundColor: '#101114',
   },
   scrollView: {
     flex: 1,
@@ -271,11 +373,11 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   onboardingCard: {
-    backgroundColor: '#16171E',
-    borderRadius: 20,
+    backgroundColor: '#1A1D23',
+    borderRadius: 22,
     marginHorizontal: 16,
-    marginVertical: 10,
-    padding: 18,
+    marginVertical: 16,
+    padding: 20,
     borderWidth: 1,
     borderColor: 'rgba(255, 157, 102, 0.22)',
   },
@@ -283,7 +385,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 8,
+    marginBottom: 12,
   },
   onboardingBadge: {
     flexDirection: 'row',
@@ -302,29 +404,29 @@ const styles = StyleSheet.create({
   },
   onboardingTitle: {
     color: '#FFFFFF',
-    fontSize: 17,
+    fontSize: 18,
     fontWeight: '800',
     letterSpacing: -0.3,
-    marginBottom: 4,
+    marginBottom: 8,
   },
   onboardingSub: {
     color: expenseColors.textMuted,
-    fontSize: 12,
-    lineHeight: 16,
-    marginBottom: 16,
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 18,
   },
   stepsContainer: {
-    gap: 12,
+    gap: 16,
   },
   stepRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 12,
+    gap: 14,
   },
   stepIconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -340,77 +442,77 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 2,
+    marginBottom: 4,
   },
   stepTitle: {
     color: '#FFFFFF',
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '700',
   },
   stepDesc: {
     color: expenseColors.textMuted,
-    fontSize: 11,
-    lineHeight: 15,
-    marginBottom: 8,
+    fontSize: 12,
+    lineHeight: 17,
+    marginBottom: 10,
   },
   stepDoneBadge: {
     backgroundColor: 'rgba(92, 228, 154, 0.12)',
     paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingVertical: 3,
     borderRadius: 6,
   },
   stepDoneText: {
     color: '#5CE49A',
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '700',
   },
   stepReqBadge: {
     backgroundColor: 'rgba(255, 91, 91, 0.15)',
     paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingVertical: 3,
     borderRadius: 6,
   },
   stepReqText: {
     color: '#FF5B5B',
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '700',
   },
   stepActionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    gap: 6,
     backgroundColor: '#FF9D66',
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 9,
     alignSelf: 'flex-start',
   },
   stepActionBtnText: {
     color: '#0F1015',
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '800',
   },
   stepActionOutlineBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    gap: 6,
     backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 9,
     alignSelf: 'flex-start',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   stepActionOutlineBtnText: {
     color: '#FFFFFF',
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '700',
   },
   stepButtonsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
   },
   stepDivider: {
     height: 1,

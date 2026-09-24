@@ -1,6 +1,6 @@
 export const expenseColors = {
   bgPrimary: '#101114',
-  bgCard: '#1A1C24',
+  bgCard: '#1A1D23',
   borderCard: 'rgba(255, 255, 255, 0.06)',
   circleBtnBg: '#232633',
 

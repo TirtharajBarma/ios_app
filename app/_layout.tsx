@@ -224,6 +224,24 @@ export default function RootLayout() {
             fullScreenGestureEnabled: true,
           }}
         />
+        <Stack.Screen
+          name="folder/[id]"
+          options={{
+            headerShown: false,
+            animation: "slide_from_right",
+            gestureEnabled: true,
+            fullScreenGestureEnabled: true,
+          }}
+        />
+        <Stack.Screen
+          name="receivables/index"
+          options={{
+            headerShown: false,
+            animation: "slide_from_right",
+            gestureEnabled: true,
+            fullScreenGestureEnabled: true,
+          }}
+        />
       </Stack>
 
       {isLocked && (

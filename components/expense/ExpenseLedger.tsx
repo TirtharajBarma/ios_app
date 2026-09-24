@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   View,
   StyleSheet,
@@ -7,40 +7,70 @@ import {
   TextInput,
   Modal,
   Platform,
+  Animated,
+  LayoutAnimation,
+  UIManager,
+  Keyboard,
+  TouchableWithoutFeedback,
 } from 'react-native';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ArrowRightLeft,
   Users,
   Tag,
-  CheckCircle2,
-  Circle,
   Trash2,
   Sparkles,
   HandCoins,
   Search,
   X,
   Mic,
-  Cpu,
   Check,
+  ChevronRight,
+  ChevronDown,
+  Building2,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
 import { MenuAction } from '@expo/ui/community/menu';
 import { AppText, NativeLiquidMenu } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
-import { FixedBottomNav } from './FixedBottomNav';
 import { expenseColors } from '@/constants/expenseColors';
 import { ExpenseTransaction, ExpenseCategory } from '@/types/expense';
 import { CategoryIcon } from './CategoryIcon';
-import { getDeviceAiEngineInfo, SMART_QUERY_PRESETS } from '@/services/onDeviceAi';
+import { getDeviceAiEngineInfo } from '@/services/onDeviceAi';
+
+export interface LedgerGroupItem {
+  type: 'single' | 'folder';
+  tx?: ExpenseTransaction;
+  folderKey?: string;
+  folderName?: string;
+  folderEmoji?: string;
+  folderTxs?: ExpenseTransaction[];
+  folderTotal?: number;
+}
+
+const ROTATING_SEARCH_PLACEHOLDERS = [
+  '"How much did I spend at Amazon in Decemb..."',
+  '"Uber trips last weekend"',
+  '"Food & dining expenses > ₹500"',
+  '"Total spent on Cigarettes this month"',
+  '"Transactions paid from Slice"',
+  '"Coffee & cafe orders in September"',
+];
 
 export const ExpenseLedger: React.FC = () => {
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   const {
     accounts,
     categories,
     transactions,
+    eventFolders,
     activeAccountFilter,
     smartSearchQuery,
     selectedTransactionIds,
@@ -51,15 +81,52 @@ export const ExpenseLedger: React.FC = () => {
     getSmartSearchResult,
     toggleSelectTransaction,
     clearSelectedTransactions,
-    selectAllTransactions,
     removeTransactions,
+    updateTransactionsCategory,
     settleTransaction,
   } = useExpenseStore();
 
   const [isSelectMode, setIsSelectMode] = useState(false);
-  const [settlingTx, setSettlingTx] = useState<ExpenseTransaction | null>(null);
-  const [settleAccountId, setSettleAccountId] = useState<string>(accounts[0]?.id || 'acc_hdfc');
+  const [placeholderIndex, setPlaceholderIndex] = useState(0);
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const searchInputRef = useRef<TextInput>(null);
+
   const sym = currencySymbol || '₹';
+
+  const animHeader = useRef(new Animated.Value(1)).current;
+  const animSearch = useRef(new Animated.Value(1)).current;
+  const animFilters = useRef(new Animated.Value(1)).current;
+  const animList = useRef(new Animated.Value(1)).current;
+
+  // Rotate smart search placeholder smoothly every 4 seconds
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setPlaceholderIndex((prev) => (prev + 1) % ROTATING_SEARCH_PLACEHOLDERS.length);
+    }, 4000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const handleToggleSelectMode = () => {
+    Haptics.selectionAsync().catch(() => {});
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    if (isSelectMode) {
+      clearSelectedTransactions();
+      setIsSelectMode(false);
+    } else {
+      setIsSelectMode(true);
+    }
+  };
+
+  // Category Actions for Batch Categorization
+  const categoryMenuActions: MenuAction[] = useMemo(() => {
+    return categories
+      .filter((c) => c.id !== 'cat_income')
+      .map((c) => ({
+        id: c.id,
+        title: `${c.name}${c.emoji ? ` ${c.emoji}` : ''}`,
+        image: 'tag.fill' as any,
+      }));
+  }, [categories]);
 
   // Statistical Anomaly / Outlier Calculation (Z-Score approximation per category)
   const categoryAverages = useMemo(() => {
@@ -77,9 +144,63 @@ export const ExpenseLedger: React.FC = () => {
     return map;
   }, [categories, transactions]);
 
+  // Unified Pending Debts & Lent Receivables (Soft Pastel Aesthetics)
+  const pendingLentList = useMemo(() => {
+    const list: Array<{ id: string; title: string; borrower: string; amount: number; tx: ExpenseTransaction }> = [];
+    transactions.forEach((tx) => {
+      if (tx.type === 'debt_lend' && !tx.isSettled) {
+        list.push({
+          id: tx.id,
+          title: tx.note || 'Lent to Friend',
+          borrower: tx.borrowerOrLender || 'Friend',
+          amount: tx.amount,
+          tx,
+        });
+      } else if (tx.split && !tx.split.settled && (tx.split.friendsShare || 0) > 0) {
+        list.push({
+          id: tx.id,
+          title: tx.note || 'Split Bill',
+          borrower: tx.split.friendNames || 'Friends',
+          amount: tx.split.friendsShare,
+          tx,
+        });
+      }
+    });
+    return list;
+  }, [transactions]);
+
+  const pendingBorrowList = useMemo(() => {
+    const list: Array<{ id: string; title: string; borrower: string; amount: number; tx: ExpenseTransaction }> = [];
+    transactions.forEach((tx) => {
+      if (tx.type === 'debt_borrow' && !tx.isSettled) {
+        list.push({
+          id: tx.id,
+          title: tx.note || 'Borrowed from Friend',
+          borrower: tx.borrowerOrLender || 'Friend',
+          amount: tx.amount,
+          tx,
+        });
+      }
+    });
+    return list;
+  }, [transactions]);
+
+  const totalPendingLent = useMemo(() => {
+    return pendingLentList.reduce((sum, item) => sum + item.amount, 0);
+  }, [pendingLentList]);
+
+  const totalPendingBorrow = useMemo(() => {
+    return pendingBorrowList.reduce((sum, item) => sum + item.amount, 0);
+  }, [pendingBorrowList]);
+
+  const hasPendingDebts = totalPendingLent > 0 || totalPendingBorrow > 0;
+
   const deviceAiInfo = useMemo(() => getDeviceAiEngineInfo(), []);
   const aiResult = useMemo(() => getSmartSearchResult(), [transactions, activeAccountFilter, smartSearchQuery, accounts, categories]);
-  const filteredTxs = useMemo(() => getFilteredTransactions(), [transactions, activeAccountFilter, smartSearchQuery, accounts, categories]);
+
+  const filteredTxs = useMemo(() => {
+    return getFilteredTransactions();
+  }, [transactions, activeAccountFilter, smartSearchQuery, accounts, categories]);
 
   const getCategoryObj = (catId: string) => {
     return categories.find((c) => c.id === catId) || categories[0];
@@ -95,7 +216,7 @@ export const ExpenseLedger: React.FC = () => {
       <CategoryIcon
         category={cat}
         size={16}
-        color="#FFFFFF"
+        color={cat.color || '#FFFFFF'}
         strokeWidth={2}
         fill={true}
       />
@@ -104,8 +225,9 @@ export const ExpenseLedger: React.FC = () => {
 
   const accountFilterList = ['All', ...accounts.map((a) => a.name)];
 
+  // Group All Transactions by Date and Folder (No Pagination Limit)
   const dateGrouped = useMemo(() => {
-    const groups: Record<string, ExpenseTransaction[]> = {};
+    const groups: Record<string, LedgerGroupItem[]> = {};
     filteredTxs.forEach((tx) => {
       const dateObj = new Date(tx.date);
       const dateHeading = dateObj
@@ -119,10 +241,38 @@ export const ExpenseLedger: React.FC = () => {
       if (!groups[dateHeading]) {
         groups[dateHeading] = [];
       }
-      groups[dateHeading].push(tx);
+
+      const folderKey = tx.folderId || (tx.folderName ? `name_${tx.folderName.toLowerCase()}` : null);
+      if (folderKey) {
+        const existing = groups[dateHeading].find(
+          (item) => item.type === 'folder' && item.folderKey === folderKey
+        );
+        const folderObj = eventFolders.find((f) => f.id === tx.folderId);
+        const folderName = folderObj?.name || tx.folderName || 'Event';
+        const folderEmoji = folderObj?.emoji || '🌴';
+
+        if (existing && existing.folderTxs) {
+          existing.folderTxs.push(tx);
+          existing.folderTotal = (existing.folderTotal || 0) + (tx.type === 'expense' ? tx.amount : 0);
+        } else {
+          groups[dateHeading].push({
+            type: 'folder',
+            folderKey,
+            folderName,
+            folderEmoji,
+            folderTxs: [tx],
+            folderTotal: tx.type === 'expense' ? tx.amount : 0,
+          });
+        }
+      } else {
+        groups[dateHeading].push({
+          type: 'single',
+          tx,
+        });
+      }
     });
     return groups;
-  }, [filteredTxs]);
+  }, [filteredTxs, eventFolders]);
 
   const renderTransactionItem = (tx: ExpenseTransaction, isLast: boolean) => {
     const cat = getCategoryObj(tx.categoryId);
@@ -134,21 +284,30 @@ export const ExpenseLedger: React.FC = () => {
 
     const isTransfer = tx.type === 'transfer';
     const isSplit = !!tx.split;
-    const isDebt = tx.type === 'debt_lend' || tx.type === 'debt_borrow';
-    const isExpense = tx.type === 'expense' || isSplit || tx.type === 'debt_lend';
-    const isIncome = tx.type === 'income' || tx.type === 'debt_borrow';
-
-    const sym = currencySymbol || '₹';
-    let amountDisplay = `${sym}${tx.amount.toLocaleString('en-IN')}`;
-    if (tx.type === 'debt_lend') amountDisplay = `-${sym}${tx.amount.toLocaleString('en-IN')}`;
-    else if (tx.type === 'debt_borrow') amountDisplay = `+${sym}${tx.amount.toLocaleString('en-IN')}`;
-    else if (isExpense) amountDisplay = `-${sym}${tx.amount.toLocaleString('en-IN')}`;
-    else if (isIncome) amountDisplay = `+${sym}${tx.amount.toLocaleString('en-IN')}`;
-    else if (isTransfer) amountDisplay = `⇄ ${sym}${tx.amount.toLocaleString('en-IN')}`;
-
     const isDebtLend = tx.type === 'debt_lend';
-    const isSettled = isDebtLend ? tx.isSettled : tx.split?.settled;
-    const canSettle = (isDebtLend || (isSplit && (tx.split?.friendsShare || 0) > 0)) && !isSettled;
+    const isDebtBorrow = tx.type === 'debt_borrow';
+    const isDebt = isDebtLend || isDebtBorrow;
+    const isExpense = tx.type === 'expense' || isSplit || isDebtLend;
+    const isIncome = tx.type === 'income' || isDebtBorrow;
+
+    const isSettled = isDebtLend ? tx.isSettled : isDebtBorrow ? tx.isSettled : tx.split?.settled;
+
+    let amountDisplay = `${sym}${tx.amount.toLocaleString('en-IN')}`;
+    if (isDebtLend) {
+      amountDisplay = isSettled
+        ? `✓ ${sym}${tx.amount.toLocaleString('en-IN')}`
+        : `-${sym}${tx.amount.toLocaleString('en-IN')}`;
+    } else if (isDebtBorrow) {
+      amountDisplay = isSettled
+        ? `✓ ${sym}${tx.amount.toLocaleString('en-IN')}`
+        : `+${sym}${tx.amount.toLocaleString('en-IN')}`;
+    } else if (isExpense) {
+      amountDisplay = `-${sym}${tx.amount.toLocaleString('en-IN')}`;
+    } else if (isIncome) {
+      amountDisplay = `+${sym}${tx.amount.toLocaleString('en-IN')}`;
+    } else if (isTransfer) {
+      amountDisplay = `⇄ ${sym}${tx.amount.toLocaleString('en-IN')}`;
+    }
 
     const catStats = categoryAverages[tx.categoryId];
     const isOutlier =
@@ -163,15 +322,6 @@ export const ExpenseLedger: React.FC = () => {
         title: 'Copy Details',
         image: 'doc.on.doc' as any,
       },
-      ...(canSettle
-        ? [
-            {
-              id: 'settle',
-              title: 'Settle Up',
-              image: 'checkmark.circle.fill' as any,
-            },
-          ]
-        : []),
       {
         id: 'select',
         title: 'Select Item',
@@ -191,42 +341,62 @@ export const ExpenseLedger: React.FC = () => {
         activeOpacity={0.7}
         onPress={() => {
           if (isSelectMode) {
+            Haptics.selectionAsync().catch(() => {});
             toggleSelectTransaction(tx.id);
           }
         }}
       >
-        {/* Select Checkbox in Select Mode */}
+        {/* Circular Checkbox in Select Mode (Exact reference style) */}
         {isSelectMode && (
-          <View style={styles.checkboxContainer}>
+          <TouchableOpacity
+            style={styles.checkboxTouchTarget}
+            onPress={() => {
+              Haptics.selectionAsync().catch(() => {});
+              toggleSelectTransaction(tx.id);
+            }}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
             {isSelected ? (
-              <CheckCircle2 size={20} color={expenseColors.accentPeach} />
+              <View style={styles.radioSelected}>
+                <Check size={12} color="#0D0E12" strokeWidth={3.5} />
+              </View>
             ) : (
-              <Circle size={20} color={expenseColors.textMuted} />
+              <View style={styles.radioUnselected} />
             )}
-          </View>
+          </TouchableOpacity>
         )}
 
-        {/* Left: Category / Transfer Icon Circle */}
+        {/* Left: Category / Transfer / Debt Icon Squircle */}
         <View
           style={[
             styles.categoryIconCircle,
             {
               backgroundColor: isTransfer
-                ? expenseColors.accentBlue
+                ? 'rgba(96, 165, 250, 0.15)'
                 : isSplit
-                ? expenseColors.accentPurple
-                : isDebt
-                ? '#F2994A'
-                : cat.color,
+                ? isSettled
+                  ? 'rgba(124, 217, 168, 0.12)'
+                  : 'rgba(242, 139, 130, 0.12)'
+                : isDebtLend
+                ? isSettled
+                  ? 'rgba(124, 217, 168, 0.12)'
+                  : 'rgba(242, 139, 130, 0.12)'
+                : isDebtBorrow
+                ? isSettled
+                  ? 'rgba(124, 217, 168, 0.12)'
+                  : 'rgba(251, 191, 36, 0.12)'
+                : '#202330',
             },
           ]}
         >
           {isTransfer ? (
-            <ArrowRightLeft size={16} color="#FFFFFF" />
+            <ArrowRightLeft size={16} color="#60A5FA" />
           ) : isSplit ? (
-            <Users size={16} color="#FFFFFF" />
-          ) : isDebt ? (
-            <HandCoins size={16} color="#FFFFFF" />
+            <Users size={16} color={isSettled ? '#7CD9A8' : '#F28B82'} />
+          ) : isDebtLend ? (
+            <HandCoins size={16} color={isSettled ? '#7CD9A8' : '#F28B82'} />
+          ) : isDebtBorrow ? (
+            <HandCoins size={16} color={isSettled ? '#7CD9A8' : '#FBBF24'} />
           ) : (
             renderCategoryIcon(cat)
           )}
@@ -246,20 +416,43 @@ export const ExpenseLedger: React.FC = () => {
                   {getAccountName(tx.accountId)} ➔ {getAccountName(tx.toAccountId)}
                 </AppText>
               </View>
-            ) : isDebt ? (
-              <View style={styles.debtFlowPill}>
-                <AppText style={styles.debtFlowText}>
-                  {tx.type === 'debt_lend' ? 'Lent to' : 'Borrowed from'} {tx.borrowerOrLender || 'Friend'}
+            ) : isDebtLend ? (
+              <View
+                style={[
+                  styles.debtLentPill,
+                  isSettled && styles.settledPill,
+                ]}
+              >
+                <AppText
+                  style={[
+                    styles.debtLentText,
+                    isSettled && styles.settledPillText,
+                  ]}
+                >
+                  {isSettled ? 'Recovered from ' : 'Lent to '}
+                  {tx.borrowerOrLender || 'Friend'}
+                </AppText>
+              </View>
+            ) : isDebtBorrow ? (
+              <View
+                style={[
+                  styles.debtBorrowPill,
+                  isSettled && styles.settledPill,
+                ]}
+              >
+                <AppText
+                  style={[
+                    styles.debtBorrowText,
+                    isSettled && styles.settledPillText,
+                  ]}
+                >
+                  {isSettled ? 'Repaid to ' : 'Borrowed from '}
+                  {tx.borrowerOrLender || 'Friend'}
                 </AppText>
               </View>
             ) : (
-              <View
-                style={[
-                  styles.categoryPill,
-                  { backgroundColor: `${cat.color}25` },
-                ]}
-              >
-                <AppText style={[styles.categoryPillText, { color: cat.color }]}>
+              <View style={styles.categoryPill}>
+                <AppText style={[styles.categoryPillText, { color: cat.color || expenseColors.accentPeach }]}>
                   {cat.name} {cat.emoji || ''}
                 </AppText>
               </View>
@@ -287,51 +480,29 @@ export const ExpenseLedger: React.FC = () => {
           {isSplit && tx.split && (
             <View style={styles.splitLedgerDetail}>
               <AppText style={styles.splitLedgerDetailText}>
-                Your share: <AppText style={{ color: '#FFFFFF', fontWeight: '700' }}>{sym}{tx.split.yourShare.toLocaleString('en-IN')}</AppText>
+                My share: <AppText style={{ color: '#FFFFFF', fontWeight: '700' }}>{sym}{tx.split.yourShare.toLocaleString('en-IN')}</AppText>
                 {'  '}•{'  '}
-                Lent: <AppText style={{ color: expenseColors.accentGreen, fontWeight: '700' }}>{sym}{tx.split.friendsShare.toLocaleString('en-IN')}</AppText>
+                Lent: <AppText style={{ color: tx.split.settled ? '#7CD9A8' : '#F28B82', fontWeight: '700' }}>{sym}{tx.split.friendsShare.toLocaleString('en-IN')}</AppText>
                 {tx.split.friendNames ? ` (${tx.split.friendNames})` : ''}
               </AppText>
             </View>
           )}
         </View>
 
-        {/* Right: Amount & Settle Up action */}
+        {/* Right: Amount (Clean, right-aligned, dynamic colors) */}
         <View style={styles.amountCol}>
           <AppText
             style={[
               styles.transactionAmountText,
-              isExpense && styles.expenseAmount,
-              isIncome && styles.incomeAmount,
+              isDebtLend && (isSettled ? styles.settledAmount : styles.debtLendPendingAmount),
+              isDebtBorrow && (isSettled ? styles.settledAmount : styles.debtBorrowPendingAmount),
+              !isDebt && isExpense && styles.expenseAmount,
+              !isDebt && isIncome && styles.incomeAmount,
               isTransfer && styles.transferAmount,
             ]}
           >
             {amountDisplay}
           </AppText>
-          <AppText style={styles.accountSubText}>
-            {getAccountName(tx.accountId)}
-          </AppText>
-
-          {canSettle && (
-            <TouchableOpacity
-              style={styles.settleUpBtn}
-              onPress={(e) => {
-                e.stopPropagation();
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-                setSettlingTx(tx);
-                setSettleAccountId(tx.accountId || accounts[0]?.id || 'acc_hdfc');
-              }}
-              activeOpacity={0.8}
-            >
-              <Check size={10} color="#2ECC71" strokeWidth={3} />
-              <AppText style={styles.settleUpBtnText}>Settle Up</AppText>
-            </TouchableOpacity>
-          )}
-          {isSettled && (
-            <View style={styles.settledBadge}>
-              <AppText style={styles.settledBadgeText}>✓ Settled</AppText>
-            </View>
-          )}
         </View>
       </TouchableOpacity>
     );
@@ -351,13 +522,8 @@ export const ExpenseLedger: React.FC = () => {
             const copyText = `${tx.note || cat.name}: ${amountDisplay} (${formattedDate})`;
             Clipboard.setStringAsync(copyText).catch(() => {});
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-          } else if (actionId === 'settle') {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-            setSettlingTx(tx);
-            setSettleAccountId(tx.accountId || accounts[0]?.id || 'acc_hdfc');
           } else if (actionId === 'select') {
-            Haptics.selectionAsync().catch(() => {});
-            setIsSelectMode(true);
+            handleToggleSelectMode();
             toggleSelectTransaction(tx.id);
           } else if (actionId === 'delete') {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
@@ -371,68 +537,141 @@ export const ExpenseLedger: React.FC = () => {
     );
   };
 
+  const renderFolderItem = (
+    folderKey: string,
+    folderName: string,
+    folderEmoji: string,
+    folderTxs: ExpenseTransaction[],
+    folderTotal: number,
+    isLast: boolean
+  ) => {
+    return (
+      <TouchableOpacity
+        key={folderKey}
+        style={[styles.folderRowContainer, !isLast && styles.rowDivider]}
+        activeOpacity={0.75}
+        onPress={() => {
+          Haptics.selectionAsync().catch(() => {});
+          router.push({
+            pathname: '/folder/[id]',
+            params: {
+              id: folderKey,
+              name: folderName,
+              emoji: folderEmoji,
+            },
+          });
+        }}
+      >
+        {/* Folder Icon Circle */}
+        <View style={styles.folderIconCircle}>
+          <AppText style={{ fontSize: 16 }}>{folderEmoji}</AppText>
+        </View>
+
+        {/* Center Info */}
+        <View style={styles.folderInfoCol}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <AppText style={styles.folderTitleText} numberOfLines={1}>
+              {folderName.toUpperCase()}
+            </AppText>
+            <View style={styles.folderCountBadge}>
+              <AppText style={styles.folderCountBadgeText}>{folderTxs.length}</AppText>
+            </View>
+          </View>
+          <AppText style={styles.folderSubText}>
+            Trip Folder • {folderTxs.length} item{folderTxs.length > 1 ? 's' : ''}
+          </AppText>
+        </View>
+
+        {/* Right Amount & Push Chevron */}
+        <View style={styles.folderRightCol}>
+          <AppText style={styles.folderTotalText}>
+            -{sym}{folderTotal.toLocaleString('en-IN')}
+          </AppText>
+          <ChevronRight size={15} color="#7E8394" />
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
   return (
     <View style={styles.screenContainer}>
       {/* Top Safe Area Background */}
       <View style={{ height: insets.top, backgroundColor: expenseColors.bgPrimary, zIndex: 10 }} />
 
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={[
-          styles.scrollContent,
-          {
-            paddingTop: 8,
-            paddingBottom: insets.bottom + 80,
-          },
-        ]}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Header */}
-        <View style={styles.headerRow}>
+      {/* ── FIXED TOP SECTION (Header, Smart Search, Bank Filters, Receivables Summary) ── */}
+      <View style={styles.fixedTopSection}>
+        {/* Top Header Row */}
+        <Animated.View
+          style={[
+            styles.headerRow,
+            {
+              opacity: animHeader,
+              transform: [
+                {
+                  translateY: animHeader.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [14, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
           <TouchableOpacity
-            style={styles.selectActionBtn}
-            onPress={() => {
-              setIsSelectMode(!isSelectMode);
-              if (isSelectMode) clearSelectedTransactions();
-            }}
+            onPress={handleToggleSelectMode}
+            activeOpacity={0.7}
+            style={styles.headerTextBtn}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >
-            <AppText style={styles.selectActionText}>
-              {isSelectMode ? 'Cancel' : 'Select'}
+            <AppText style={styles.headerTextBtnLabel}>
+              {isSelectMode ? 'Done' : 'Select'}
             </AppText>
           </TouchableOpacity>
 
-          {/* Mixed Typography Header: "THE LEDGER" */}
           <View style={styles.titleContainer}>
             <AppText style={styles.titleThe}>THE </AppText>
             <AppText style={styles.titleLedger}>LEDGER</AppText>
           </View>
 
-          <View style={styles.headerRightPlaceholder} />
-        </View>
+          {/* Placeholder spacer on right to keep THE LEDGER centered */}
+          <View style={styles.headerRightSpacer} />
+        </Animated.View>
 
-        {/* On-Device AI Smart Search & Query Card */}
-        <View style={styles.smartSearchCard}>
+        {/* Smart Search Card */}
+        <Animated.View
+          style={[
+            styles.smartSearchCard,
+            {
+              opacity: animSearch,
+              transform: [
+                {
+                  translateY: animSearch.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [16, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
           <View style={styles.smartSearchHeadingRow}>
             <View style={styles.headingTitleLeft}>
               <Sparkles size={14} color={expenseColors.accentPeach} />
-              <AppText style={styles.smartSearchHeading}>ON-DEVICE AI QUERY</AppText>
+              <AppText style={styles.smartSearchHeading}>SMART SEARCH</AppText>
             </View>
-            {/* <View style={styles.hardwareBadge}>
-              <Cpu size={10} color="#5CE49A" />
-              <AppText style={styles.hardwareBadgeText}>
-                {Platform.OS === 'ios' ? ' Neural Engine' : '🤖 NNAPI ML'}
-              </AppText>
-            </View> */}
           </View>
 
           {/* Search Input Box */}
-          <View style={styles.inputContainer}>
-            <Search size={16} color={expenseColors.textMuted} style={{ marginRight: 8 }} />
+          <View style={[styles.inputContainer, isSearchFocused && styles.inputContainerFocused]}>
+            <Search size={15} color={isSearchFocused ? expenseColors.accentPeach : '#6C7082'} style={{ marginRight: 8 }} />
             <TextInput
+              ref={searchInputRef}
               style={styles.searchInput}
-              placeholder='Ask: "How much spent on Food in September?"'
-              placeholderTextColor={expenseColors.textMuted}
+              placeholder={ROTATING_SEARCH_PLACEHOLDERS[placeholderIndex]}
+              placeholderTextColor="#555866"
               value={smartSearchQuery}
+              onFocus={() => setIsSearchFocused(true)}
+              onBlur={() => setIsSearchFocused(false)}
               onChangeText={(text) => {
                 if (text.length === 1 && smartSearchQuery.length === 0) {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
@@ -440,9 +679,14 @@ export const ExpenseLedger: React.FC = () => {
                 setSmartSearchQuery(text);
               }}
               autoCorrect={false}
-              returnKeyType="search"
+              returnKeyType="done"
+              blurOnSubmit={true}
+              onSubmitEditing={() => {
+                Keyboard.dismiss();
+                setIsSearchFocused(false);
+              }}
             />
-            {smartSearchQuery.length > 0 ? (
+            {smartSearchQuery.length > 0 && (
               <TouchableOpacity
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
@@ -453,53 +697,29 @@ export const ExpenseLedger: React.FC = () => {
               >
                 <X size={15} color={expenseColors.textSubtle} />
               </TouchableOpacity>
-            ) : (
-              <View style={styles.micBadge}>
-                <Mic size={15} color={expenseColors.textMuted} />
-              </View>
             )}
+            {isSearchFocused ? (
+              <TouchableOpacity
+                onPress={() => {
+                  Haptics.selectionAsync().catch(() => {});
+                  Keyboard.dismiss();
+                  searchInputRef.current?.blur();
+                  setIsSearchFocused(false);
+                }}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                style={styles.doneDismissBtn}
+              >
+                <AppText style={styles.doneDismissText}>Done</AppText>
+              </TouchableOpacity>
+            ) : smartSearchQuery.length === 0 ? (
+              <View style={styles.micBadge}>
+                <Mic size={15} color="#555866" />
+              </View>
+            ) : null}
           </View>
+        </Animated.View>
 
-          {/* Smart AI Query Preset Chips */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.queryPresetScroll}
-          >
-            {SMART_QUERY_PRESETS.map((preset) => {
-              const isSelected = smartSearchQuery === preset.query;
-              return (
-                <TouchableOpacity
-                  key={preset.label}
-                  style={[
-                    styles.presetQueryChip,
-                    isSelected && styles.presetQueryChipActive,
-                  ]}
-                  activeOpacity={0.7}
-                  onPress={() => {
-                    Haptics.selectionAsync().catch(() => {});
-                    if (isSelected) {
-                      setSmartSearchQuery('');
-                    } else {
-                      setSmartSearchQuery(preset.query);
-                    }
-                  }}
-                >
-                  <AppText
-                    style={[
-                      styles.presetQueryText,
-                      isSelected && styles.presetQueryTextActive,
-                    ]}
-                  >
-                    {preset.label}
-                  </AppText>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </View>
-
-        {/* ── ON-DEVICE AI INSIGHT CARD (Rendered when a query is active) ── */}
+        {/* On-Device AI Insight Card */}
         {aiResult && (
           <View style={styles.aiInsightCard}>
             <View style={styles.aiInsightTopRow}>
@@ -512,7 +732,6 @@ export const ExpenseLedger: React.FC = () => {
 
             <AppText style={styles.aiAnswerText}>{aiResult.naturalLanguageAnswer}</AppText>
 
-            {/* AI Metrics Row */}
             {aiResult.metrics.length > 0 && (
               <View style={styles.aiMetricsRow}>
                 {aiResult.metrics.map((m) => (
@@ -526,198 +745,255 @@ export const ExpenseLedger: React.FC = () => {
           </View>
         )}
 
-        {/* Account Filters Row ONLY */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterScrollContainer}
-          style={styles.filterScrollView}
+        {/* Account Filters Row (All, HDFC, Slice, Cash...) */}
+        <Animated.View
+          style={{
+            opacity: animFilters,
+            transform: [
+              {
+                translateY: animFilters.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [14, 0],
+                }),
+              },
+            ],
+          }}
         >
-          {accountFilterList.map((filterName) => {
-            const isActive = activeAccountFilter.toLowerCase() === filterName.toLowerCase();
-            return (
-              <TouchableOpacity
-                key={filterName}
-                style={[
-                  styles.filterPill,
-                  isActive ? styles.filterPillActive : styles.filterPillInactive,
-                ]}
-                activeOpacity={0.7}
-                onPress={() => {
-                  Haptics.selectionAsync().catch(() => {});
-                  setActiveAccountFilter(filterName);
-                }}
-              >
-                <AppText
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={styles.filterScrollContainer}
+            style={styles.filterScrollView}
+          >
+            {accountFilterList.map((filterName) => {
+              const isActive = activeAccountFilter.toLowerCase() === filterName.toLowerCase();
+              return (
+                <TouchableOpacity
+                  key={filterName}
                   style={[
-                    styles.filterPillText,
-                    isActive ? styles.filterTextActive : styles.filterTextInactive,
+                    styles.filterPill,
+                    isActive ? styles.filterPillActive : styles.filterPillInactive,
                   ]}
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    setIsSearchFocused(false);
+                    Haptics.selectionAsync().catch(() => {});
+                    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                    setActiveAccountFilter(filterName);
+                  }}
                 >
-                  {filterName}
-                </AppText>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
+                  <AppText
+                    style={[
+                      styles.filterPillText,
+                      isActive ? styles.filterTextActive : styles.filterTextInactive,
+                    ]}
+                  >
+                    {filterName}
+                  </AppText>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </Animated.View>
 
-        {/* Bulk Action Controls in Select Mode */}
-        {isSelectMode && (
-          <View style={styles.bulkActionBar}>
-            <TouchableOpacity onPress={selectAllTransactions}>
-              <AppText style={styles.bulkActionText}>Select All</AppText>
-            </TouchableOpacity>
+        {/* Compact Debts & Receivables Summary Bar (Links to /receivables) */}
+        {hasPendingDebts && !isSelectMode && (
+          <TouchableOpacity
+            style={styles.compactLentRow}
+            activeOpacity={0.75}
+            onPress={() => {
+              Keyboard.dismiss();
+              setIsSearchFocused(false);
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+              router.push('/receivables');
+            }}
+          >
+            <View style={styles.compactLentLeft}>
+              <View style={styles.compactLentIconCircle}>
+                <HandCoins size={16} color="#A0A5B5" />
+              </View>
+              <View style={styles.compactLentTextCol}>
+                <AppText style={styles.compactLentTitle}>
+                  {totalPendingLent > 0 && totalPendingBorrow > 0
+                    ? 'DEBTS & RECEIVABLES'
+                    : totalPendingLent > 0
+                    ? 'MONEY TO COLLECT'
+                    : 'MONEY TO PAY'}
+                </AppText>
+                <AppText style={styles.compactLentSubtitle}>
+                  {totalPendingLent > 0 && totalPendingBorrow > 0
+                    ? `${pendingLentList.length} to collect · ${pendingBorrowList.length} to pay`
+                    : totalPendingLent > 0
+                    ? `${pendingLentList.length} ${pendingLentList.length === 1 ? 'person' : 'people'} · pending`
+                    : `${pendingBorrowList.length} ${pendingBorrowList.length === 1 ? 'person' : 'people'} · to pay`}
+                </AppText>
+              </View>
+            </View>
+            <View style={styles.compactLentRight}>
+              <ChevronRight size={16} color="#7E8394" />
+            </View>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* ── INDEPENDENT SCROLLABLE TRANSACTIONS LIST ── */}
+      <ScrollView
+        style={styles.transactionsScroll}
+        contentContainerStyle={[
+          styles.transactionsScrollContent,
+          {
+            paddingTop: 8,
+            paddingBottom: insets.bottom + (isSelectMode ? 100 : 70),
+          },
+        ]}
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
+        onScrollBeginDrag={() => {
+          Keyboard.dismiss();
+          setIsSearchFocused(false);
+        }}
+        showsVerticalScrollIndicator={false}
+      >
+        <Animated.View
+          style={{
+            opacity: animList,
+            transform: [
+              {
+                translateY: animList.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [16, 0],
+                }),
+              },
+            ],
+          }}
+        >
+          {Object.keys(dateGrouped).length === 0 ? (
+            <View style={styles.emptyStateContainer}>
+              <View style={styles.emptyIconCircle}>
+                <Search size={22} color={expenseColors.textMuted} />
+              </View>
+              <AppText style={styles.emptyStateTitle}>
+                {smartSearchQuery ? 'No matching transactions' : 'No transactions found'}
+              </AppText>
+              <AppText style={styles.emptyStateSubtitle}>
+                {smartSearchQuery
+                  ? `No transactions matched "${smartSearchQuery}".`
+                  : 'Try adjusting your account selection or add a new transaction.'}
+              </AppText>
+              {smartSearchQuery.length > 0 && (
+                <TouchableOpacity
+                  style={styles.clearSearchBtn}
+                  onPress={() => {
+                    Haptics.selectionAsync().catch(() => {});
+                    setSmartSearchQuery('');
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <AppText style={styles.clearSearchBtnText}>Clear Search</AppText>
+                </TouchableOpacity>
+              )}
+            </View>
+          ) : (
+            Object.entries(dateGrouped).map(([dateHeading, items]) => (
+              <View key={dateHeading} style={styles.dateGroupContainer}>
+                {/* Centered Date Header */}
+                <AppText style={styles.dateHeadingText}>{dateHeading}</AppText>
+
+                {/* Group Card */}
+                <View style={styles.groupCard}>
+                  {items.map((item, idx) => {
+                    const isLast = idx === items.length - 1;
+                    if (item.type === 'folder' && item.folderKey && item.folderTxs) {
+                      return renderFolderItem(
+                        item.folderKey,
+                        item.folderName || 'Event',
+                        item.folderEmoji || '🌴',
+                        item.folderTxs,
+                        item.folderTotal || 0,
+                        isLast
+                      );
+                    } else if (item.tx) {
+                      return renderTransactionItem(item.tx, isLast);
+                    }
+                    return null;
+                  })}
+                </View>
+              </View>
+            ))
+          )}
+        </Animated.View>
+      </ScrollView>
+
+      {/* ── FIXED BOTTOM ACTION BAR IN SELECTION MODE (Exact reference layout & proportions) ── */}
+      {isSelectMode && (
+        <View style={[styles.bottomActionBarContainer, { bottom: Math.max(insets.bottom, 12) }]}>
+          {/* Left: Selected Count */}
+          <AppText style={styles.selectedCountText}>
+            {selectedTransactionIds.length} Selected
+          </AppText>
+
+          {/* Right Action Buttons: Delete, Category, X */}
+          <View style={styles.actionBarRightButtons}>
+            {/* Delete Action Button */}
             <TouchableOpacity
+              style={[
+                styles.deleteActionButton,
+                selectedTransactionIds.length === 0 && { opacity: 0.5 },
+              ]}
+              disabled={selectedTransactionIds.length === 0}
               onPress={() => {
                 if (selectedTransactionIds.length > 0) {
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
                   removeTransactions(selectedTransactionIds);
+                  clearSelectedTransactions();
                   setIsSelectMode(false);
                 }
               }}
+              activeOpacity={0.8}
             >
-              <View style={styles.deleteBtnContent}>
-                <Trash2 size={16} color={expenseColors.accentRed} />
-                <AppText style={styles.deleteActionText}>
-                  Delete ({selectedTransactionIds.length})
-                </AppText>
+              <Trash2 size={14} color="#FFFFFF" />
+              <AppText style={styles.deleteActionButtonText}>Delete</AppText>
+            </TouchableOpacity>
+
+            {/* Category Action Menu Button */}
+            <NativeLiquidMenu
+              title="Assign Category"
+              actions={categoryMenuActions}
+              onSelect={(catId) => {
+                if (selectedTransactionIds.length > 0) {
+                  updateTransactionsCategory(selectedTransactionIds, catId);
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+                  clearSelectedTransactions();
+                  setIsSelectMode(false);
+                } else {
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+                }
+              }}
+            >
+              <View
+                style={[
+                  styles.categoryActionButton,
+                  selectedTransactionIds.length === 0 && { opacity: 0.5 },
+                ]}
+              >
+                <AppText style={styles.categoryActionButtonText}>Category</AppText>
               </View>
+            </NativeLiquidMenu>
+
+            {/* Close / X Icon Button */}
+            <TouchableOpacity
+              style={styles.closeActionButton}
+              onPress={handleToggleSelectMode}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            >
+              <X size={18} color="#A0A5B5" />
             </TouchableOpacity>
           </View>
-        )}
+        </View>
+      )}
 
-        {/* DATE GROUPED VIEW (Standard Ledger View) */}
-        {Object.keys(dateGrouped).length === 0 ? (
-          <View style={styles.emptyStateContainer}>
-            <View style={styles.emptyIconCircle}>
-              <Search size={22} color={expenseColors.textMuted} />
-            </View>
-            <AppText style={styles.emptyStateTitle}>
-              {smartSearchQuery ? 'No matching transactions' : 'No transactions found'}
-            </AppText>
-            <AppText style={styles.emptyStateSubtitle}>
-              {smartSearchQuery
-                ? `No transactions matched "${smartSearchQuery}". Try asking about "Food", "Shopping", or "Expenses > 100".`
-                : 'Try adjusting your account selection or add a new transaction.'}
-            </AppText>
-            {smartSearchQuery.length > 0 && (
-              <TouchableOpacity
-                style={styles.clearSearchBtn}
-                onPress={() => {
-                  Haptics.selectionAsync().catch(() => {});
-                  setSmartSearchQuery('');
-                }}
-                activeOpacity={0.8}
-              >
-                <AppText style={styles.clearSearchBtnText}>Clear Search</AppText>
-              </TouchableOpacity>
-            )}
-          </View>
-        ) : (
-          Object.entries(dateGrouped).map(([dateHeading, txs]) => (
-            <View key={dateHeading} style={styles.dateGroupContainer}>
-              {/* Date Heading */}
-              <AppText style={styles.dateHeadingText}>{dateHeading}</AppText>
-
-              {/* Group Card */}
-              <View style={styles.groupCard}>
-                {txs.map((tx, idx) => renderTransactionItem(tx, idx === txs.length - 1))}
-              </View>
-            </View>
-          ))
-        )}
-      </ScrollView>
-
-      {/* 1-TAP SETTLE UP MODAL */}
-      <Modal
-        visible={settlingTx !== null}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setSettlingTx(null)}
-      >
-        <TouchableOpacity
-          style={styles.modalBackdrop}
-          activeOpacity={1}
-          onPress={() => setSettlingTx(null)}
-        >
-          <View style={styles.settleModalCard} onStartShouldSetResponder={() => true}>
-            <View style={styles.settleModalHeader}>
-              <View style={styles.settleHeaderLeft}>
-                <Check size={16} color="#2ECC71" strokeWidth={3} />
-                <AppText style={styles.settleModalTitle}>SETTLE RECEIVABLE</AppText>
-              </View>
-              <TouchableOpacity onPress={() => setSettlingTx(null)}>
-                <X size={18} color="#A0A5B5" />
-              </TouchableOpacity>
-            </View>
-
-            {settlingTx && (
-              <>
-                <AppText style={styles.settleModalDesc}>
-                  Receive payment from{' '}
-                  <AppText style={{ color: '#FFFFFF', fontWeight: '800' }}>
-                    {settlingTx.borrowerOrLender || settlingTx.split?.friendNames || 'Friend'}
-                  </AppText>
-                </AppText>
-
-                <View style={styles.settleAmountHero}>
-                  <AppText style={styles.settleAmountHeroText}>
-                    {sym}
-                    {(
-                      settlingTx.type === 'debt_lend'
-                        ? settlingTx.amount
-                        : settlingTx.split?.friendsShare || 0
-                    ).toLocaleString('en-IN')}
-                  </AppText>
-                </View>
-
-                <AppText style={styles.modalFieldLabel}>RECEIVE INTO ACCOUNT</AppText>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={{ gap: 8, marginVertical: 8 }}
-                >
-                  {accounts.map((acc) => {
-                    const isSelected = settleAccountId === acc.id;
-                    return (
-                      <TouchableOpacity
-                        key={acc.id}
-                        onPress={() => setSettleAccountId(acc.id)}
-                        style={[
-                          styles.settleAccChip,
-                          isSelected && styles.settleAccChipSelected,
-                        ]}
-                      >
-                        <AppText
-                          style={[
-                            styles.settleAccChipText,
-                            isSelected && { color: '#FFFFFF', fontWeight: '800' },
-                          ]}
-                        >
-                          {acc.name.toUpperCase()}
-                        </AppText>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-
-                <TouchableOpacity
-                  style={styles.settleConfirmBtn}
-                  activeOpacity={0.85}
-                  onPress={() => {
-                    if (settlingTx) {
-                      settleTransaction(settlingTx.id, settleAccountId);
-                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-                      setSettlingTx(null);
-                    }
-                  }}
-                >
-                  <AppText style={styles.settleConfirmBtnText}>Confirm & Deposit</AppText>
-                </TouchableOpacity>
-              </>
-            )}
-          </View>
-        </TouchableOpacity>
-      </Modal>
     </View>
   );
 };
@@ -727,29 +1003,33 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: expenseColors.bgPrimary,
   },
-  scrollView: {
+  fixedTopSection: {
+    backgroundColor: expenseColors.bgPrimary,
+    zIndex: 5,
+  },
+  transactionsScroll: {
     flex: 1,
   },
-  scrollContent: {
+  transactionsScrollContent: {
     flexGrow: 1,
   },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 6,
+    paddingHorizontal: 20,
+    paddingTop: 8,
     paddingBottom: 16,
   },
-  selectActionBtn: {
-    paddingVertical: 4,
-    paddingRight: 8,
+  headerTextBtn: {
+    minWidth: 60,
+    justifyContent: 'center',
   },
-  selectActionText: {
-    color: expenseColors.accentPeach,
+  headerTextBtnLabel: {
+    color: '#FF9D66',
     fontSize: 16,
-    lineHeight: 20,
     fontWeight: '600',
+    letterSpacing: 0.2,
   },
   titleContainer: {
     flexDirection: 'row',
@@ -769,22 +1049,21 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 1.0,
   },
-  headerRightPlaceholder: {
-    width: 48,
+  headerRightSpacer: {
+    minWidth: 60,
   },
   smartSearchCard: {
     backgroundColor: expenseColors.bgCard,
     borderRadius: 20,
     padding: 16,
     marginHorizontal: 16,
-    marginBottom: 12,
+    marginBottom: 16,
     borderWidth: 1,
-    borderColor: 'rgba(235, 178, 154, 0.2)',
+    borderColor: 'rgba(255, 255, 255, 0.05)',
   },
   smartSearchHeadingRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     marginBottom: 12,
   },
   headingTitleLeft: {
@@ -795,78 +1074,54 @@ const styles = StyleSheet.create({
   smartSearchHeading: {
     color: expenseColors.textPrimary,
     fontSize: 12,
-    lineHeight: 16,
     fontWeight: '800',
-    letterSpacing: 1.0,
-  },
-  hardwareBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(92, 228, 154, 0.12)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-    borderWidth: 0.5,
-    borderColor: 'rgba(92, 228, 154, 0.3)',
-  },
-  hardwareBadgeText: {
-    color: '#5CE49A',
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.4,
+    letterSpacing: 0.8,
   },
   inputContainer: {
-    backgroundColor: '#22242F',
-    borderRadius: 14,
+    backgroundColor: '#1E212B',
+    borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
     flexDirection: 'row',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  inputContainerFocused: {
+    borderColor: 'rgba(235, 178, 154, 0.45)',
+    backgroundColor: '#222532',
   },
   searchInput: {
     flex: 1,
     color: expenseColors.textPrimary,
-    fontSize: 14,
+    fontSize: 13,
     padding: 0,
   },
   clearBtn: {
     padding: 4,
+    marginRight: 4,
+  },
+  doneDismissBtn: {
+    backgroundColor: 'rgba(235, 178, 154, 0.15)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    marginLeft: 4,
+  },
+  doneDismissText: {
+    color: expenseColors.accentPeach,
+    fontSize: 12,
+    fontWeight: '800',
   },
   micBadge: {
     padding: 4,
   },
-  queryPresetScroll: {
-    paddingTop: 12,
-    gap: 8,
-  },
-  presetQueryChip: {
-    backgroundColor: '#1E202B',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
-  },
-  presetQueryChipActive: {
-    backgroundColor: 'rgba(235, 178, 154, 0.22)',
-    borderColor: expenseColors.accentPeach,
-  },
-  presetQueryText: {
-    color: expenseColors.textSubtle,
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  presetQueryTextActive: {
-    color: expenseColors.accentPeach,
-    fontWeight: '800',
-  },
   aiInsightCard: {
     backgroundColor: 'rgba(235, 178, 154, 0.08)',
     marginHorizontal: 16,
-    marginBottom: 12,
-    borderRadius: 16,
-    padding: 14,
+    marginBottom: 14,
+    borderRadius: 18,
+    padding: 16,
     borderWidth: 1,
     borderColor: 'rgba(235, 178, 154, 0.35)',
   },
@@ -874,16 +1129,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 8,
+    marginBottom: 10,
   },
   aiInsightBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
     backgroundColor: 'rgba(235, 178, 154, 0.2)',
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 7,
   },
   aiInsightBadgeText: {
     color: expenseColors.accentPeach,
@@ -893,15 +1148,15 @@ const styles = StyleSheet.create({
   },
   aiEngineSubtext: {
     color: expenseColors.textMuted,
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '500',
   },
   aiAnswerText: {
     color: '#FFFFFF',
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 14,
+    lineHeight: 20,
     fontWeight: '600',
-    marginBottom: 10,
+    marginBottom: 12,
   },
   aiMetricsRow: {
     flexDirection: 'row',
@@ -910,9 +1165,9 @@ const styles = StyleSheet.create({
   },
   metricPill: {
     backgroundColor: '#1E202B',
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 9,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
     flexDirection: 'row',
@@ -921,78 +1176,43 @@ const styles = StyleSheet.create({
   },
   metricLabel: {
     color: expenseColors.textMuted,
-    fontSize: 9,
+    fontSize: 10,
     fontWeight: '800',
     letterSpacing: 0.5,
   },
   metricValue: {
     color: '#5CE49A',
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '800',
   },
-  typeFilterScrollContainer: {
+  filterScrollView: {
+    height: 42,
+    flexGrow: 0,
+    flexShrink: 0,
+    marginBottom: 16,
+  },
+  filterScrollContainer: {
+    height: 42,
     paddingHorizontal: 16,
     gap: 8,
-    marginBottom: 10,
+    alignItems: 'center',
+    flexDirection: 'row',
   },
-  typeFilterPill: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 14,
-    borderWidth: 1,
+  filterPill: {
+    height: 36,
+    paddingHorizontal: 16,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  typeFilterPillActive: {
-    backgroundColor: 'rgba(235, 178, 154, 0.18)',
-    borderColor: expenseColors.accentPeach,
-  },
-  typeFilterPillInactive: {
-    backgroundColor: '#1E202B',
-    borderColor: 'rgba(255, 255, 255, 0.05)',
-  },
-  typeFilterPillText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  typeFilterTextActive: {
-    color: expenseColors.accentPeach,
-    fontWeight: '800',
-  },
-  typeFilterTextInactive: {
-    color: expenseColors.textSubtle,
-  },
-filterScrollView: {
-  height: 44,
-  flexGrow: 0,
-  flexShrink: 0,
-},
-filterScrollContainer: {
-  height: 44,
-  paddingHorizontal: 16,
-  gap: 8,
-  marginBottom: 16,
-  alignItems: 'center',
-  flexDirection: 'row',
-},
-filterPill: {
-  height: 36,
-  minHeight: 36,
-  paddingHorizontal: 14,
-  borderRadius: 14,
-  alignItems: 'center',
-  justifyContent: 'center',
-  alignSelf: 'center',
-  flexGrow: 0,
-  flexShrink: 0,
-},
   filterPillActive: {
     backgroundColor: '#FFFFFF',
   },
   filterPillInactive: {
-    backgroundColor: '#1E202B',
+    backgroundColor: '#1E212B',
   },
   filterPillText: {
-    fontSize: 12,
-    lineHeight: 16,
+    fontSize: 13,
     fontWeight: '600',
   },
   filterTextActive: {
@@ -1000,98 +1220,30 @@ filterPill: {
     fontWeight: '800',
   },
   filterTextInactive: {
-    color: expenseColors.textSubtle,
+    color: '#7E8394',
   },
-  bulkActionBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    marginBottom: 16,
-  },
-  bulkActionText: {
-    color: expenseColors.accentPeach,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  deleteBtnContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  deleteActionText: {
-    color: expenseColors.accentRed,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  tripCapsuleContainer: {
-    marginBottom: 16,
-  },
-  tripCapsuleHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#1A1C24',
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    marginHorizontal: 16,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(235, 178, 154, 0.25)',
-  },
-  tripCapsuleTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    flex: 1,
-  },
-  tripCapsuleName: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '800',
-    letterSpacing: 0.4,
-  },
-  tripCountBadge: {
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  tripCountBadgeText: {
-    color: '#A0A5B5',
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  tripCapsuleRightRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  tripTotalText: {
-    color: expenseColors.accentPeach,
-    fontSize: 14,
-    fontWeight: '800',
-  },
+
+  // ── Date Group Header (Centered, matching exact reference) ──
   dateGroupContainer: {
     marginBottom: 20,
   },
   dateHeadingText: {
-    color: expenseColors.textMuted,
-    fontSize: 12,
-    lineHeight: 16,
+    color: '#7E8394',
+    fontSize: 11,
+    lineHeight: 15,
     fontWeight: '700',
-    letterSpacing: 1.2,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
     textAlign: 'center',
-    marginBottom: 10,
-    paddingTop: 12,
+    marginBottom: 12,
   },
+
   groupCard: {
-    backgroundColor: expenseColors.bgCard,
+    backgroundColor: '#181A23',
     borderRadius: 20,
     marginHorizontal: 16,
     borderWidth: 1,
-    borderColor: expenseColors.borderCard,
+    borderColor: 'rgba(255, 255, 255, 0.05)',
     overflow: 'hidden',
   },
   transactionRow: {
@@ -1104,13 +1256,86 @@ filterPill: {
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255, 255, 255, 0.04)',
   },
-  checkboxContainer: {
+
+  // ── Folder Row (Single item that pushes into dedicated page) ──
+  folderRowContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  folderIconCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: '#202330',
+    alignItems: 'center',
+    justifyContent: 'center',
     marginRight: 12,
   },
+  folderInfoCol: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  folderTitleText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  folderCountBadge: {
+    backgroundColor: 'rgba(235, 178, 154, 0.18)',
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 6,
+  },
+  folderCountBadgeText: {
+    color: expenseColors.accentPeach,
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  folderSubText: {
+    color: '#7E8394',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  folderRightCol: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  folderTotalText: {
+    color: expenseColors.accentPeach,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+
+  // ── Circular Checkbox (Shifted right in selection mode) ──
+  checkboxTouchTarget: {
+    paddingRight: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  radioUnselected: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: '#4E5365',
+    backgroundColor: 'transparent',
+  },
+  radioSelected: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#FF9D66',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
   categoryIconCircle: {
     width: 38,
     height: 38,
-    borderRadius: 19,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
@@ -1120,7 +1345,7 @@ filterPill: {
     justifyContent: 'center',
   },
   transactionTitle: {
-    color: expenseColors.textPrimary,
+    color: '#FFFFFF',
     fontSize: 14,
     lineHeight: 18,
     fontWeight: '700',
@@ -1134,26 +1359,43 @@ filterPill: {
     gap: 6,
   },
   transferFlowPill: {
-    backgroundColor: 'rgba(144, 202, 249, 0.2)',
+    backgroundColor: 'rgba(96, 165, 250, 0.15)',
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 6,
   },
   transferFlowText: {
-    color: expenseColors.accentBlue,
+    color: '#60A5FA',
     fontSize: 11,
     fontWeight: '700',
   },
-  debtFlowPill: {
-    backgroundColor: 'rgba(242, 153, 74, 0.2)',
+  debtLentPill: {
+    backgroundColor: 'rgba(242, 139, 130, 0.12)',
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 6,
   },
-  debtFlowText: {
-    color: '#F2994A',
+  debtLentText: {
+    color: '#F28B82',
     fontSize: 11,
     fontWeight: '700',
+  },
+  debtBorrowPill: {
+    backgroundColor: 'rgba(251, 191, 36, 0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  debtBorrowText: {
+    color: '#FBBF24',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  settledPill: {
+    backgroundColor: 'rgba(124, 217, 168, 0.12)',
+  },
+  settledPillText: {
+    color: '#7CD9A8',
   },
   tripTagBadge: {
     flexDirection: 'row',
@@ -1170,25 +1412,26 @@ filterPill: {
     fontWeight: '700',
   },
   splitLedgerDetail: {
-    marginTop: 4,
+    marginTop: 6,
   },
   splitLedgerDetailText: {
     color: '#8E919D',
-    fontSize: 11,
+    fontSize: 12,
   },
   categoryPill: {
+    backgroundColor: '#232633',
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 8,
   },
   categoryPillText: {
     fontSize: 11,
-    lineHeight: 14,
+    lineHeight: 15,
     fontWeight: '600',
   },
   transactionDateText: {
-    color: expenseColors.textMuted,
-    fontSize: 12,
+    color: '#7E8394',
+    fontSize: 11,
     lineHeight: 15,
     fontWeight: '500',
   },
@@ -1198,23 +1441,32 @@ filterPill: {
   },
   transactionAmountText: {
     fontSize: 15,
-    lineHeight: 18,
+    lineHeight: 19,
     fontWeight: '800',
   },
-  accountSubText: {
-    color: expenseColors.textMuted,
-    fontSize: 10,
-    fontWeight: '600',
-    marginTop: 2,
-  },
   expenseAmount: {
-    color: expenseColors.accentRed,
+    color: '#FF6B6B',
   },
   incomeAmount: {
-    color: expenseColors.accentGreen,
+    color: '#34D399',
   },
   transferAmount: {
-    color: '#4A90E2',
+    color: '#60A5FA',
+  },
+  debtLendPendingAmount: {
+    color: '#F28B82', // Pastel Coral / Red when pending
+  },
+  debtBorrowPendingAmount: {
+    color: '#FBBF24', // Warm Yellow when pending
+  },
+  settledAmount: {
+    color: '#7CD9A8', // Pastel Green when settled
+  },
+  debtLendAmount: {
+    color: '#F28B82',
+  },
+  debtBorrowAmount: {
+    color: '#FBBF24',
   },
   outlierBadge: {
     backgroundColor: 'rgba(255, 157, 102, 0.15)',
@@ -1227,46 +1479,19 @@ filterPill: {
     fontSize: 9,
     fontWeight: '800',
   },
-  settleUpBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    backgroundColor: 'rgba(46, 204, 113, 0.15)',
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 6,
-    marginTop: 4,
-  },
-  settleUpBtnText: {
-    color: '#2ECC71',
-    fontSize: 9,
-    fontWeight: '800',
-  },
-  settledBadge: {
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-    marginTop: 4,
-  },
-  settledBadgeText: {
-    color: expenseColors.textMuted,
-    fontSize: 9,
-    fontWeight: '700',
-  },
   emptyStateContainer: {
-    paddingVertical: 40,
+    paddingVertical: 48,
     alignItems: 'center',
-    paddingHorizontal: 24,
+    paddingHorizontal: 28,
   },
   emptyIconCircle: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: '#1E202B',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 14,
+    marginBottom: 16,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
   },
@@ -1298,92 +1523,114 @@ filterPill: {
     fontWeight: '700',
   },
 
-  // ── Settle Up Modal ──
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 18,
-  },
-  settleModalCard: {
-    width: '100%',
-    backgroundColor: '#1A1C24',
-    borderRadius: 22,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  settleModalHeader: {
+  // ── Compact Lent / Receivables Bar (Fixed above transaction feed) ──
+  compactLentRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    backgroundColor: '#181A23',
+    marginHorizontal: 16,
+    marginBottom: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
   },
-  settleHeaderLeft: {
+  compactLentLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  compactLentIconCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  compactLentTextCol: {
+    justifyContent: 'center',
+  },
+  compactLentTitle: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+  },
+  compactLentSubtitle: {
+    color: '#7E8394',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  compactLentRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingLeft: 4,
+  },
+
+  // ── FIXED BOTTOM ACTION BAR (Exact match to reference image) ──
+  bottomActionBarContainer: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    backgroundColor: '#12141C',
+    borderRadius: 22,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 8,
+    zIndex: 999,
+  },
+  selectedCountText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  actionBarRightButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  deleteActionButton: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-  },
-  settleModalTitle: {
-    color: '#2ECC71',
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 0.8,
-  },
-  settleModalDesc: {
-    color: '#8E919D',
-    fontSize: 12,
-    marginBottom: 8,
-  },
-  settleAmountHero: {
-    backgroundColor: '#232633',
-    borderRadius: 16,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginBottom: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(46, 204, 113, 0.25)',
-  },
-  settleAmountHeroText: {
-    color: '#2ECC71',
-    fontSize: 28,
-    fontWeight: '800',
-  },
-  modalFieldLabel: {
-    color: '#7E8394',
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.6,
-    marginBottom: 4,
-  },
-  settleAccChip: {
-    backgroundColor: '#232633',
-    paddingHorizontal: 12,
+    backgroundColor: '#FF725E',
+    paddingHorizontal: 16,
     paddingVertical: 8,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 18,
   },
-  settleAccChipSelected: {
-    borderColor: '#2ECC71',
-    backgroundColor: 'rgba(46, 204, 113, 0.15)',
-  },
-  settleAccChipText: {
-    color: '#8E919D',
-    fontSize: 11,
+  deleteActionButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
     fontWeight: '700',
   },
-  settleConfirmBtn: {
-    backgroundColor: '#2ECC71',
-    borderRadius: 14,
-    paddingVertical: 13,
+  categoryActionButton: {
+    backgroundColor: '#FF9D66',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 18,
     alignItems: 'center',
-    marginTop: 14,
+    justifyContent: 'center',
   },
-  settleConfirmBtnText: {
-    color: '#0D0E12',
+  categoryActionButtonText: {
+    color: '#FFFFFF',
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '700',
+  },
+  closeActionButton: {
+    padding: 6,
+    marginLeft: 2,
   },
 });

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   View,
   StyleSheet,
@@ -8,6 +8,7 @@ import {
   Alert,
   ActivityIndicator,
   Modal,
+  Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -111,6 +112,10 @@ export const ExpenseImport: React.FC = () => {
   const [stagedTransactions, setStagedTransactions] = useState<ParsedStagedTxn[]>([]);
   const [isReviewModalVisible, setIsReviewModalVisible] = useState<boolean>(false);
   const [stagedAccountId, setStagedAccountId] = useState<string>(accounts[0]?.id || '');
+
+  const animHeader = useRef(new Animated.Value(1)).current;
+  const animDropzone = useRef(new Animated.Value(1)).current;
+  const animAccount = useRef(new Animated.Value(1)).current;
 
   const selectedStagedCount = useMemo(() => {
     return stagedTransactions.filter((t) => t.selected).length;
@@ -411,7 +416,22 @@ export const ExpenseImport: React.FC = () => {
         showsVerticalScrollIndicator={false}
       >
         {/* Header: "IMPORT HUB" */}
-        <View style={styles.headerContainer}>
+        <Animated.View
+          style={[
+            styles.headerContainer,
+            {
+              opacity: animHeader,
+              transform: [
+                {
+                  translateY: animHeader.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [14, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
           <View style={styles.titleContainer}>
             <AppText style={styles.titleImport}>IMPORT </AppText>
             <AppText style={styles.titleHub}>HUB</AppText>
@@ -422,76 +442,105 @@ export const ExpenseImport: React.FC = () => {
             Upload CSV, PDF statement, XLSX, or photo of receipt.{'\n'}
             Parsed transactions go to your staging inbox for review before being added.
           </AppText>
-        </View>
+        </Animated.View>
 
         {/* File Upload Dropzone Card */}
-        <TouchableOpacity
-          style={styles.dropzoneCard}
-          activeOpacity={0.85}
-          onPress={handlePickDocument}
+        <Animated.View
+          style={{
+            opacity: animDropzone,
+            transform: [
+              {
+                translateY: animDropzone.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [16, 0],
+                }),
+              },
+            ],
+          }}
         >
-          {importStatus === 'uploading' || importStatus === 'processing' ? (
-            <View style={styles.dropzoneInnerContent}>
-              <ActivityIndicator size="large" color={expenseColors.accentPeach} />
-              <AppText style={styles.dropzoneTitle}>
-                {importStatus === 'uploading' ? 'Reading statement...' : 'Extracting & auto-categorizing...'}
-              </AppText>
-            </View>
-          ) : importStatus === 'success' ? (
-            <View style={styles.dropzoneInnerContent}>
-              <CheckCircle size={44} color={expenseColors.accentGreen} strokeWidth={2} />
-              <AppText style={styles.dropzoneTitle}>
-                Imported {selectedStagedCount} Transaction{selectedStagedCount !== 1 ? 's' : ''}!
-              </AppText>
-              <AppText style={styles.dropzoneSubtext}>
-                {uploadedFileName || 'Bank Statement'} added to Ledger
-              </AppText>
-
-              <View style={styles.successActionsRow}>
-                <TouchableOpacity
-                  style={styles.viewLedgerBtn}
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    Haptics.selectionAsync();
-                    router.push('/(tabs)/ledger');
-                  }}
-                >
-                  <AppText style={styles.viewLedgerBtnText}>View in Ledger</AppText>
-                  <ArrowRight size={13} color="#0F1015" strokeWidth={2.5} />
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.resetBtn}
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    Haptics.selectionAsync();
-                    setImportStatus('idle');
-                    setUploadedFileName(null);
-                  }}
-                >
-                  <AppText style={styles.resetBtnText}>Upload Another</AppText>
-                </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.dropzoneCard}
+            activeOpacity={0.85}
+            onPress={handlePickDocument}
+          >
+            {importStatus === 'uploading' || importStatus === 'processing' ? (
+              <View style={styles.dropzoneInnerContent}>
+                <ActivityIndicator size="large" color={expenseColors.accentPeach} />
+                <AppText style={styles.dropzoneTitle}>
+                  {importStatus === 'uploading' ? 'Reading statement...' : 'Extracting & auto-categorizing...'}
+                </AppText>
               </View>
-            </View>
-          ) : (
-            <View style={styles.dropzoneInnerContent}>
-              <View style={styles.uploadIconContainer}>
-                <UploadCloud size={32} color={expenseColors.textPrimary} strokeWidth={2} />
+            ) : importStatus === 'success' ? (
+              <View style={styles.dropzoneInnerContent}>
+                <CheckCircle size={44} color={expenseColors.accentGreen} strokeWidth={2} />
+                <AppText style={styles.dropzoneTitle}>
+                  Imported {selectedStagedCount} Transaction{selectedStagedCount !== 1 ? 's' : ''}!
+                </AppText>
+                <AppText style={styles.dropzoneSubtext}>
+                  {uploadedFileName || 'Bank Statement'} added to Ledger
+                </AppText>
+
+                <View style={styles.successActionsRow}>
+                  <TouchableOpacity
+                    style={styles.viewLedgerBtn}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      Haptics.selectionAsync();
+                      router.push('/(tabs)/ledger');
+                    }}
+                  >
+                    <AppText style={styles.viewLedgerBtnText}>View in Ledger</AppText>
+                    <ArrowRight size={13} color="#0F1015" strokeWidth={2.5} />
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.resetBtn}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      Haptics.selectionAsync();
+                      setImportStatus('idle');
+                      setUploadedFileName(null);
+                    }}
+                  >
+                    <AppText style={styles.resetBtnText}>Upload Another</AppText>
+                  </TouchableOpacity>
+                </View>
               </View>
+            ) : (
+              <View style={styles.dropzoneInnerContent}>
+                <View style={styles.uploadIconContainer}>
+                  <UploadCloud size={32} color={expenseColors.textPrimary} strokeWidth={2} />
+                </View>
 
-              <AppText style={styles.dropzoneTitle}>
-                DROP BANK STATEMENT OR BROWSE
-              </AppText>
+                <AppText style={styles.dropzoneTitle}>
+                  DROP BANK STATEMENT OR BROWSE
+                </AppText>
 
-              <AppText style={styles.dropzoneSubtext}>
-                PDF • CSV • XLSX • RECEIPT IMAGES
-              </AppText>
-            </View>
-          )}
-        </TouchableOpacity>
+                <AppText style={styles.dropzoneSubtext}>
+                  PDF • CSV • XLSX • RECEIPT IMAGES
+                </AppText>
+              </View>
+            )}
+          </TouchableOpacity>
+        </Animated.View>
 
         {/* Account Selection Card */}
-        <View style={styles.accountCard}>
+        <Animated.View
+          style={[
+            styles.accountCard,
+            {
+              opacity: animAccount,
+              transform: [
+                {
+                  translateY: animAccount.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [18, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
           <View style={styles.accountHeaderRow}>
             <CreditCard size={18} color={expenseColors.textPrimary} />
             <AppText style={styles.accountCardTitle}>DEFAULT TARGET ACCOUNT</AppText>
@@ -534,7 +583,7 @@ export const ExpenseImport: React.FC = () => {
           <AppText style={styles.accountCardDescription}>
             Transactions will be assigned to this account upon import.
           </AppText>
-        </View>
+        </Animated.View>
       </ScrollView>
 
       {/* ══════════════════════════════════════════════════════════
@@ -737,8 +786,8 @@ const styles = StyleSheet.create({
   },
   uploadDescription: {
     color: expenseColors.textMuted,
-    fontSize: 12,
-    lineHeight: 18,
+    fontSize: 13,
+    lineHeight: 20,
     textAlign: 'center',
   },
   dropzoneCard: {
@@ -777,10 +826,10 @@ const styles = StyleSheet.create({
   },
   dropzoneSubtext: {
     color: expenseColors.textMuted,
-    fontSize: 11,
-    lineHeight: 15,
+    fontSize: 12,
+    lineHeight: 16,
     fontWeight: '600',
-    letterSpacing: 1.0,
+    letterSpacing: 0.8,
     textAlign: 'center',
   },
   successActionsRow: {
@@ -854,7 +903,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   dropdownOptionsList: {
-    backgroundColor: '#1A1C24',
+    backgroundColor: '#1A1D23',
     borderRadius: 12,
     marginBottom: 10,
     overflow: 'hidden',
@@ -875,8 +924,8 @@ const styles = StyleSheet.create({
   },
   accountCardDescription: {
     color: expenseColors.textMuted,
-    fontSize: 12,
-    lineHeight: 16,
+    fontSize: 13,
+    lineHeight: 18,
   },
 
   // ── Modal Staging Styles ──
@@ -917,7 +966,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 18,
     paddingVertical: 10,
-    backgroundColor: '#1A1C24',
+    backgroundColor: '#1A1D23',
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.04)',
   },
@@ -976,9 +1025,9 @@ const styles = StyleSheet.create({
   stagedItemRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1A1C24',
-    borderRadius: 14,
-    padding: 12,
+    backgroundColor: '#1A1D23',
+    borderRadius: 16,
+    padding: 14,
     marginTop: 8,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.04)',
@@ -1030,7 +1079,7 @@ const styles = StyleSheet.create({
   modalFooter: {
     paddingHorizontal: 16,
     paddingTop: 12,
-    backgroundColor: '#1A1C24',
+    backgroundColor: '#1A1D23',
     borderTopWidth: 1,
     borderTopColor: 'rgba(255,255,255,0.06)',
   },

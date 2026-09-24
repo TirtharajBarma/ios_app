@@ -562,7 +562,7 @@ export default function YourDataScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#0F1015',
+    backgroundColor: '#101114',
   },
   header: {
     flexDirection: 'row',
@@ -621,7 +621,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   card: {
-    backgroundColor: '#16171E',
+    backgroundColor: '#1A1D23',
     borderRadius: 18,
     padding: 16,
     borderWidth: 1,
