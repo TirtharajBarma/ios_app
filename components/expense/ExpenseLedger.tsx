@@ -651,9 +651,6 @@ export const ExpenseLedger: React.FC = () => {
           </View>
         </TouchableOpacity>
       </Modal>
-
-      {/* Fixed Bottom Navigation */}
-      <FixedBottomNav activeTab="ledger" />
     </View>
   );
 };

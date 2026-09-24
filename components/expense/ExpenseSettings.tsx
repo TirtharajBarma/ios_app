@@ -895,9 +895,6 @@ export const ExpenseSettings: React.FC = () => {
           </Animated.View>
         </KeyboardAvoidingView>
       </Modal>
-
-      {/* Fixed Bottom Navigation */}
-      <FixedBottomNav activeTab="settings" />
     </View>
   );
 };

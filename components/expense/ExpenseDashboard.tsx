@@ -237,9 +237,6 @@ export const ExpenseDashboard: React.FC = () => {
         <AccountsSection onAccountPress={handleAccountPress} />
       </ScrollView>
 
-      {/* Fixed Bottom Navigation */}
-      <FixedBottomNav activeTab="home" />
-
       {/* Add Transaction Modal */}
       <AddTransactionModal
         visible={showAddTxModal}

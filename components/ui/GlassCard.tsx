@@ -11,8 +11,9 @@
  *   </GlassCard>
  */
 import React, { memo, forwardRef } from "react";
-import { View, type StyleProp, type ViewStyle, Platform } from "react-native";
+import { View, type StyleProp, type ViewStyle, Platform, StyleSheet } from "react-native";
 import { BlurView } from "expo-blur";
+import { GlassView, GlassContainer } from "expo-glass-effect";
 import { colors, spacing, radius } from "@/constants";
 
 export interface GlassCardProps {
@@ -45,6 +46,30 @@ const GlassCard = forwardRef<View, GlassCardProps>(function GlassCard(
 ) {
   const br = borderRadius ?? radius[24];
 
+  if (Platform.OS === "ios") {
+    return (
+      <GlassContainer style={[{ borderRadius: br }, style]}>
+        <GlassView
+          ref={ref}
+          glassEffectStyle="regular"
+          tintColor={tint === "dark" ? "rgba(255, 255, 255, 0.08)" : "rgba(255, 255, 255, 0.25)"}
+          style={[
+            {
+              borderRadius: br,
+              padding,
+              borderWidth: bordered ? 0.5 : 0,
+              borderColor: "rgba(255, 255, 255, 0.18)",
+              overflow: "hidden",
+            },
+          ]}
+        >
+          {children}
+        </GlassView>
+      </GlassContainer>
+    );
+  }
+
+  // Android Material Design 3 Surface
   return (
     <View
       ref={ref}
@@ -53,24 +78,15 @@ const GlassCard = forwardRef<View, GlassCardProps>(function GlassCard(
           borderRadius: br,
           overflow: "hidden",
           borderWidth: bordered ? 1 : 0,
-          borderColor: colors.border,
-          ...Platform.select({
-            android: {
-              backgroundColor: tint === "dark" ? "rgba(20, 20, 22, 0.85)" : "rgba(255, 255, 255, 0.15)",
-            },
-            default: {},
-          }),
+          borderColor: "rgba(255, 255, 255, 0.08)",
+          backgroundColor: tint === "dark" ? "#161822" : "rgba(255, 255, 255, 0.9)",
+          padding,
+          elevation: 3,
         },
         style,
       ]}
     >
-      <BlurView
-        intensity={intensity}
-        tint={tint}
-        style={{ borderRadius: br, padding }}
-      >
-        {children}
-      </BlurView>
+      {children}
     </View>
   );
 });

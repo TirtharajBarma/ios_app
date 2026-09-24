@@ -1279,8 +1279,6 @@ export const ExpenseVisualizer: React.FC = () => {
         </View>
 
       </ScrollView>
-
-      <FixedBottomNav activeTab="visualizer" />
     </View>
   );
 };

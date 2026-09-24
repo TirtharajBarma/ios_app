@@ -695,9 +695,6 @@ export const ExpenseImport: React.FC = () => {
           </View>
         </View>
       </Modal>
-
-      {/* Fixed Bottom Navigation */}
-      <FixedBottomNav activeTab="import" />
     </View>
   );
 };
