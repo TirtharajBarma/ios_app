@@ -43,7 +43,7 @@ import { useExpenseStore } from '@/store/useExpenseStore';
 import { expenseColors } from '@/constants/expenseColors';
 import { ExpenseTransaction, ExpenseCategory } from '@/types/expense';
 import { CategoryIcon } from './CategoryIcon';
-import { AddTransactionModal } from './AddTransactionModal';
+import { AddTransactionModal, INCOME_CATEGORIES } from './AddTransactionModal';
 import { SplitDetailsModal } from './SplitDetailsModal';
 import { getDeviceAiEngineInfo } from '@/services/onDeviceAi';
 
@@ -244,8 +244,23 @@ export const ExpenseLedger: React.FC = () => {
     ];
   }, [categories, selectedCategoryFilter]);
 
-  const getCategoryObj = (catId: string) => {
-    return categories.find((c) => c.id === catId) || categories[0];
+  const getCategoryObj = (catId?: string, type?: string): ExpenseCategory => {
+    if (type === 'income' || catId?.includes('income') || catId?.includes('salary') || catId?.includes('bonus') || catId?.includes('freelance') || catId?.includes('invest')) {
+      const incMatch = INCOME_CATEGORIES.find((c) => c.id === catId);
+      if (incMatch) return incMatch;
+      return { id: 'cat_salary', name: 'Salary / Income', emoji: '💼', color: '#8CD9C8', iconName: 'Briefcase' };
+    }
+    const cat = categories.find((c) => c.id === catId);
+    if (cat) return cat;
+    const incCat = INCOME_CATEGORIES.find((c) => c.id === catId);
+    if (incCat) return incCat;
+    return categories.find((c) => c.id === 'cat_misc') || {
+      id: 'cat_misc',
+      name: 'General',
+      emoji: '⋯',
+      color: '#8E95A5',
+      iconName: 'MoreHorizontal',
+    };
   };
 
   const getAccountName = (accId?: string, fallbackName?: string) => {
@@ -343,7 +358,7 @@ export const ExpenseLedger: React.FC = () => {
   }, [sortedFilteredTxs, eventFolders]);
 
   const renderTransactionItem = (tx: ExpenseTransaction, isLast: boolean) => {
-    const cat = getCategoryObj(tx.categoryId);
+    const cat = getCategoryObj(tx.categoryId, tx.type);
     const isSelected = selectedTransactionIds.includes(tx.id);
     const formattedDate = new Date(tx.date).toLocaleDateString('en-US', {
       day: 'numeric',

@@ -8,6 +8,7 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  Keyboard,
 } from 'react-native';
 import {
   X,
@@ -77,6 +78,7 @@ export const SetOpeningBalancesModal: React.FC<SetOpeningBalancesModalProps> = (
   };
 
   const handleToggleType = (accId: string, newType: 'savings' | 'credit' | 'wallet') => {
+    Keyboard.dismiss();
     Haptics.selectionAsync().catch(() => {});
     setAccountTypes((prev) => ({
       ...prev,
@@ -85,6 +87,7 @@ export const SetOpeningBalancesModal: React.FC<SetOpeningBalancesModalProps> = (
   };
 
   const handleAddNewAccount = () => {
+    Keyboard.dismiss();
     if (!newAccName.trim()) return;
     Haptics.selectionAsync().catch(() => {});
 
@@ -107,6 +110,7 @@ export const SetOpeningBalancesModal: React.FC<SetOpeningBalancesModalProps> = (
   };
 
   const handleSaveAll = () => {
+    Keyboard.dismiss();
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
 
     // Save newly entered account if filled
@@ -159,7 +163,10 @@ export const SetOpeningBalancesModal: React.FC<SetOpeningBalancesModalProps> = (
       visible={visible}
       animationType="slide"
       presentationStyle="pageSheet"
-      onRequestClose={onClose}
+      onRequestClose={() => {
+        Keyboard.dismiss();
+        onClose();
+      }}
     >
       <KeyboardAvoidingView
         style={styles.container}
@@ -181,6 +188,7 @@ export const SetOpeningBalancesModal: React.FC<SetOpeningBalancesModalProps> = (
           </View>
           <TouchableOpacity
             onPress={() => {
+              Keyboard.dismiss();
               Haptics.selectionAsync().catch(() => {});
               onClose();
             }}
@@ -193,9 +201,10 @@ export const SetOpeningBalancesModal: React.FC<SetOpeningBalancesModalProps> = (
 
         <ScrollView
           style={styles.scroll}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: 60 }]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
         >
           {/* Guidance Notice */}
           <View style={styles.infoCard}>
@@ -268,6 +277,8 @@ export const SetOpeningBalancesModal: React.FC<SetOpeningBalancesModalProps> = (
                         placeholder="0.00 (Optional starting balance)"
                         placeholderTextColor={expenseColors.textMuted}
                         keyboardType="decimal-pad"
+                        returnKeyType="done"
+                        onSubmitEditing={() => Keyboard.dismiss()}
                         value={inputVal}
                         onChangeText={(txt) => handleInputChange(acc.id, txt)}
                       />
@@ -288,13 +299,17 @@ export const SetOpeningBalancesModal: React.FC<SetOpeningBalancesModalProps> = (
                   placeholderTextColor={expenseColors.textMuted}
                   value={newAccName}
                   onChangeText={setNewAccName}
+                  returnKeyType="next"
                   autoFocus={true}
                 />
 
                 <View style={styles.typeSelectorRow}>
                   <TouchableOpacity
                     style={[styles.typeOptionPill, newAccType === 'savings' && styles.typeOptionActive]}
-                    onPress={() => setNewAccType('savings')}
+                    onPress={() => {
+                      Keyboard.dismiss();
+                      setNewAccType('savings');
+                    }}
                   >
                     <AppText style={[styles.typeOptionText, newAccType === 'savings' && styles.typeOptionTextActive]}>
                       BANK
@@ -303,7 +318,10 @@ export const SetOpeningBalancesModal: React.FC<SetOpeningBalancesModalProps> = (
 
                   <TouchableOpacity
                     style={[styles.typeOptionPill, newAccType === 'credit' && styles.typeOptionActive]}
-                    onPress={() => setNewAccType('credit')}
+                    onPress={() => {
+                      Keyboard.dismiss();
+                      setNewAccType('credit');
+                    }}
                   >
                     <AppText style={[styles.typeOptionText, newAccType === 'credit' && styles.typeOptionTextActive]}>
                       CREDIT
@@ -312,7 +330,10 @@ export const SetOpeningBalancesModal: React.FC<SetOpeningBalancesModalProps> = (
 
                   <TouchableOpacity
                     style={[styles.typeOptionPill, newAccType === 'wallet' && styles.typeOptionActive]}
-                    onPress={() => setNewAccType('wallet')}
+                    onPress={() => {
+                      Keyboard.dismiss();
+                      setNewAccType('wallet');
+                    }}
                   >
                     <AppText style={[styles.typeOptionText, newAccType === 'wallet' && styles.typeOptionTextActive]}>
                       WALLET
@@ -327,6 +348,8 @@ export const SetOpeningBalancesModal: React.FC<SetOpeningBalancesModalProps> = (
                     placeholder="Starting Balance (e.g. 2771)"
                     placeholderTextColor={expenseColors.textMuted}
                     keyboardType="decimal-pad"
+                    returnKeyType="done"
+                    onSubmitEditing={() => Keyboard.dismiss()}
                     value={newAccBalance}
                     onChangeText={setNewAccBalance}
                   />
@@ -342,7 +365,10 @@ export const SetOpeningBalancesModal: React.FC<SetOpeningBalancesModalProps> = (
 
                   <TouchableOpacity
                     style={styles.cancelAddBtn}
-                    onPress={() => setIsAddingNew(false)}
+                    onPress={() => {
+                      Keyboard.dismiss();
+                      setIsAddingNew(false);
+                    }}
                   >
                     <AppText style={styles.cancelAddBtnText}>Cancel</AppText>
                   </TouchableOpacity>

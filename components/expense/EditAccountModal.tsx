@@ -9,6 +9,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Keyboard,
 } from 'react-native';
 import {
   X,
@@ -161,7 +162,13 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
       >
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+          <TouchableOpacity
+            onPress={() => {
+              Keyboard.dismiss();
+              onClose();
+            }}
+            style={styles.closeBtn}
+          >
             <X size={22} color="#A0A5B5" />
           </TouchableOpacity>
           <AppText style={styles.headerTitle}>
@@ -172,11 +179,10 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
 
         <ScrollView
           style={styles.scroll}
-          contentContainerStyle={[styles.scrollContent, { paddingBottom: 220 }]}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: 40 }]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
-          automaticallyAdjustKeyboardInsets={true}
+          keyboardDismissMode="interactive"
         >
           {/* ACCOUNT NAME */}
           <View style={styles.section}>
@@ -187,6 +193,8 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
               placeholderTextColor="#555866"
               value={name}
               onChangeText={setName}
+              returnKeyType="done"
+              onSubmitEditing={() => Keyboard.dismiss()}
             />
           </View>
 
@@ -199,7 +207,10 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
                   styles.typePill,
                   type === 'savings' && styles.typePillSelected,
                 ]}
-                onPress={() => setType('savings')}
+                onPress={() => {
+                  Keyboard.dismiss();
+                  setType('savings');
+                }}
               >
                 {Platform.OS === 'ios' ? (
                   <SymbolView
@@ -228,7 +239,10 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
                   styles.typePill,
                   type === 'credit' && styles.typePillSelected,
                 ]}
-                onPress={() => setType('credit')}
+                onPress={() => {
+                  Keyboard.dismiss();
+                  setType('credit');
+                }}
               >
                 {Platform.OS === 'ios' ? (
                   <SymbolView
@@ -257,7 +271,10 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
                   styles.typePill,
                   type === 'wallet' && styles.typePillSelected,
                 ]}
-                onPress={() => setType('wallet')}
+                onPress={() => {
+                  Keyboard.dismiss();
+                  setType('wallet');
+                }}
               >
                 {Platform.OS === 'ios' ? (
                   <SymbolView
@@ -294,7 +311,10 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
           {/* ADJUST OPENING BALANCE CARD */}
           <TouchableOpacity
             style={styles.balanceCard}
-            onPress={() => setShowBalanceInput(!showBalanceInput)}
+            onPress={() => {
+              Keyboard.dismiss();
+              setShowBalanceInput(!showBalanceInput);
+            }}
             activeOpacity={0.75}
           >
             <View style={styles.balanceIconBox}>
@@ -329,6 +349,8 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
                   keyboardType="numeric"
                   value={openingBalance}
                   onChangeText={setOpeningBalance}
+                  returnKeyType="done"
+                  onSubmitEditing={() => Keyboard.dismiss()}
                 />
               </View>
             </View>
@@ -339,7 +361,10 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
             <View style={styles.actionButtonsStack}>
               <TouchableOpacity
                 style={styles.archiveBtn}
-                onPress={handleArchive}
+                onPress={() => {
+                  Keyboard.dismiss();
+                  handleArchive();
+                }}
                 activeOpacity={0.75}
               >
                 <Archive size={16} color="#A0A5B5" />
@@ -350,7 +375,10 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
 
               <TouchableOpacity
                 style={styles.deleteBtn}
-                onPress={handleDelete}
+                onPress={() => {
+                  Keyboard.dismiss();
+                  handleDelete();
+                }}
                 activeOpacity={0.75}
               >
                 <Trash2 size={16} color="#FF6B6B" />
@@ -362,7 +390,10 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
           {/* SAVE BUTTON */}
           <TouchableOpacity
             style={styles.saveBtn}
-            onPress={handleSave}
+            onPress={() => {
+              Keyboard.dismiss();
+              handleSave();
+            }}
             activeOpacity={0.85}
           >
             <AppText style={styles.saveBtnText}>

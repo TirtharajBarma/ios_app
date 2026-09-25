@@ -371,7 +371,7 @@ export const AppWalkthroughModal: React.FC<AppWalkthroughModalProps> = ({ visibl
                   <View style={styles.momentStage}>
                     <View style={styles.heroBalanceShowcase}>
                       <View style={styles.heroBalanceHeader}>
-                        <AppText style={styles.heroBalanceLabel}>TOTAL LIQUID BALANCE</AppText>
+                        <AppText style={styles.heroBalanceLabel}>TOTAL BALANCE</AppText>
                         <AppText style={styles.heroBalanceValue}>{sym}48,250</AppText>
                       </View>
 

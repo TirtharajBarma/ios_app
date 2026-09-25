@@ -7,6 +7,7 @@ import {
   ScrollView,
   TextInput,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
   Alert,
 } from 'react-native';
@@ -36,20 +37,33 @@ import { AccountIcon } from './AccountIcon';
 const EMOJI_OPTIONS = ['🛡️', '🌴', '💻', '🚗', '🏠', '💍', '📚', '📈', '🎁', '⚡'];
 const COLOR_OPTIONS = ['#8CD9C8', '#9DC6EB', '#F2AEC4', '#F4CD89', '#C4A7E7', '#F8A888'];
 
+const GOAL_TEMPLATES = [
+  { name: 'Emergency Fund', emoji: '🛡️', target: '50000', color: '#8CD9C8' },
+  { name: 'Goa / Vacation', emoji: '🌴', target: '30000', color: '#9DC6EB' },
+  { name: 'MacBook / Tech', emoji: '💻', target: '80000', color: '#C4A7E7' },
+  { name: 'House Rent Deposit', emoji: '🏠', target: '50000', color: '#F4CD89' },
+  { name: 'Festivals & Gifts', emoji: '🎁', target: '20000', color: '#F2AEC4' },
+  { name: 'Vehicle Service', emoji: '🚗', target: '25000', color: '#F8A888' },
+];
+
 interface AccountsListModalProps {
   visible: boolean;
   onClose: () => void;
+  initialTab?: 'accounts' | 'goals';
 }
 
 export const AccountsListModal: React.FC<AccountsListModalProps> = ({
   visible,
   onClose,
+  initialTab,
 }) => {
   const {
     accounts,
     transactions,
     savingsVaults,
     currencySymbol,
+    monthlyBudget,
+    getTotalSpent,
     deleteAccount,
     archiveAccount,
     unarchiveAccount,
@@ -64,8 +78,29 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
   const sym = currencySymbol || '₹';
   const totalBalance = getTotalBalance();
   const totalSavedInVaults = getTotalSavedInVaults();
+  const totalSpent = getTotalSpent();
+  
+  // Real liquid cash available in bank accounts (excluding credit cards)
+  const liquidAccounts = accounts.filter((a) => a.type !== 'credit' && a.statusType !== 'due' && !a.isArchived);
+  const liquidBankBalance = liquidAccounts.reduce((sum, a) => sum + a.balance, 0);
+  const creditAccounts = accounts.filter((a) => a.type === 'credit' && !a.isArchived);
+  const totalCreditDues = creditAccounts.reduce((sum, a) => sum + (a.dueAmount || 0), 0);
+  const rawUnspentSurplus = Math.max(0, monthlyBudget - totalSpent);
+  // Real surplus is strictly bounded by actual liquid cash in bank
+  const realSurplus = Math.max(0, Math.min(rawUnspentSurplus, liquidBankBalance));
 
-  const [activeTab, setActiveTab] = useState<'accounts' | 'goals'>('accounts');
+  const now = new Date();
+  const currentDay = now.getDate();
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const showSurplusBanner = savingsVaults.length > 0 && realSurplus >= 500 && currentDay >= Math.max(20, daysInMonth - 7);
+
+  const [activeTab, setActiveTab] = useState<'accounts' | 'goals'>(initialTab || 'accounts');
+
+  React.useEffect(() => {
+    if (visible && initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [visible, initialTab]);
   const [selectedAccountForEdit, setSelectedAccountForEdit] = useState<ExpenseAccount | null>(null);
   const [showEditModal, setShowEditModal] = useState<boolean>(false);
 
@@ -80,7 +115,7 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
   const [selectedVault, setSelectedVault] = useState<SavingsVault | null>(null);
   const [actionType, setActionType] = useState<'deposit' | 'withdraw'>('deposit');
   const [actionAmount, setActionAmount] = useState<string>('');
-  const [sourceAccountId, setSourceAccountId] = useState<string>(accounts[0]?.id || '');
+  const [sourceAccountId, setSourceAccountId] = useState<string>(liquidAccounts[0]?.id || accounts[0]?.id || '');
   const [showActionModal, setShowActionModal] = useState<boolean>(false);
 
   // Active (non-archived) accounts
@@ -117,11 +152,12 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
     }
   };
 
-  const openDeposit = (vault: SavingsVault) => {
+  const openDeposit = (vault: SavingsVault, prefilledAmount?: number) => {
     setSelectedVault(vault);
     setActionType('deposit');
-    setActionAmount('');
-    setSourceAccountId(accounts[0]?.id || '');
+    setActionAmount(prefilledAmount ? prefilledAmount.toString() : '');
+    const firstLiquidAcc = accounts.find((a) => a.type !== 'credit' && a.statusType !== 'due' && !a.isArchived);
+    setSourceAccountId(firstLiquidAcc?.id || accounts[0]?.id || '');
     setShowActionModal(true);
     Haptics.selectionAsync().catch(() => {});
   };
@@ -130,12 +166,51 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
     setSelectedVault(vault);
     setActionType('withdraw');
     setActionAmount('');
-    setSourceAccountId(accounts[0]?.id || '');
+    const firstLiquidAcc = accounts.find((a) => a.type !== 'credit' && a.statusType !== 'due' && !a.isArchived);
+    setSourceAccountId(firstLiquidAcc?.id || accounts[0]?.id || '');
     setShowActionModal(true);
     Haptics.selectionAsync().catch(() => {});
   };
 
+  const handleDeleteVault = (vault: SavingsVault) => {
+    if (vault.currentAmount > 0) {
+      const refundAcc = accounts.find((a) => a.type !== 'credit' && a.statusType !== 'due' && !a.isArchived) || accounts[0];
+      Alert.alert(
+        `Delete ${vault.name}?`,
+        `This goal has ${sym}${vault.currentAmount.toLocaleString('en-IN')} saved inside it. The full amount will be safely refunded back to ${refundAcc?.name || 'Primary Account'}.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Refund & Delete',
+            style: 'destructive',
+            onPress: () => {
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+              deleteSavingsVault(vault.id, refundAcc?.id);
+            },
+          },
+        ]
+      );
+    } else {
+      Alert.alert(
+        `Delete ${vault.name}?`,
+        'Are you sure you want to delete this savings goal?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: () => {
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+              deleteSavingsVault(vault.id);
+            },
+          },
+        ]
+      );
+    }
+  };
+
   const handleConfirmAction = () => {
+    Keyboard.dismiss();
     const amt = parseFloat(actionAmount);
     if (isNaN(amt) || amt <= 0 || !selectedVault) {
       Alert.alert('Invalid Amount', 'Please enter a valid amount.');
@@ -159,6 +234,7 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
   };
 
   const handleCreateGoal = () => {
+    Keyboard.dismiss();
     const target = parseFloat(goalTarget);
     if (!goalName.trim() || isNaN(target) || target <= 0) {
       Alert.alert('Invalid Goal', 'Please enter a goal name and target amount.');
@@ -233,8 +309,26 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
             <>
               {/* Summary Stats Pill */}
               <View style={styles.summaryBar}>
-                <AppText style={styles.summaryBarLabel}>TOTAL LIQUID BALANCE</AppText>
-                <AppText style={styles.summaryBarVal}>{sym}{totalBalance.toLocaleString('en-IN')}</AppText>
+                <View style={styles.summaryBarRow}>
+                  <AppText style={styles.summaryBarLabel}>TOTAL NET BALANCE</AppText>
+                  <AppText style={styles.summaryBarVal}>{sym}{totalBalance.toLocaleString('en-IN')}</AppText>
+                </View>
+                {totalCreditDues > 0 ? (
+                  <View style={styles.summaryChipsRow}>
+                    <View style={styles.summaryChip}>
+                      <AppText style={styles.summaryChipLabel}>Bank </AppText>
+                      <AppText style={styles.summaryChipVal}>{sym}{liquidBankBalance.toLocaleString('en-IN')}</AppText>
+                    </View>
+                    <View style={[styles.summaryChip, styles.summaryChipDue]}>
+                      <AppText style={styles.summaryChipDueLabel}>Bills </AppText>
+                      <AppText style={styles.summaryChipDueVal}>{sym}{totalCreditDues.toLocaleString('en-IN')}</AppText>
+                    </View>
+                  </View>
+                ) : (
+                  <AppText style={styles.summaryBarSub}>
+                    Across {activeAccounts.length} active account{activeAccounts.length === 1 ? '' : 's'}
+                  </AppText>
+                )}
               </View>
 
               <AppText style={styles.sectionTitle}>ACTIVE ACCOUNTS</AppText>
@@ -330,11 +424,57 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
             <>
               {/* Summary Stats Pill for Goals */}
               <View style={styles.summaryBar}>
-                <AppText style={styles.summaryBarLabel}>TOTAL RESERVED IN GOALS</AppText>
-                <AppText style={[styles.summaryBarVal, { color: expenseColors.accentGreen }]}>
-                  {sym}{totalSavedInVaults.toLocaleString('en-IN')}
+                <View style={styles.summaryBarRow}>
+                  <AppText style={styles.summaryBarLabel}>TOTAL IN SAVINGS GOALS</AppText>
+                  <AppText style={[styles.summaryBarVal, { color: expenseColors.accentGreen }]}>
+                    {sym}{totalSavedInVaults.toLocaleString('en-IN')}
+                  </AppText>
+                </View>
+                <AppText style={styles.summaryBarSub}>
+                  {savingsVaults.length} Active Goal{savingsVaults.length === 1 ? '' : 's'}
                 </AppText>
               </View>
+
+              {/* Month-End Leftover Surplus Suggestion Banner */}
+              {showSurplusBanner && (
+                <View style={styles.surplusBanner}>
+                  <View style={styles.surplusBannerHeader}>
+                    <Sparkles size={14} color="#70D6BC" />
+                    <AppText style={styles.surplusBannerTitle}>MONTHLY LEFTOVER BUDGET</AppText>
+                  </View>
+                  <AppText style={styles.surplusBannerDesc}>
+                    You have <AppText style={{ color: '#FFFFFF', fontWeight: '800' }}>{sym}{realSurplus.toLocaleString('en-IN')}</AppText> left from your {sym}{monthlyBudget.toLocaleString('en-IN')} monthly budget. Move leftover cash into goals:
+                  </AppText>
+                  <View style={styles.surplusBannerBtns}>
+                    {savingsVaults.slice(0, 2).map((v) => (
+                      <TouchableOpacity
+                        key={v.id}
+                        style={styles.surplusActionBtn}
+                        activeOpacity={0.8}
+                        onPress={() => openDeposit(v, realSurplus)}
+                      >
+                        <AppText style={styles.surplusActionBtnText}>
+                          Save to {v.emoji} {v.name}
+                        </AppText>
+                      </TouchableOpacity>
+                    ))}
+                    {savingsVaults.length >= 2 && (
+                      <TouchableOpacity
+                        style={styles.surplusSplitBtn}
+                        activeOpacity={0.8}
+                        onPress={() => {
+                          const half = Math.round(realSurplus / 2);
+                          openDeposit(savingsVaults[0], half);
+                        }}
+                      >
+                        <AppText style={styles.surplusSplitBtnText}>
+                          Split & Save ({sym}{Math.round(realSurplus / 2).toLocaleString('en-IN')} each)
+                        </AppText>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
+              )}
 
               <AppText style={styles.sectionTitle}>SAVINGS VAULTS & POCKETS</AppText>
 
@@ -360,6 +500,21 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
                     const progressPct = vault.targetAmount > 0
                       ? Math.min(Math.round((vault.currentAmount / vault.targetAmount) * 100), 100)
                       : 0;
+
+                    const vaultDepositsThisMonth = transactions
+                      .filter((t) => t.type === 'vault_deposit' && t.vaultId === vault.id)
+                      .reduce((sum, t) => sum + t.amount, 0);
+
+                    const remainingTarget = Math.max(0, vault.targetAmount - vault.currentAmount);
+                    const estimatedMonths = vaultDepositsThisMonth > 0
+                      ? Math.max(1, Math.ceil(remainingTarget / vaultDepositsThisMonth))
+                      : null;
+
+                    const paceNote = vault.currentAmount >= vault.targetAmount
+                      ? '🎉 100% Target Completed!'
+                      : estimatedMonths
+                      ? `✨ ~${estimatedMonths} mos at current pace (${sym}${vaultDepositsThisMonth.toLocaleString('en-IN')}/mo)`
+                      : `💡 Save ${sym}${Math.ceil(remainingTarget / 12).toLocaleString('en-IN')}/mo to complete in 1 yr`;
 
                     const vaultActions: MenuAction[] = [
                       {
@@ -392,8 +547,7 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
                           } else if (actionId === 'withdraw') {
                             openWithdraw(vault);
                           } else if (actionId === 'delete') {
-                            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
-                            deleteSavingsVault(vault.id);
+                            handleDeleteVault(vault);
                           }
                         }}
                         style={{ width: '100%' }}
@@ -428,6 +582,9 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
                               ]}
                             />
                           </View>
+
+                          {/* Smart Pace Insight */}
+                          <AppText style={styles.goalPaceNote}>{paceNote}</AppText>
 
                           {/* Bottom Values & Buttons */}
                           <View style={styles.goalBottomRow}>
@@ -475,226 +632,269 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
           onClose={() => setShowEditModal(false)}
         />
 
-        {/* Quick Deposit / Withdraw Sheet */}
-        <Modal
-          visible={showActionModal}
-          transparent
-          animationType="slide"
-          onRequestClose={() => setShowActionModal(false)}
-        >
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            style={styles.modalBackdrop}
-          >
+        {/* Quick Deposit / Withdraw Overlay Sheet */}
+        {showActionModal && (
+          <View style={StyleSheet.absoluteFill}>
             <TouchableOpacity
-              style={StyleSheet.absoluteFill}
+              style={styles.modalBackdrop}
               activeOpacity={1}
-              onPress={() => setShowActionModal(false)}
+              onPress={() => {
+                Keyboard.dismiss();
+                setShowActionModal(false);
+              }}
             />
 
-            <View style={styles.sheetContent}>
-              <View style={styles.sheetHandle} />
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+              style={styles.sheetOverlayContainer}
+              pointerEvents="box-none"
+            >
+              <View style={styles.sheetContent}>
+                <View style={styles.sheetHandle} />
 
-              <View style={styles.sheetHeaderRow}>
-                <View style={styles.sheetHeaderLeft}>
-                  <AppText style={styles.sheetEmoji}>{selectedVault?.emoji}</AppText>
+                <View style={styles.sheetHeaderRow}>
+                  <View style={styles.sheetHeaderLeft}>
+                    <AppText style={styles.sheetEmoji}>{selectedVault?.emoji}</AppText>
+                    <View>
+                      <AppText style={styles.sheetTitle}>
+                        {actionType === 'deposit' ? 'Save to' : 'Withdraw from'} {selectedVault?.name}
+                      </AppText>
+                      <AppText style={styles.sheetSub}>
+                        Saved: {sym}{selectedVault?.currentAmount.toLocaleString('en-IN')} / {sym}{selectedVault?.targetAmount.toLocaleString('en-IN')}
+                      </AppText>
+                    </View>
+                  </View>
+
+                  <TouchableOpacity
+                    style={styles.sheetCloseBtn}
+                    onPress={() => {
+                      Keyboard.dismiss();
+                      setShowActionModal(false);
+                    }}
+                  >
+                    <X size={16} color="#A0A5B5" />
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.amountInputContainer}>
+                  <AppText style={styles.amountCurrencySymbol}>{sym}</AppText>
+                  <TextInput
+                    style={styles.amountInput}
+                    placeholder="0"
+                    placeholderTextColor="#555866"
+                    keyboardType="numeric"
+                    returnKeyType="done"
+                    onSubmitEditing={Keyboard.dismiss}
+                    value={actionAmount}
+                    onChangeText={setActionAmount}
+                    autoFocus
+                  />
+                </View>
+
+                <View style={styles.presetChipsRow}>
+                  {[500, 1000, 2000, 5000].map((amt) => (
+                    <TouchableOpacity
+                      key={amt}
+                      style={styles.presetChip}
+                      onPress={() => {
+                        Haptics.selectionAsync().catch(() => {});
+                        setActionAmount(amt.toString());
+                        Keyboard.dismiss();
+                      }}
+                    >
+                      <AppText style={styles.presetChipText}>+{sym}{amt.toLocaleString('en-IN')}</AppText>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {accounts.length > 0 && (
+                  <View style={styles.accountSelectSection}>
+                    <AppText style={styles.accountSelectLabel}>
+                      {actionType === 'deposit' ? 'DEDUCT FROM ACCOUNT' : 'TRANSFER INTO ACCOUNT'}
+                    </AppText>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                      {accounts.map((acc) => {
+                        const isSelected = sourceAccountId === acc.id;
+                        return (
+                          <TouchableOpacity
+                            key={acc.id}
+                            style={[styles.accountPill, isSelected && styles.accountPillActive]}
+                            onPress={() => {
+                              Haptics.selectionAsync().catch(() => {});
+                              setSourceAccountId(acc.id);
+                              Keyboard.dismiss();
+                            }}
+                          >
+                            <AppText style={[styles.accountPillText, isSelected && styles.accountPillTextActive]}>
+                              {acc.name} ({sym}{acc.balance.toLocaleString('en-IN')})
+                            </AppText>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
+                  </View>
+                )}
+
+                <TouchableOpacity
+                  style={[
+                    styles.confirmActionBtn,
+                    { backgroundColor: selectedVault?.color || expenseColors.accentPeach },
+                  ]}
+                  onPress={handleConfirmAction}
+                  activeOpacity={0.85}
+                >
+                  <PiggyBank size={18} color="#0D0E12" strokeWidth={2.5} />
+                  <AppText style={styles.confirmActionBtnText}>
+                    {actionType === 'deposit' ? `Confirm & Save in ${selectedVault?.name}` : 'Confirm Withdrawal'}
+                  </AppText>
+                </TouchableOpacity>
+              </View>
+            </KeyboardAvoidingView>
+          </View>
+        )}
+
+        {/* Create New Goal Overlay Sheet */}
+        {showNewGoalModal && (
+          <View style={StyleSheet.absoluteFill}>
+            <TouchableOpacity
+              style={styles.modalBackdrop}
+              activeOpacity={1}
+              onPress={() => {
+                Keyboard.dismiss();
+                setShowNewGoalModal(false);
+              }}
+            />
+
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+              style={styles.sheetOverlayContainer}
+              pointerEvents="box-none"
+            >
+              <View style={styles.sheetContent}>
+                <View style={styles.sheetHandle} />
+
+                <View style={styles.sheetHeaderRow}>
                   <View>
-                    <AppText style={styles.sheetTitle}>
-                      {actionType === 'deposit' ? 'Save to' : 'Withdraw from'} {selectedVault?.name}
-                    </AppText>
-                    <AppText style={styles.sheetSub}>
-                      Saved: {sym}{selectedVault?.currentAmount.toLocaleString('en-IN')} / {sym}{selectedVault?.targetAmount.toLocaleString('en-IN')}
-                    </AppText>
+                    <AppText style={styles.sheetTitle}>Create Savings Goal</AppText>
+                    <AppText style={styles.sheetSub}>Isolate funds for emergency, travel or dreams</AppText>
+                  </View>
+
+                  <TouchableOpacity
+                    style={styles.sheetCloseBtn}
+                    onPress={() => {
+                      Keyboard.dismiss();
+                      setShowNewGoalModal(false);
+                    }}
+                  >
+                    <X size={16} color="#A0A5B5" />
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <AppText style={styles.fieldLabel}>QUICK SUGGESTIONS / TEMPLATES</AppText>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 2 }}>
+                    {GOAL_TEMPLATES.map((tmpl) => (
+                      <TouchableOpacity
+                        key={tmpl.name}
+                        style={styles.templateChip}
+                        onPress={() => {
+                          Haptics.selectionAsync().catch(() => {});
+                          setGoalEmoji(tmpl.emoji);
+                          setGoalName(tmpl.name);
+                          setGoalTarget(tmpl.target);
+                          setGoalColor(tmpl.color);
+                          Keyboard.dismiss();
+                        }}
+                        activeOpacity={0.75}
+                      >
+                        <AppText style={styles.templateChipEmoji}>{tmpl.emoji}</AppText>
+                        <AppText style={styles.templateChipText}>{tmpl.name}</AppText>
+                        <AppText style={styles.templateChipTarget}>
+                          {sym}{parseInt(tmpl.target, 10).toLocaleString('en-IN')}
+                        </AppText>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <AppText style={styles.fieldLabel}>CHOOSE ICON</AppText>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 2 }}>
+                    {EMOJI_OPTIONS.map((e) => (
+                      <TouchableOpacity
+                        key={e}
+                        style={[styles.emojiPickItem, goalEmoji === e && styles.emojiPickItemActive]}
+                        onPress={() => {
+                          Haptics.selectionAsync().catch(() => {});
+                          setGoalEmoji(e);
+                        }}
+                      >
+                        <AppText style={styles.emojiPickText}>{e}</AppText>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <AppText style={styles.fieldLabel}>GOAL NAME</AppText>
+                  <TextInput
+                    style={styles.formInput}
+                    placeholder="e.g. Emergency Fund, Goa Trip, MacBook"
+                    placeholderTextColor="#555866"
+                    value={goalName}
+                    returnKeyType="next"
+                    onChangeText={setGoalName}
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <AppText style={styles.fieldLabel}>TARGET AMOUNT ({sym})</AppText>
+                  <TextInput
+                    style={styles.formInput}
+                    placeholder="e.g. 50000"
+                    placeholderTextColor="#555866"
+                    keyboardType="numeric"
+                    returnKeyType="done"
+                    onSubmitEditing={Keyboard.dismiss}
+                    value={goalTarget}
+                    onChangeText={setGoalTarget}
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <AppText style={styles.fieldLabel}>THEME COLOR</AppText>
+                  <View style={styles.colorsRow}>
+                    {COLOR_OPTIONS.map((c) => (
+                      <TouchableOpacity
+                        key={c}
+                        style={[
+                          styles.colorDot,
+                          { backgroundColor: c },
+                          goalColor === c && styles.colorDotActive,
+                        ]}
+                        onPress={() => {
+                          Haptics.selectionAsync().catch(() => {});
+                          setGoalColor(c);
+                        }}
+                      >
+                        {goalColor === c && <Check size={12} color="#0D0E12" strokeWidth={3} />}
+                      </TouchableOpacity>
+                    ))}
                   </View>
                 </View>
 
                 <TouchableOpacity
-                  style={styles.sheetCloseBtn}
-                  onPress={() => setShowActionModal(false)}
+                  style={styles.createGoalBtn}
+                  onPress={handleCreateGoal}
+                  activeOpacity={0.85}
                 >
-                  <X size={16} color="#A0A5B5" />
+                  <Sparkles size={16} color="#0D0E12" />
+                  <AppText style={styles.createGoalBtnText}>Create Savings Goal</AppText>
                 </TouchableOpacity>
               </View>
-
-              <View style={styles.amountInputContainer}>
-                <AppText style={styles.amountCurrencySymbol}>{sym}</AppText>
-                <TextInput
-                  style={styles.amountInput}
-                  placeholder="0"
-                  placeholderTextColor="#555866"
-                  keyboardType="numeric"
-                  value={actionAmount}
-                  onChangeText={setActionAmount}
-                  autoFocus
-                />
-              </View>
-
-              <View style={styles.presetChipsRow}>
-                {[500, 1000, 2000, 5000].map((amt) => (
-                  <TouchableOpacity
-                    key={amt}
-                    style={styles.presetChip}
-                    onPress={() => {
-                      Haptics.selectionAsync().catch(() => {});
-                      setActionAmount(amt.toString());
-                    }}
-                  >
-                    <AppText style={styles.presetChipText}>+{sym}{amt.toLocaleString('en-IN')}</AppText>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              {accounts.length > 0 && (
-                <View style={styles.accountSelectSection}>
-                  <AppText style={styles.accountSelectLabel}>
-                    {actionType === 'deposit' ? 'DEDUCT FROM ACCOUNT' : 'TRANSFER INTO ACCOUNT'}
-                  </AppText>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-                    {accounts.map((acc) => {
-                      const isSelected = sourceAccountId === acc.id;
-                      return (
-                        <TouchableOpacity
-                          key={acc.id}
-                          style={[styles.accountPill, isSelected && styles.accountPillActive]}
-                          onPress={() => {
-                            Haptics.selectionAsync().catch(() => {});
-                            setSourceAccountId(acc.id);
-                          }}
-                        >
-                          <AppText style={[styles.accountPillText, isSelected && styles.accountPillTextActive]}>
-                            {acc.name} ({sym}{acc.balance.toLocaleString('en-IN')})
-                          </AppText>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </ScrollView>
-                </View>
-              )}
-
-              <TouchableOpacity
-                style={[
-                  styles.confirmActionBtn,
-                  { backgroundColor: selectedVault?.color || expenseColors.accentPeach },
-                ]}
-                onPress={handleConfirmAction}
-                activeOpacity={0.85}
-              >
-                <PiggyBank size={18} color="#0D0E12" strokeWidth={2.5} />
-                <AppText style={styles.confirmActionBtnText}>
-                  {actionType === 'deposit' ? `Confirm & Save in ${selectedVault?.name}` : 'Confirm Withdrawal'}
-                </AppText>
-              </TouchableOpacity>
-            </View>
-          </KeyboardAvoidingView>
-        </Modal>
-
-        {/* Create New Goal Modal */}
-        <Modal
-          visible={showNewGoalModal}
-          transparent
-          animationType="slide"
-          onRequestClose={() => setShowNewGoalModal(false)}
-        >
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            style={styles.modalBackdrop}
-          >
-            <TouchableOpacity
-              style={StyleSheet.absoluteFill}
-              activeOpacity={1}
-              onPress={() => setShowNewGoalModal(false)}
-            />
-
-            <View style={styles.sheetContent}>
-              <View style={styles.sheetHandle} />
-
-              <View style={styles.sheetHeaderRow}>
-                <View>
-                  <AppText style={styles.sheetTitle}>Create Savings Goal</AppText>
-                  <AppText style={styles.sheetSub}>Isolate funds for emergency, travel or dreams</AppText>
-                </View>
-
-                <TouchableOpacity
-                  style={styles.sheetCloseBtn}
-                  onPress={() => setShowNewGoalModal(false)}
-                >
-                  <X size={16} color="#A0A5B5" />
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.formRow}>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-                  {EMOJI_OPTIONS.map((e) => (
-                    <TouchableOpacity
-                      key={e}
-                      style={[styles.emojiPickItem, goalEmoji === e && styles.emojiPickItemActive]}
-                      onPress={() => {
-                        Haptics.selectionAsync().catch(() => {});
-                        setGoalEmoji(e);
-                      }}
-                    >
-                      <AppText style={styles.emojiPickText}>{e}</AppText>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
-
-              <View style={styles.inputGroup}>
-                <AppText style={styles.fieldLabel}>GOAL NAME</AppText>
-                <TextInput
-                  style={styles.formInput}
-                  placeholder="e.g. Emergency Fund, Goa Trip, MacBook"
-                  placeholderTextColor="#555866"
-                  value={goalName}
-                  onChangeText={setGoalName}
-                />
-              </View>
-
-              <View style={styles.inputGroup}>
-                <AppText style={styles.fieldLabel}>TARGET AMOUNT ({sym})</AppText>
-                <TextInput
-                  style={styles.formInput}
-                  placeholder="e.g. 50000"
-                  placeholderTextColor="#555866"
-                  keyboardType="numeric"
-                  value={goalTarget}
-                  onChangeText={setGoalTarget}
-                />
-              </View>
-
-              <View style={styles.inputGroup}>
-                <AppText style={styles.fieldLabel}>THEME COLOR</AppText>
-                <View style={styles.colorsRow}>
-                  {COLOR_OPTIONS.map((c) => (
-                    <TouchableOpacity
-                      key={c}
-                      style={[
-                        styles.colorDot,
-                        { backgroundColor: c },
-                        goalColor === c && styles.colorDotActive,
-                      ]}
-                      onPress={() => {
-                        Haptics.selectionAsync().catch(() => {});
-                        setGoalColor(c);
-                      }}
-                    >
-                      {goalColor === c && <Check size={12} color="#0D0E12" strokeWidth={3} />}
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-
-              <TouchableOpacity
-                style={styles.createGoalBtn}
-                onPress={handleCreateGoal}
-                activeOpacity={0.85}
-              >
-                <Sparkles size={16} color="#0D0E12" />
-                <AppText style={styles.createGoalBtnText}>Create Savings Goal</AppText>
-              </TouchableOpacity>
-            </View>
-          </KeyboardAvoidingView>
-        </Modal>
+            </KeyboardAvoidingView>
+          </View>
+        )}
       </View>
     </Modal>
   );
@@ -763,15 +963,18 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   summaryBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
     backgroundColor: '#1A1D23',
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.05)',
+    gap: 4,
+  },
+  summaryBarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   summaryBarLabel: {
     color: '#707587',
@@ -783,6 +986,51 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '800',
+  },
+  summaryBarSub: {
+    color: '#8E919D',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  summaryChipsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 2,
+  },
+  summaryChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.07)',
+  },
+  summaryChipLabel: {
+    color: '#8E919D',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  summaryChipVal: {
+    color: '#E1E4EA',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  summaryChipDue: {
+    backgroundColor: 'rgba(244, 139, 139, 0.08)',
+    borderColor: 'rgba(244, 139, 139, 0.18)',
+  },
+  summaryChipDueLabel: {
+    color: '#F48B8B',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  summaryChipDueVal: {
+    color: '#F48B8B',
+    fontSize: 11,
+    fontWeight: '700',
   },
   sectionTitle: {
     color: expenseColors.textSubtle,
@@ -1021,8 +1269,15 @@ const styles = StyleSheet.create({
 
   // Modal Sheet Styles
   modalBackdrop: {
-    flex: 1,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.75)',
+  },
+  sheetOverlayContainer: {
+    flex: 1,
     justifyContent: 'flex-end',
   },
   sheetContent: {
@@ -1189,15 +1444,15 @@ const styles = StyleSheet.create({
     fontSize: 20,
   },
   inputGroup: {
-    marginBottom: 14,
+    marginBottom: 16,
+    gap: 6,
   },
   fieldLabel: {
     color: '#7E8394',
-    fontSize: 10,
-    lineHeight: 14,
-    fontWeight: '800',
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '700',
     letterSpacing: 0.8,
-    marginBottom: 6,
     textTransform: 'uppercase',
   },
   formInput: {
@@ -1227,6 +1482,30 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#FFFFFF',
   },
+  templateChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1E232B',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#2D333F',
+    gap: 6,
+  },
+  templateChipEmoji: {
+    fontSize: 14,
+  },
+  templateChipText: {
+    color: '#E5E7EB',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  templateChipTarget: {
+    color: '#9CA3AF',
+    fontSize: 11,
+    fontWeight: '600',
+  },
   createGoalBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1242,5 +1521,70 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 18,
     fontWeight: '800',
+  },
+
+  // ── Month-End Surplus Banner & Goal Pace ──
+  surplusBanner: {
+    backgroundColor: '#1E232B',
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(112, 214, 188, 0.3)',
+    gap: 8,
+  },
+  surplusBannerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  surplusBannerTitle: {
+    color: '#70D6BC',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  surplusBannerDesc: {
+    color: '#9CA3AF',
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  surplusBannerBtns: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 4,
+  },
+  surplusActionBtn: {
+    backgroundColor: 'rgba(112, 214, 188, 0.15)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(112, 214, 188, 0.3)',
+  },
+  surplusActionBtnText: {
+    color: '#70D6BC',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  surplusSplitBtn: {
+    backgroundColor: 'rgba(255, 157, 102, 0.15)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 157, 102, 0.3)',
+  },
+  surplusSplitBtnText: {
+    color: '#FF9D66',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  goalPaceNote: {
+    color: '#8E919D',
+    fontSize: 11,
+    fontWeight: '500',
+    marginBottom: 10,
   },
 });

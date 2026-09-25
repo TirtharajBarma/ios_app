@@ -74,18 +74,25 @@ export default function PersonalizationScreen() {
   const handleFocus = (offset: number) => {
     setTimeout(() => {
       scrollRef.current?.scrollTo({ y: offset, animated: true });
-    }, 120);
+    }, 100);
   };
 
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       style={[styles.container, { paddingTop: insets.top }]}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 10 : 0}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 24 : 0}
     >
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} activeOpacity={0.7}>
+        <TouchableOpacity
+          onPress={() => {
+            Keyboard.dismiss();
+            router.back();
+          }}
+          style={styles.backBtn}
+          activeOpacity={0.7}
+        >
           <ChevronLeft size={22} color={colors.accent} />
         </TouchableOpacity>
         <AppText variant="headline" weight="700" color={colors.white}>
@@ -116,10 +123,9 @@ export default function PersonalizationScreen() {
         showsVerticalScrollIndicator={false}
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
-        automaticallyAdjustKeyboardInsets={true}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingBottom: insets.bottom + spacing[48] + 160 },
+          { paddingBottom: insets.bottom + spacing[32] },
         ]}
       >
         {/* Avatar Live Preview */}
@@ -176,6 +182,7 @@ export default function PersonalizationScreen() {
                     ]}
                     activeOpacity={0.75}
                     onPress={() => {
+                      Keyboard.dismiss();
                       Haptics.selectionAsync();
                       setSelectedAvatar(item.id);
                     }}
@@ -235,7 +242,7 @@ export default function PersonalizationScreen() {
                 autoCorrect={false}
                 onSubmitEditing={() => emailRef.current?.focus()}
                 blurOnSubmit={false}
-                onFocus={() => handleFocus(360)}
+                onFocus={() => handleFocus(120)}
               />
             </View>
             <View style={styles.inputDivider} />
@@ -259,7 +266,7 @@ export default function PersonalizationScreen() {
                 returnKeyType="next"
                 onSubmitEditing={() => taglineRef.current?.focus()}
                 blurOnSubmit={false}
-                onFocus={() => handleFocus(440)}
+                onFocus={() => handleFocus(180)}
               />
             </View>
             <View style={styles.inputDivider} />
@@ -280,7 +287,7 @@ export default function PersonalizationScreen() {
                 returnKeyType="done"
                 onSubmitEditing={handleSave}
                 autoCapitalize="sentences"
-                onFocus={() => handleFocus(520)}
+                onFocus={() => handleFocus(240)}
               />
             </View>
           </View>

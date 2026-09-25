@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   Modal,
   Platform,
+  Linking,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -22,6 +23,7 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
   Users,
+  MessageSquare,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { MenuAction } from '@expo/ui/community/menu';
@@ -188,6 +190,28 @@ export default function ReceivablesScreen() {
   const selectedAccount = useMemo(() => {
     return accounts.find((a) => a.id === settleAccountId) || accounts[0];
   }, [accounts, settleAccountId]);
+
+  const sendWhatsAppReminder = (name: string, netAmount: number) => {
+    Haptics.selectionAsync().catch(() => {});
+    const isOwed = netAmount >= 0;
+    const absAmt = Math.abs(netAmount);
+    const message = isOwed
+      ? `Hey ${name}! 👋 Gentle reminder from The Ledger: Net balance is ${sym}${absAmt.toLocaleString('en-IN')}. Please settle when convenient!`
+      : `Hey ${name}! 👋 Checking our balance on The Ledger: I owe you ${sym}${absAmt.toLocaleString('en-IN')}. Let me know how to send it!`;
+
+    const url = `whatsapp://send?text=${encodeURIComponent(message)}`;
+    Linking.canOpenURL(url)
+      .then((supported) => {
+        if (supported) {
+          Linking.openURL(url);
+        } else {
+          Linking.openURL(`https://wa.me/?text=${encodeURIComponent(message)}`);
+        }
+      })
+      .catch(() => {
+        Linking.openURL(`https://wa.me/?text=${encodeURIComponent(message)}`);
+      });
+  };
 
   // Account Menu Actions for iOS Native Menu
   const accountMenuActions: MenuAction[] = useMemo(() => {
@@ -543,7 +567,7 @@ export default function ReceivablesScreen() {
                   </NativeLiquidMenu>
                 </View>
 
-                {/* 4. Action Button */}
+                {/* 4. Action Buttons */}
                 <TouchableOpacity
                   style={styles.confirmDepositBtn}
                   activeOpacity={0.85}
@@ -562,6 +586,20 @@ export default function ReceivablesScreen() {
                   <AppText style={styles.confirmDepositBtnText}>
                     {settlingItem.tx.type === 'debt_borrow' ? 'Confirm & Repay' : 'Confirm & Deposit'}
                   </AppText>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.sheetWhatsAppBtn}
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    if (settlingItem) {
+                      const net = settlingItem.tx.type === 'debt_borrow' ? -settlingItem.amount : settlingItem.amount;
+                      sendWhatsAppReminder(settlingItem.borrower, net);
+                    }
+                  }}
+                >
+                  <MessageSquare size={13} color="#70D6BC" />
+                  <AppText style={styles.sheetWhatsAppBtnText}>Send Reminder on WhatsApp</AppText>
                 </TouchableOpacity>
               </>
             )}
@@ -728,6 +766,24 @@ const styles = StyleSheet.create({
   tabPillTextActive: {
     color: '#0F1015',
     fontWeight: '800',
+  },
+
+  sheetWhatsAppBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(112, 214, 188, 0.1)',
+    borderRadius: 14,
+    height: 46,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(112, 214, 188, 0.25)',
+  },
+  sheetWhatsAppBtnText: {
+    color: '#70D6BC',
+    fontSize: 13,
+    fontWeight: '700',
   },
 
   // ── Debtor List Section ──

@@ -372,6 +372,7 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
       <KeyboardAvoidingView
         style={styles.modalRoot}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
       >
         {/* iOS Drag Handle */}
         <View style={styles.dragHandleContainer}>
@@ -402,6 +403,7 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
             activeOpacity={0.7}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             onPress={() => {
+              Keyboard.dismiss();
               Haptics.selectionAsync();
               onClose();
             }}
@@ -464,6 +466,7 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
               contentContainerStyle={styles.scrollContent}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="interactive"
             >
               {/* Summary Metric Card */}
               <View style={styles.summaryCard}>
@@ -555,6 +558,7 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                           key={tab}
                           style={[styles.accountTabPill, isSelected && styles.accountTabPillActive]}
                           onPress={() => {
+                            Keyboard.dismiss();
                             Haptics.selectionAsync();
                             setSelectedAccountFilter(tab);
                           }}
@@ -584,6 +588,8 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                     placeholderTextColor="#696C75"
                     value={searchQuery}
                     onChangeText={setSearchQuery}
+                    returnKeyType="search"
+                    onSubmitEditing={() => Keyboard.dismiss()}
                   />
                 </View>
 
@@ -758,6 +764,7 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
               contentContainerStyle={styles.scrollContent}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="interactive"
             >
               {/* Guidance Notice */}
               <View style={styles.infoCard}>
@@ -825,6 +832,7 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                           ]}
                           activeOpacity={0.8}
                           onPress={() => {
+                            Keyboard.dismiss();
                             Haptics.selectionAsync();
                             setAccountTypes((prev) => ({ ...prev, [item.key]: 'savings' }));
                           }}
@@ -846,6 +854,7 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                           ]}
                           activeOpacity={0.8}
                           onPress={() => {
+                            Keyboard.dismiss();
                             Haptics.selectionAsync();
                             setAccountTypes((prev) => ({ ...prev, [item.key]: 'credit' }));
                           }}
@@ -867,6 +876,7 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                           ]}
                           activeOpacity={0.8}
                           onPress={() => {
+                            Keyboard.dismiss();
                             Haptics.selectionAsync();
                             setAccountTypes((prev) => ({ ...prev, [item.key]: 'wallet' }));
                           }}
@@ -907,6 +917,7 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                           {startingNum !== 0 && (
                             <TouchableOpacity
                               onPress={() => {
+                                Keyboard.dismiss();
                                 Haptics.selectionAsync();
                                 setBalanceInputs((prev) => ({ ...prev, [item.key]: '0' }));
                               }}
@@ -925,6 +936,8 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                             placeholderTextColor="#696C75"
                             keyboardType="numeric"
                             value={inputVal === '0' ? '' : inputVal}
+                            returnKeyType="done"
+                            onSubmitEditing={() => Keyboard.dismiss()}
                             onChangeText={(text) =>
                               setBalanceInputs((prev) => ({ ...prev, [item.key]: text }))
                             }
@@ -990,6 +1003,7 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                       placeholderTextColor="#696C75"
                       value={newAccName}
                       onChangeText={setNewAccName}
+                      returnKeyType="next"
                     />
 
                     <View style={styles.typeSelectorContainer}>
@@ -998,7 +1012,10 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                           styles.typeSegmentBtn,
                           newAccType === 'savings' && styles.typeSegmentBtnActive,
                         ]}
-                        onPress={() => setNewAccType('savings')}
+                        onPress={() => {
+                          Keyboard.dismiss();
+                          setNewAccType('savings');
+                        }}
                       >
                         <AppText
                           style={[
@@ -1015,7 +1032,10 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                           styles.typeSegmentBtn,
                           newAccType === 'credit' && styles.typeSegmentBtnActive,
                         ]}
-                        onPress={() => setNewAccType('credit')}
+                        onPress={() => {
+                          Keyboard.dismiss();
+                          setNewAccType('credit');
+                        }}
                       >
                         <AppText
                           style={[
@@ -1037,13 +1057,18 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                         keyboardType="numeric"
                         value={newAccBalance}
                         onChangeText={setNewAccBalance}
+                        returnKeyType="done"
+                        onSubmitEditing={() => Keyboard.dismiss()}
                       />
                     </View>
 
                     <View style={styles.addAccountActionsRow}>
                       <TouchableOpacity
                         style={styles.cancelAddBtn}
-                        onPress={() => setIsAddingNewAcc(false)}
+                        onPress={() => {
+                          Keyboard.dismiss();
+                          setIsAddingNewAcc(false);
+                        }}
                       >
                         <AppText style={styles.cancelAddBtnText}>Cancel</AppText>
                       </TouchableOpacity>
@@ -1061,6 +1086,7 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                     style={styles.addMissingAccountBtn}
                     activeOpacity={0.75}
                     onPress={() => {
+                      Keyboard.dismiss();
                       Haptics.selectionAsync();
                       setIsAddingNewAcc(true);
                     }}
@@ -1102,6 +1128,7 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
               contentContainerStyle={styles.scrollContent}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="interactive"
             >
               {/* Header Title Block */}
               <View style={styles.budgetHeaderBlock}>
@@ -1126,6 +1153,8 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                     keyboardType="numeric"
                     value={budgetInput}
                     onChangeText={setBudgetInput}
+                    returnKeyType="done"
+                    onSubmitEditing={() => Keyboard.dismiss()}
                   />
                 </View>
               </View>
@@ -1142,6 +1171,7 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                         style={[styles.presetChip, isSelected && styles.presetChipActive]}
                         activeOpacity={0.75}
                         onPress={() => {
+                          Keyboard.dismiss();
                           Haptics.selectionAsync();
                           setBudgetInput(amt.toString());
                         }}

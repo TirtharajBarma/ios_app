@@ -20,6 +20,7 @@ import { expenseColors } from '@/constants/expenseColors';
 import { ExpenseHeader } from './ExpenseHeader';
 import { MonthSummary } from './MonthSummary';
 import { MoneyFlowCard } from './MoneyFlowCard';
+import { SavingsGoalsPill } from './SavingsGoalsPill';
 import { BudgetCard } from './BudgetCard';
 import { AccountsSection } from './AccountsSection';
 import { FixedBottomNav, ExpenseTabType } from './FixedBottomNav';
@@ -47,6 +48,7 @@ export const ExpenseDashboard: React.FC = () => {
 
   const [showAddTxModal, setShowAddTxModal] = useState<boolean>(false);
   const [showAccountsModal, setShowAccountsModal] = useState<boolean>(false);
+  const [accountsModalTab, setAccountsModalTab] = useState<'accounts' | 'goals'>('accounts');
   const [selectedAccountForEdit, setSelectedAccountForEdit] = useState<ExpenseAccount | null>(null);
   const [showEditAccountModal, setShowEditAccountModal] = useState<boolean>(false);
 
@@ -113,6 +115,7 @@ export const ExpenseDashboard: React.FC = () => {
   };
 
   const handleFilterPress = () => {
+    setAccountsModalTab('accounts');
     setShowAccountsModal(true);
   };
 
@@ -324,6 +327,12 @@ export const ExpenseDashboard: React.FC = () => {
           }}
         >
           <MoneyFlowCard />
+          <SavingsGoalsPill
+            onPress={() => {
+              setAccountsModalTab('goals');
+              setShowAccountsModal(true);
+            }}
+          />
         </Animated.View>
 
         {/* Budget Card with Donut Chart */}
@@ -370,6 +379,7 @@ export const ExpenseDashboard: React.FC = () => {
       {/* Accounts Listing Modal */}
       <AccountsListModal
         visible={showAccountsModal}
+        initialTab={accountsModalTab}
         onClose={() => setShowAccountsModal(false)}
       />
 

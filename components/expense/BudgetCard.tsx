@@ -8,6 +8,7 @@ import {
   Easing,
 } from 'react-native';
 import Svg, { Circle, G } from 'react-native-svg';
+import { Zap } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { AppText } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
@@ -194,10 +195,9 @@ export const BudgetCard: React.FC = () => {
   // ─────────────────────────────────────────────────────────
   // 2. CENTER CONTENT DISPLAY
   // ─────────────────────────────────────────────────────────
-  let centerTitle = 'Budget';
-  let centerAmount = formatCompactCurrency(remainingBudget);
-  let centerSubLabel = 'left';
-  let centerFootnote = `${formatCompactCurrency(totalSpent)} of ${formatCompactCurrency(monthlyBudget)}`;
+  let centerTitle = 'LEFT TO SPEND';
+  let centerAmount = formatCompactCurrency(remainingBudget, sym);
+  let centerFootnote = `${formatCompactCurrency(totalSpent, sym)} of ${formatCompactCurrency(monthlyBudget, sym)} used`;
 
   const hasFixedBudget = selectedCategoryItem && categoryBudgets[selectedCategoryItem.category.id] !== undefined;
   const catBudget = selectedCategoryItem && hasFixedBudget ? categoryBudgets[selectedCategoryItem.category.id] : 0;
@@ -209,17 +209,62 @@ export const BudgetCard: React.FC = () => {
 
     if (hasFixedBudget && catBudget > 0) {
       const catRemaining = Math.max(catBudget - catSpent, 0);
-      const catUsedPct = Math.round((catSpent / catBudget) * 100);
-
-      centerAmount = formatCompactCurrency(catRemaining);
-      centerSubLabel = 'remaining';
-      centerFootnote = `${catUsedPct}% used of ${formatCompactCurrency(catBudget)}`;
+      centerAmount = formatCompactCurrency(catRemaining, sym);
+      centerFootnote = `${formatCompactCurrency(catSpent, sym)} of ${formatCompactCurrency(catBudget, sym)} used`;
     } else {
-      centerAmount = formatCompactCurrency(catSpent);
-      centerSubLabel = 'spent';
-      centerFootnote = 'no budget set';
+      centerAmount = formatCompactCurrency(catSpent, sym);
+      centerFootnote = 'Total spent';
     }
   }
+
+  // Dynamic Daily Safe Pace & Adaptive Split Burnout Forecasting
+  const now = new Date();
+  const currentDay = now.getDate();
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const daysRemaining = Math.max(1, daysInMonth - currentDay + 1);
+
+  // Helper to identify fixed non-discretionary commitments (Rent, Utilities, Subscriptions, EMIs)
+  const isFixedCommitment = (cat: { id: string; name: string }) => {
+    const n = (cat.name || '').toLowerCase();
+    const id = (cat.id || '').toLowerCase();
+    return (
+      id.includes('rent') ||
+      id.includes('util') ||
+      id.includes('bill') ||
+      id.includes('subs') ||
+      n.includes('rent') ||
+      n.includes('electric') ||
+      n.includes('power') ||
+      n.includes('utility') ||
+      n.includes('wifi') ||
+      n.includes('subscription') ||
+      n.includes('emi') ||
+      n.includes('loan') ||
+      n.includes('insurance')
+    );
+  };
+
+  const fixedSpent = breakdown.reduce((sum, item) => {
+    return sum + (isFixedCommitment(item.category) ? item.amount : 0);
+  }, 0);
+
+  const variableSpent = Math.max(0, totalSpent - fixedSpent);
+  const variableDailyBurn = currentDay > 0 ? Math.round(variableSpent / currentDay) : 0;
+  const safeDailyPace = monthlyBudget > 0 ? Math.max(0, Math.round(remainingBudget / daysRemaining)) : 0;
+
+  // Over-pacing is strictly based on variable burn rate, preventing Day 1 Rent from triggering false alarms
+  const isOverPacing =
+    monthlyBudget > 0 &&
+    variableSpent > 0 &&
+    variableDailyBurn > safeDailyPace * 1.15 &&
+    remainingBudget > 0;
+
+  const isExceeded = monthlyBudget > 0 && totalSpent >= monthlyBudget;
+
+  const projectedBurnoutDay =
+    variableDailyBurn > 0 && remainingBudget > 0
+      ? Math.min(daysInMonth, Math.round(currentDay + remainingBudget / variableDailyBurn))
+      : daysInMonth;
 
   // Split active categories into left and right columns for the legend (highest to lowest spend)
   const half = Math.ceil(activeBreakdown.length / 2);
@@ -323,7 +368,6 @@ export const BudgetCard: React.FC = () => {
           <AppText style={styles.centerMainAmount} numberOfLines={1}>
             {centerAmount}
           </AppText>
-          <AppText style={styles.centerLeftLabel}>{centerSubLabel}</AppText>
           <AppText style={styles.centerSubText} numberOfLines={1}>
             {centerFootnote}
           </AppText>
@@ -466,6 +510,58 @@ export const BudgetCard: React.FC = () => {
           </View>
         </View>
       )}
+
+      {/* Seamless Daily Safe Allowance Pacing Footer */}
+      {monthlyBudget > 0 && !selectedCategoryItem && (
+        <View style={styles.pacingFooter}>
+          <View style={styles.pacingFooterLeft}>
+            <Zap
+              size={12}
+              color={
+                isExceeded
+                  ? '#FF6B6B'
+                  : isOverPacing
+                  ? '#FF9D66'
+                  : expenseColors.accentGreen
+              }
+            />
+            <AppText style={styles.pacingValueText}>
+              {sym}{safeDailyPace.toLocaleString('en-IN')}/day
+            </AppText>
+            <AppText style={styles.pacingLabelText}>daily limit</AppText>
+          </View>
+
+          <View
+            style={[
+              styles.pacingStatusPill,
+              isExceeded
+                ? styles.pacingPillExceeded
+                : isOverPacing
+                ? styles.pacingPillWarning
+                : styles.pacingPillGood,
+            ]}
+          >
+            <AppText
+              style={[
+                styles.pacingStatusText,
+                isExceeded
+                  ? styles.pacingTextExceeded
+                  : isOverPacing
+                  ? styles.pacingTextWarning
+                  : styles.pacingTextGood,
+              ]}
+            >
+              {isExceeded
+                ? 'Limit Exceeded'
+                : isOverPacing
+                ? `Burnout ~Day ${projectedBurnoutDay}`
+                : fixedSpent > 0 && variableSpent === 0
+                ? `Bills Paid • ${daysRemaining}d left`
+                : `${daysRemaining} days left`}
+            </AppText>
+          </View>
+        </View>
+      )}
     </View>
   );
 };
@@ -504,37 +600,30 @@ const styles = StyleSheet.create({
     position: 'absolute',
     alignItems: 'center',
     justifyContent: 'center',
-    width: 150,
+    width: 140,
+    gap: 2,
   },
   centerBudgetLabel: {
     color: '#8E919D',
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: '600',
-    marginBottom: 4,
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '700',
+    letterSpacing: 0.8,
     textAlign: 'center',
+    textTransform: 'uppercase',
   },
   centerMainAmount: {
     color: '#FFFFFF',
-    fontSize: 36,
-    lineHeight: 40,
+    fontSize: 34,
+    lineHeight: 38,
     fontWeight: '800',
     letterSpacing: -0.5,
     textAlign: 'center',
   },
-  centerLeftLabel: {
+  centerSubText: {
     color: '#8E919D',
     fontSize: 12,
-    lineHeight: 16,
-    fontWeight: '600',
-    marginTop: 2,
-    marginBottom: 6,
-    textAlign: 'center',
-  },
-  centerSubText: {
-    color: '#656978',
-    fontSize: 12,
-    lineHeight: 16,
+    lineHeight: 15,
     fontWeight: '600',
     textAlign: 'center',
   },
@@ -659,5 +748,67 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
     textAlign: 'center',
+  },
+  pacingFooter: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 12,
+    marginTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  pacingFooterLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    flex: 1,
+  },
+  pacingValueText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
+    lineHeight: 14,
+  },
+  pacingLabelText: {
+    color: '#8E919D',
+    fontSize: 11,
+    fontWeight: '600',
+    lineHeight: 14,
+  },
+  pacingStatusPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  pacingPillGood: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  pacingPillWarning: {
+    backgroundColor: 'rgba(255, 157, 102, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 157, 102, 0.25)',
+  },
+  pacingPillExceeded: {
+    backgroundColor: 'rgba(255, 107, 107, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 107, 107, 0.25)',
+  },
+  pacingStatusText: {
+    fontSize: 11,
+    fontWeight: '700',
+    lineHeight: 14,
+  },
+  pacingTextGood: {
+    color: '#D1D5DB',
+  },
+  pacingTextWarning: {
+    color: '#FF9D66',
+  },
+  pacingTextExceeded: {
+    color: '#FF6B6B',
   },
 });

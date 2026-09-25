@@ -8,6 +8,7 @@ import {
   Modal,
   KeyboardAvoidingView,
   Platform,
+  Keyboard,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -74,6 +75,7 @@ export default function MonthlyBudgetScreen() {
   }, [localCategoryBudgets]);
 
   const handleQuickPreset = (amount: number) => {
+    Keyboard.dismiss();
     Haptics.selectionAsync();
     setBudgetInput(amount.toString());
   };
@@ -87,6 +89,7 @@ export default function MonthlyBudgetScreen() {
   };
 
   const handleAdjustCategory = (catId: string, delta: number) => {
+    Keyboard.dismiss();
     Haptics.selectionAsync();
     const current = localCategoryBudgets[catId] || 0;
     const next = Math.max(0, current + delta);
@@ -97,6 +100,7 @@ export default function MonthlyBudgetScreen() {
   };
 
   const handleSaveAll = () => {
+    Keyboard.dismiss();
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     const clean = budgetInput.trim().replace(/,/g, '');
     const parsed = clean === '' ? 0 : parseFloat(clean);
@@ -144,11 +148,10 @@ export default function MonthlyBudgetScreen() {
         <ScrollView
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
-          automaticallyAdjustKeyboardInsets={true}
+          keyboardDismissMode="interactive"
           contentContainerStyle={[
             styles.scrollContent,
-            { paddingBottom: insets.bottom + 220 },
+            { paddingBottom: insets.bottom + 90 },
           ]}
         >
         {/* Title & Subtitle */}
@@ -170,6 +173,7 @@ export default function MonthlyBudgetScreen() {
             ]}
             activeOpacity={0.8}
             onPress={() => {
+              Keyboard.dismiss();
               Haptics.selectionAsync();
               setActiveTab('overall');
             }}
@@ -191,6 +195,7 @@ export default function MonthlyBudgetScreen() {
             ]}
             activeOpacity={0.8}
             onPress={() => {
+              Keyboard.dismiss();
               Haptics.selectionAsync();
               setActiveTab('category');
             }}
@@ -222,6 +227,8 @@ export default function MonthlyBudgetScreen() {
                     value={budgetInput}
                     onChangeText={setBudgetInput}
                     keyboardType="numeric"
+                    returnKeyType="done"
+                    onSubmitEditing={() => Keyboard.dismiss()}
                     style={styles.largeAmountInput}
                     selectionColor={expenseColors.accentPeach}
                   />
@@ -231,7 +238,10 @@ export default function MonthlyBudgetScreen() {
                 <TouchableOpacity
                   style={styles.keypadBtn}
                   activeOpacity={0.8}
-                  onPress={() => setIsKeypadModalVisible(true)}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    setIsKeypadModalVisible(true);
+                  }}
                 >
                   <Hash size={20} color={expenseColors.accentPeach} strokeWidth={2.5} />
                 </TouchableOpacity>
@@ -379,6 +389,8 @@ export default function MonthlyBudgetScreen() {
                             placeholder="0"
                             placeholderTextColor="#5A5E6D"
                             keyboardType="number-pad"
+                            returnKeyType="done"
+                            onSubmitEditing={() => Keyboard.dismiss()}
                             onChangeText={(text) => {
                               const clean = text.replace(/[^0-9]/g, '');
                               const val = clean ? parseInt(clean, 10) : 0;

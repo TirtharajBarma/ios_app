@@ -129,7 +129,7 @@ interface ExpenseState {
   // Savings Vaults Actions
   addSavingsVault: (vault: Omit<SavingsVault, 'id' | 'currentAmount'>) => void;
   updateSavingsVault: (id: string, updates: Partial<SavingsVault>) => void;
-  deleteSavingsVault: (id: string) => void;
+  deleteSavingsVault: (id: string, refundAccountId?: string) => void;
   depositToVault: (vaultId: string, amount: number, sourceAccountId?: string) => void;
   withdrawFromVault: (vaultId: string, amount: number, targetAccountId?: string) => void;
 
@@ -1368,10 +1368,50 @@ export const useExpenseStore = create<ExpenseState>()(
     }));
   },
 
-  deleteSavingsVault: (id) => {
-    set((state) => ({
-      savingsVaults: state.savingsVaults.filter((v) => v.id !== id),
-    }));
+  deleteSavingsVault: (id, refundAccountId) => {
+    const vault = get().savingsVaults.find((v) => v.id === id);
+    if (!vault) return;
+
+    set((state) => {
+      let updatedAccounts = [...state.accounts];
+      let newTransactions = [...state.transactions];
+
+      // If the vault had money, refund 100% of it back to the target account so net worth is never lost!
+      if (vault.currentAmount > 0) {
+        const effectiveTarget = refundAccountId || state.accounts[0]?.id || 'acc_primary';
+        updatedAccounts = updatedAccounts.map((acc) => {
+          if (acc.id === effectiveTarget) {
+            return {
+              ...acc,
+              balance: acc.balance + vault.currentAmount,
+              monthlyChange: acc.monthlyChange + vault.currentAmount,
+              txnCountThisMonth: acc.txnCountThisMonth + 1,
+            };
+          }
+          return acc;
+        });
+
+        const refundTx: ExpenseTransaction = {
+          id: genId('tx'),
+          amount: vault.currentAmount,
+          type: 'vault_withdraw',
+          categoryId: 'cat_fin',
+          accountId: effectiveTarget,
+          vaultId: id,
+          date: localISODate(new Date()),
+          note: `Refund from deleted goal: ${vault.emoji || '🎯'} ${vault.name}`,
+        };
+        newTransactions = [refundTx, ...newTransactions];
+      }
+
+      return {
+        savingsVaults: state.savingsVaults.filter((v) => v.id !== id),
+        accounts: updatedAccounts,
+        transactions: newTransactions,
+      };
+    });
+
+    logAction('vault', `Deleted savings vault ${vault.name}, refunded ${vault.currentAmount}`, { id, refundedAmount: vault.currentAmount });
   },
 
   depositToVault: (vaultId, amount, sourceAccountId) => {

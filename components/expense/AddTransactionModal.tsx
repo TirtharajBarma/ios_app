@@ -239,6 +239,9 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
     quickPresets,
     addQuickPreset,
     deleteQuickPreset,
+    transactions,
+    learnedMerchantRules,
+    saveLearnedMerchantRule,
   } = useExpenseStore();
   const sym = currencySymbol || '₹';
   const { subscriptions, addSubscription, updateSubscription } = useSubscriptionStore();
@@ -279,7 +282,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
     return d;
   });
 
-  // Goal creation sheet
+  // Goal creation sheet & multi-goal allocation
+  const [goalAllocations, setGoalAllocations] = useState<Record<string, string>>({});
   const [showNewGoalSheet, setShowNewGoalSheet] = useState<boolean>(false);
   const [inlineGoalName, setInlineGoalName] = useState<string>('');
   const [inlineGoalTarget, setInlineGoalTarget] = useState<string>('');
@@ -298,8 +302,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   const [newPresetAmount, setNewPresetAmount] = useState<string>('');
   const [newPresetCatId, setNewPresetCatId] = useState<string>(categories[0]?.id || 'cat_shop');
 
-  // Account Dropdown Picker Modal (Transfer mode)
-  const [accountPickerSide, setAccountPickerSide] = useState<'from' | 'to' | null>(null);
   const [showAddAccountModal, setShowAddAccountModal] = useState<boolean>(false);
 
   // Date Pickers
@@ -325,11 +327,18 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
           setTabMode('expense');
         }
 
+        const isIncomeTx = tx.type === 'income';
         setAmount(tx.amount.toString());
         setMerchant(tx.note || '');
         setSelectedAccountId(tx.accountId || '');
         setToAccountId(tx.toAccountId || accounts[1]?.id || accounts[0]?.id || 'acc_slice');
-        setSelectedCategoryId(tx.categoryId || '');
+        setSelectedCategoryId(
+          tx.categoryId && (isIncomeTx ? INCOME_CATEGORIES.some((c) => c.id === tx.categoryId) : categories.some((c) => c.id === tx.categoryId))
+            ? tx.categoryId
+            : isIncomeTx
+            ? 'cat_salary'
+            : ''
+        );
         setSelectedFolderId(tx.folderId || '');
         setSelectedTag(tx.tag || '');
         setCustomTagInput('');
@@ -369,6 +378,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
         setSelectedAccountId('');
         setSelectedGoalId('');
         setGoalAllocationAmount('');
+        setGoalAllocations({});
         setSelectedFolderId('');
         setSelectedCategoryId('');
         setTxDate(new Date());
@@ -452,10 +462,66 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
     Haptics.selectionAsync().catch(() => {});
   };
 
+  // Dynamic Historical Amount Chips: based on typed merchant or selected category
+  const frequentAmounts = useMemo(() => {
+    if (tabMode !== 'expense' && tabMode !== 'income') return [];
+    const cleanMerchant = merchant.trim().toLowerCase();
+
+    // 1. If merchant is typed (>= 2 chars), search past transactions matching this merchant
+    if (cleanMerchant.length >= 2) {
+      const matchingTxs = transactions.filter(
+        (t) => t.type === tabMode && (t.note || '').toLowerCase().includes(cleanMerchant) && t.amount > 0
+      );
+      if (matchingTxs.length > 0) {
+        const freqMap: Record<number, number> = {};
+        matchingTxs.forEach((t) => {
+          const val = Math.round(t.amount);
+          freqMap[val] = (freqMap[val] || 0) + 1;
+        });
+        return Object.entries(freqMap)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 4)
+          .map(([amt]) => Number(amt));
+      }
+    }
+
+    // 2. If category is selected, find top amounts in this category
+    if (selectedCategoryId) {
+      const matchingCatTxs = transactions.filter(
+        (t) => t.type === tabMode && t.categoryId === selectedCategoryId && t.amount > 0
+      );
+      if (matchingCatTxs.length >= 2) {
+        const freqMap: Record<number, number> = {};
+        matchingCatTxs.forEach((t) => {
+          const val = Math.round(t.amount);
+          freqMap[val] = (freqMap[val] || 0) + 1;
+        });
+        return Object.entries(freqMap)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 4)
+          .map(([amt]) => Number(amt));
+      }
+    }
+
+    return [];
+  }, [transactions, tabMode, merchant, selectedCategoryId]);
+
   const handleMerchantChange = (text: string) => {
     setMerchant(text);
     if (tabMode === 'expense') {
       const lower = text.toLowerCase().trim();
+      if (!lower) return;
+
+      // 1. Check learned merchant rules from store
+      if (learnedMerchantRules && learnedMerchantRules[lower]) {
+        const learnedCatId = learnedMerchantRules[lower];
+        if (categories.some((c) => c.id === learnedCatId)) {
+          setSelectedCategoryId(learnedCatId);
+          return;
+        }
+      }
+
+      // 2. Check predefined vendor map
       for (const [key, catId] of Object.entries(VENDOR_CATEGORY_MAP)) {
         if (lower.includes(key)) {
           if (categories.some((c) => c.id === catId)) {
@@ -463,7 +529,20 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             if (catId === 'cat_subs') {
               setIsSubscription(true);
             }
-            break;
+            return;
+          }
+        }
+      }
+
+      // 3. Fuzzy search history in past transactions
+      if (lower.length >= 3) {
+        const pastMatch = transactions.find(
+          (t) => t.type === 'expense' && (t.note || '').toLowerCase().includes(lower) && t.categoryId
+        );
+        if (pastMatch && pastMatch.categoryId && categories.some((c) => c.id === pastMatch.categoryId)) {
+          setSelectedCategoryId(pastMatch.categoryId);
+          if (pastMatch.accountId && accounts.some((a) => a.id === pastMatch.accountId) && !selectedAccountId) {
+            setSelectedAccountId(pastMatch.accountId);
           }
         }
       }
@@ -743,32 +822,54 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
         }
       }
     } else if (tabMode === 'income') {
+      const finalIncomeCatId =
+        selectedCategoryId && INCOME_CATEGORIES.some((c) => c.id === selectedCategoryId)
+          ? selectedCategoryId
+          : 'cat_salary';
+
+      const effectiveAccId = selectedAccountId || accounts[0]?.id || 'acc_primary';
+
       if (initialTransaction) {
         updateTransaction(initialTransaction.id, {
           amount: numAmount,
           type: 'income',
-          categoryId: selectedCategoryId || 'cat_income',
-          accountId: selectedAccountId || accounts[0]?.id || 'acc_primary',
+          categoryId: finalIncomeCatId,
+          accountId: effectiveAccId,
           date: format(txDate, 'yyyy-MM-dd'),
-          note: finalNote || 'Income',
+          note: finalNote || 'Salary',
           tag: finalTag || undefined,
         });
       } else {
         addTransaction({
           amount: numAmount,
           type: 'income',
-          categoryId: selectedCategoryId || 'cat_income',
-          accountId: selectedAccountId || accounts[0]?.id || 'acc_primary',
+          categoryId: finalIncomeCatId,
+          accountId: effectiveAccId,
           date: format(txDate, 'yyyy-MM-dd'),
-          note: finalNote || 'Income',
+          note: finalNote || 'Salary',
           tag: finalTag || undefined,
         });
 
-        if (selectedGoalId) {
+        // 1. Process multi-goal split allocations
+        const activeAllocations = Object.entries(goalAllocations).filter(([id, amtStr]) => {
+          const amt = parseFloat(amtStr);
+          return !isNaN(amt) && amt > 0 && savingsVaults.some((v) => v.id === id);
+        });
+
+        if (activeAllocations.length > 0) {
+          activeAllocations.forEach(([vaultId, amtStr]) => {
+            const allocAmt = parseFloat(amtStr);
+            depositToVault(vaultId, Math.min(allocAmt, numAmount), effectiveAccId);
+          });
+        } else if (selectedGoalId) {
           const alloc = parseFloat(goalAllocationAmount) || numAmount;
-          depositToVault(selectedGoalId, Math.min(alloc, numAmount), selectedAccountId || accounts[0]?.id);
+          depositToVault(selectedGoalId, Math.min(alloc, numAmount), effectiveAccId);
         }
       }
+    }
+
+    if (merchant.trim() && selectedCategoryId && tabMode === 'expense' && saveLearnedMerchantRule) {
+      saveLearnedMerchantRule(merchant.trim().toLowerCase(), selectedCategoryId);
     }
 
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
@@ -831,12 +932,42 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
           : []),
       ];
 
-  const accountActions = [
+  const accountActions: MenuAction[] = [
     ...accounts.map((acc) => ({
       id: acc.id,
       title: `${acc.name} (${acc.statusType === 'due' ? `Due: ${sym}${acc.dueAmount || 0}` : `Bal: ${sym}${acc.balance}`})`,
       image: getAccountSfSymbol(acc.name) as any,
       state: (selectedAccountId === acc.id ? 'on' : 'off') as 'on' | 'off',
+    })),
+    {
+      id: '__ADD_ACCOUNT__',
+      title: 'Add New Account...',
+      image: 'plus.circle' as any,
+    },
+  ];
+
+  const fromAccountActions: MenuAction[] = [
+    ...accounts.map((acc) => ({
+      id: acc.id,
+      title: `${acc.name} (${acc.statusType === 'due' ? `Due: ${sym}${acc.dueAmount || 0}` : `Bal: ${sym}${acc.balance}`})`,
+      image: getAccountSfSymbol(acc.name) as any,
+      state: (selectedAccountId === acc.id ? 'on' : 'off') as 'on' | 'off',
+      attributes: toAccountId === acc.id ? { disabled: true } : undefined,
+    })),
+    {
+      id: '__ADD_ACCOUNT__',
+      title: 'Add New Account...',
+      image: 'plus.circle' as any,
+    },
+  ];
+
+  const toAccountActions: MenuAction[] = [
+    ...accounts.map((acc) => ({
+      id: acc.id,
+      title: `${acc.name} (${acc.statusType === 'due' ? `Due: ${sym}${acc.dueAmount || 0}` : `Bal: ${sym}${acc.balance}`})`,
+      image: getAccountSfSymbol(acc.name) as any,
+      state: (toAccountId === acc.id ? 'on' : 'off') as 'on' | 'off',
+      attributes: selectedAccountId === acc.id ? { disabled: true } : undefined,
     })),
     {
       id: '__ADD_ACCOUNT__',
@@ -908,7 +1039,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
           style={styles.scroll}
           contentContainerStyle={[
             styles.scrollContent,
-            { paddingBottom: Math.max(keyboardHeight + 60, Platform.OS === 'ios' ? 40 : 24) },
+            { paddingBottom: Platform.OS === 'ios' ? 60 : 30 },
           ]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
@@ -929,7 +1060,13 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
 
             <TouchableOpacity
               style={[styles.typeBtn, tabMode === 'income' && styles.typeBtnActive]}
-              onPress={() => { Haptics.selectionAsync().catch(() => {}); setTabMode('income'); }}
+              onPress={() => {
+                Haptics.selectionAsync().catch(() => {});
+                setTabMode('income');
+                if (!selectedCategoryId || !INCOME_CATEGORIES.some((c) => c.id === selectedCategoryId)) {
+                  setSelectedCategoryId('cat_salary');
+                }
+              }}
             >
               <AppText style={[styles.typeBtnText, tabMode === 'income' && styles.typeBtnTextActive]}>
                 INCOME
@@ -1026,32 +1163,42 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             </View>
           )}
 
-          {/* INTERACTIVE TRANSFER HERO CARD (With Dropdowns & Arrow) */}
+          {/* INTERACTIVE TRANSFER HERO CARD (With Liquid Dropdowns & Arrow) */}
           {tabMode === 'transfer' && (
             <View style={styles.transferHeroCard}>
               <View style={styles.transferHeroHeader}>
                 <AppText style={styles.transferHeroTitle}>ACCOUNT TRANSFER</AppText>
-                <AppText style={styles.transferHeroSubtitle}>Tap an account to change</AppText>
+                <AppText style={styles.transferHeroSubtitle}>Select source and destination accounts</AppText>
               </View>
 
               <View style={styles.transferDropdownRow}>
                 {/* FROM ACCOUNT */}
-                <TouchableOpacity
-                  style={styles.transferSelectBox}
-                  activeOpacity={0.8}
-                  onPress={() => setAccountPickerSide('from')}
+                <NativeLiquidMenu
+                  title="Debit Account (From)"
+                  actions={fromAccountActions}
+                  onSelect={(accId) => {
+                    if (accId === '__ADD_ACCOUNT__') {
+                      setShowAddAccountModal(true);
+                    } else {
+                      Haptics.selectionAsync().catch(() => {});
+                      setSelectedAccountId(accId);
+                    }
+                  }}
+                  style={{ flex: 1 }}
                 >
-                  <AppText style={styles.transferBoxLabel}>FROM (DEBIT)</AppText>
-                  <View style={styles.transferBoxContent}>
-                    <View style={styles.transferBoxIconWrap}>
-                      {getAccountIcon(fromAccObj?.name || '')}
+                  <View style={styles.transferSelectBox}>
+                    <AppText style={styles.transferBoxLabel}>FROM (DEBIT)</AppText>
+                    <View style={styles.transferBoxContent}>
+                      <View style={styles.transferBoxIconWrap}>
+                        {getAccountIcon(fromAccObj?.name || '')}
+                      </View>
+                      <AppText style={styles.transferBoxAccountName} numberOfLines={1}>
+                        {fromAccObj?.name.toUpperCase()}
+                      </AppText>
+                      <ChevronDown size={14} color="#A0A5B5" />
                     </View>
-                    <AppText style={styles.transferBoxAccountName} numberOfLines={1}>
-                      {fromAccObj?.name.toUpperCase()}
-                    </AppText>
-                    <ChevronDown size={14} color="#A0A5B5" />
                   </View>
-                </TouchableOpacity>
+                </NativeLiquidMenu>
 
                 {/* ARROW */}
                 <View style={styles.transferArrowWrap}>
@@ -1059,25 +1206,37 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                 </View>
 
                 {/* TO ACCOUNT */}
-                <TouchableOpacity
-                  style={[
-                    styles.transferSelectBox,
-                    isCreditCardPayment && styles.creditCardSelectBox,
-                  ]}
-                  activeOpacity={0.8}
-                  onPress={() => setAccountPickerSide('to')}
+                <NativeLiquidMenu
+                  title="Credit Account (To)"
+                  actions={toAccountActions}
+                  onSelect={(accId) => {
+                    if (accId === '__ADD_ACCOUNT__') {
+                      setShowAddAccountModal(true);
+                    } else {
+                      Haptics.selectionAsync().catch(() => {});
+                      setToAccountId(accId);
+                    }
+                  }}
+                  style={{ flex: 1 }}
                 >
-                  <AppText style={styles.transferBoxLabel}>TO (CREDIT)</AppText>
-                  <View style={styles.transferBoxContent}>
-                    <View style={styles.transferBoxIconWrap}>
-                      {getAccountIcon(toAccObj?.name || '')}
+                  <View
+                    style={[
+                      styles.transferSelectBox,
+                      isCreditCardPayment && styles.creditCardSelectBox,
+                    ]}
+                  >
+                    <AppText style={styles.transferBoxLabel}>TO (CREDIT)</AppText>
+                    <View style={styles.transferBoxContent}>
+                      <View style={styles.transferBoxIconWrap}>
+                        {getAccountIcon(toAccObj?.name || '')}
+                      </View>
+                      <AppText style={styles.transferBoxAccountName} numberOfLines={1}>
+                        {toAccObj?.name.toUpperCase()}
+                      </AppText>
+                      <ChevronDown size={14} color="#A0A5B5" />
                     </View>
-                    <AppText style={styles.transferBoxAccountName} numberOfLines={1}>
-                      {toAccObj?.name.toUpperCase()}
-                    </AppText>
-                    <ChevronDown size={14} color="#A0A5B5" />
                   </View>
-                </TouchableOpacity>
+                </NativeLiquidMenu>
               </View>
 
               <View style={styles.transferHeroFooter}>
@@ -1158,6 +1317,45 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                 onChangeText={handleMerchantChange}
                 onFocus={() => handleInputFocus(100)}
               />
+
+              {/* Seamless Contextual Amount Suggestions */}
+              {frequentAmounts.length > 0 && (
+                <View style={styles.frequentAmountsWrapper}>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.frequentAmountsScroll}
+                  >
+                    <AppText style={styles.frequentAmountsLabel}>Frequent:</AppText>
+                    {frequentAmounts.map((amt) => {
+                      const isSelected = amount === amt.toString();
+                      return (
+                        <TouchableOpacity
+                          key={amt}
+                          style={[
+                            styles.frequentAmountChip,
+                            isSelected && styles.frequentAmountChipSelected,
+                          ]}
+                          activeOpacity={0.75}
+                          onPress={() => {
+                            Haptics.selectionAsync().catch(() => {});
+                            handleAmountChange(amt.toString());
+                          }}
+                        >
+                          <AppText
+                            style={[
+                              styles.frequentAmountChipText,
+                              isSelected && styles.frequentAmountChipTextSelected,
+                            ]}
+                          >
+                            {sym}{amt.toLocaleString('en-IN')}
+                          </AppText>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              )}
             </View>
           )}
 
@@ -1428,46 +1626,162 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             </View>
           )}
 
-          {/* ALLOCATE TO SAVINGS GOAL (For Income Mode) */}
+          {/* ALLOCATE TO SAVINGS GOALS (For Income Mode - Pay Yourself First) */}
           {tabMode === 'income' && (
             <View style={styles.section}>
-              <AppText style={styles.label}>ALLOCATE TO SAVINGS GOAL (OPTIONAL)</AppText>
-              <NativeLiquidMenu
-                title="Savings Goal"
-                actions={goalActions}
-                onSelect={(goalId) => {
-                  if (goalId === '__CREATE_GOAL__') {
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                <AppText style={styles.label}>SAVINGS GOALS</AppText>
+                <TouchableOpacity
+                  style={styles.inlineAddGoalBtn}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
                     setShowNewGoalSheet(true);
-                  } else {
-                    Haptics.selectionAsync().catch(() => {});
-                    setSelectedGoalId(goalId);
-                  }
-                }}
-                style={{ width: '100%' }}
-              >
-                <View style={styles.dropdownTrigger}>
-                  <View style={styles.dropdownTriggerLeft}>
-                    <AppText style={styles.dropdownTriggerValue} numberOfLines={1}>
-                      {selectedGoalId
-                        ? `${savingsVaults.find((v) => v.id === selectedGoalId)?.emoji} ${savingsVaults.find((v) => v.id === selectedGoalId)?.name}`
-                        : 'None (Keep 100% in Bank as Operating Cash)'}
-                    </AppText>
-                  </View>
-                  <ChevronDown size={15} color="#7E8394" />
-                </View>
-              </NativeLiquidMenu>
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Plus size={12} color="#FF9D66" />
+                  <AppText style={styles.inlineAddGoalBtnText}>New Goal</AppText>
+                </TouchableOpacity>
+              </View>
 
-              {selectedGoalId !== '' && (
-                <View style={{ marginTop: 10 }}>
-                  <AppText style={styles.label}>SAVE AMOUNT TO GOAL (DEFAULT: 100%)</AppText>
-                  <TextInput
-                    style={styles.textInput}
-                    placeholder={`e.g. ${amount || '3000'}`}
-                    placeholderTextColor="#555866"
-                    keyboardType="numeric"
-                    value={goalAllocationAmount}
-                    onChangeText={setGoalAllocationAmount}
-                  />
+              {savingsVaults.length === 0 ? (
+                <TouchableOpacity
+                  style={styles.emptyGoalPromptCard}
+                  onPress={() => setShowNewGoalSheet(true)}
+                  activeOpacity={0.75}
+                >
+                  <Sparkles size={16} color="#FF9D66" />
+                  <View style={{ flex: 1 }}>
+                    <AppText style={styles.emptyGoalTitle}>Create your first Savings Goal</AppText>
+                    <AppText style={styles.emptyGoalSub}>e.g. 🚨 Emergency Fund or ✈️ Travel Savings</AppText>
+                  </View>
+                  <Plus size={16} color="#FF9D66" />
+                </TouchableOpacity>
+              ) : (
+                <View style={styles.goalAllocationsContainer}>
+                  {savingsVaults.map((vault) => {
+                    const isAllocated = goalAllocations[vault.id] !== undefined;
+                    const allocatedVal = goalAllocations[vault.id] || '';
+
+                    return (
+                      <View key={vault.id} style={[styles.goalAllocCard, isAllocated && styles.goalAllocCardActive]}>
+                        <TouchableOpacity
+                          style={styles.goalAllocHeaderRow}
+                          activeOpacity={0.7}
+                          onPress={() => {
+                            Haptics.selectionAsync().catch(() => {});
+                            setGoalAllocations((prev) => {
+                              const next = { ...prev };
+                              if (next[vault.id] !== undefined) {
+                                delete next[vault.id];
+                              } else {
+                                const suggested = numAmount > 0 ? Math.round(numAmount * 0.1).toString() : '1000';
+                                next[vault.id] = suggested;
+                                handleInputFocus(220);
+                              }
+                              return next;
+                            });
+                          }}
+                        >
+                          <View style={styles.goalAllocLeft}>
+                            <View style={[styles.goalCheckbox, isAllocated && styles.goalCheckboxActive]}>
+                              {isAllocated && <Check size={12} color="#0D0E12" strokeWidth={3} />}
+                            </View>
+                            <AppText style={styles.goalAllocEmoji}>{vault.emoji}</AppText>
+                            <View>
+                              <AppText style={styles.goalAllocName}>{vault.name}</AppText>
+                              <AppText style={styles.goalAllocMeta}>
+                                Saved: {sym}{vault.currentAmount.toLocaleString('en-IN')} / {sym}{vault.targetAmount.toLocaleString('en-IN')}
+                              </AppText>
+                            </View>
+                          </View>
+                          <AppText style={[styles.goalAllocStatus, isAllocated && { color: '#70D6BC' }]}>
+                            {isAllocated ? 'Allocating' : 'Untouched'}
+                          </AppText>
+                        </TouchableOpacity>
+
+                        {isAllocated && (
+                          <View style={styles.goalAllocInputSection}>
+                            <View style={styles.goalInputRow}>
+                              <AppText style={styles.goalInputPrefix}>{sym}</AppText>
+                              <TextInput
+                                style={styles.goalAmountInput}
+                                placeholder="0"
+                                placeholderTextColor="#555866"
+                                keyboardType="numeric"
+                                returnKeyType="done"
+                                onSubmitEditing={Keyboard.dismiss}
+                                value={allocatedVal}
+                                onFocus={() => {
+                                  handleInputFocus(220);
+                                }}
+                                onChangeText={(t) => {
+                                  setGoalAllocations((prev) => ({
+                                    ...prev,
+                                    [vault.id]: t,
+                                  }));
+                                }}
+                              />
+                            </View>
+                            {/* Quick % chips */}
+                            {numAmount > 0 && (
+                              <View style={styles.goalQuickPercentRow}>
+                                {[
+                                  { label: '10%', val: Math.round(numAmount * 0.1) },
+                                  { label: '20%', val: Math.round(numAmount * 0.2) },
+                                  { label: '30%', val: Math.round(numAmount * 0.3) },
+                                  { label: '50%', val: Math.round(numAmount * 0.5) },
+                                ].map((chip) => (
+                                  <TouchableOpacity
+                                    key={chip.label}
+                                    style={styles.goalQuickPercentChip}
+                                    onPress={() => {
+                                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                                      setGoalAllocations((prev) => ({
+                                        ...prev,
+                                        [vault.id]: chip.val.toString(),
+                                      }));
+                                    }}
+                                  >
+                                    <AppText style={styles.goalQuickPercentText}>{chip.label}</AppText>
+                                  </TouchableOpacity>
+                                ))}
+                              </View>
+                            )}
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })}
+
+                  {/* Multi-Goal Split Summary */}
+                  {numAmount > 0 && (
+                    <View style={styles.goalSplitSummaryBox}>
+                      <View style={styles.goalSummaryLine}>
+                        <AppText style={styles.goalSummaryLabel}>Total Goals Allocation:</AppText>
+                        <AppText style={styles.goalSummaryValGreen}>
+                          {sym}
+                          {Object.entries(goalAllocations)
+                            .reduce((sum, [, amtStr]) => sum + (parseFloat(amtStr) || 0), 0)
+                            .toLocaleString('en-IN')}
+                        </AppText>
+                      </View>
+                      <View style={styles.goalSummaryLine}>
+                        <AppText style={styles.goalSummaryLabel}>Spendable Cash in Bank:</AppText>
+                        <AppText style={styles.goalSummaryValWhite}>
+                          {sym}
+                          {Math.max(
+                            0,
+                            numAmount -
+                              Object.entries(goalAllocations).reduce(
+                                (sum, [, amtStr]) => sum + (parseFloat(amtStr) || 0),
+                                0
+                              )
+                          ).toLocaleString('en-IN')}
+                        </AppText>
+                      </View>
+                    </View>
+                  )}
                 </View>
               )}
             </View>
@@ -1674,85 +1988,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
           </TouchableOpacity>
         </Modal>
 
-        {/* ACCOUNT PICKER DROPDOWN MODAL FOR TRANSFER */}
-        {accountPickerSide !== null && (
-          <Modal
-            transparent
-            visible={true}
-            animationType="fade"
-            onRequestClose={() => setAccountPickerSide(null)}
-          >
-            <TouchableOpacity
-              style={styles.modalBackdrop}
-              activeOpacity={1}
-              onPress={() => setAccountPickerSide(null)}
-            >
-              <View style={styles.pickerModalContent} onStartShouldSetResponder={() => true}>
-                <View style={styles.pickerModalHeader}>
-                  <AppText style={styles.pickerModalTitle}>
-                    {accountPickerSide === 'from' ? 'SELECT DEBIT ACCOUNT (FROM)' : 'SELECT CREDIT ACCOUNT (TO)'}
-                  </AppText>
-                  <TouchableOpacity onPress={() => setAccountPickerSide(null)}>
-                    <X size={18} color="#A0A5B5" />
-                  </TouchableOpacity>
-                </View>
-
-                <View style={styles.pickerAccountList}>
-                  {accounts.map((acc) => {
-                    const isOpposite = accountPickerSide === 'from'
-                      ? toAccountId === acc.id
-                      : selectedAccountId === acc.id;
-                    const isCurrent = accountPickerSide === 'from'
-                      ? selectedAccountId === acc.id
-                      : toAccountId === acc.id;
-
-                    return (
-                      <TouchableOpacity
-                        key={acc.id}
-                        disabled={isOpposite}
-                        style={[
-                          styles.pickerAccountItem,
-                          isCurrent && styles.pickerAccountItemCurrent,
-                          isOpposite && styles.pickerAccountItemDisabled,
-                        ]}
-                        onPress={() => {
-                          if (accountPickerSide === 'from') {
-                            setSelectedAccountId(acc.id);
-                          } else {
-                            setToAccountId(acc.id);
-                          }
-                          setAccountPickerSide(null);
-                        }}
-                      >
-                        <View style={styles.pickerAccountLeft}>
-                          <View style={[styles.pickerIconCircle, isCurrent && { backgroundColor: expenseColors.accentPeach }]}>
-                            {getAccountIcon(acc.name)}
-                          </View>
-                          <View>
-                            <AppText style={[styles.pickerAccountName, isOpposite && { color: '#555866' }]}>
-                              {acc.name.toUpperCase()}
-                            </AppText>
-                            <AppText style={styles.pickerAccountType}>
-                              {acc.statusType === 'due' ? `Due: ${sym}${acc.dueAmount || 0}` : `Bal: ${sym}${acc.balance}`}
-                            </AppText>
-                          </View>
-                        </View>
-
-                        {isCurrent && <Check size={18} color={expenseColors.accentPeach} />}
-                        {isOpposite && (
-                          <AppText style={styles.pickerOppositeNotice}>
-                            Already {accountPickerSide === 'from' ? 'To' : 'From'}
-                          </AppText>
-                        )}
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </View>
-            </TouchableOpacity>
-          </Modal>
-        )}
-
         {/* Transaction Date Picker Modal */}
         <DatePickerModal
           visible={showTxDatePicker}
@@ -1841,14 +2076,14 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                 </TouchableOpacity>
               </View>
 
-              <View style={{ marginBottom: 14 }}>
+              <View style={{ marginBottom: 14, gap: 6 }}>
                 <AppText
                   style={{
                     color: '#7E8394',
-                    fontSize: 10,
-                    fontWeight: '800',
+                    fontSize: 11,
+                    lineHeight: 15,
+                    fontWeight: '700',
                     letterSpacing: 0.8,
-                    marginBottom: 6,
                     textTransform: 'uppercase',
                   }}
                 >
@@ -1873,14 +2108,14 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                 />
               </View>
 
-              <View style={{ marginBottom: 16 }}>
+              <View style={{ marginBottom: 16, gap: 6 }}>
                 <AppText
                   style={{
                     color: '#7E8394',
-                    fontSize: 10,
-                    fontWeight: '800',
+                    fontSize: 11,
+                    lineHeight: 15,
+                    fontWeight: '700',
                     letterSpacing: 0.8,
-                    marginBottom: 6,
                     textTransform: 'uppercase',
                   }}
                 >
@@ -2307,6 +2542,45 @@ const styles = StyleSheet.create({
     paddingBottom: 0,
     includeFontPadding: false,
     textAlignVertical: 'center',
+  },
+  frequentAmountsWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+    width: '100%',
+  },
+  frequentAmountsLabel: {
+    color: '#7E8394',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    marginRight: 6,
+  },
+  frequentAmountsScroll: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  frequentAmountChip: {
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  frequentAmountChipSelected: {
+    backgroundColor: 'rgba(255, 157, 102, 0.18)',
+    borderColor: '#FF9D66',
+  },
+  frequentAmountChipText: {
+    color: '#A0A5B5',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  frequentAmountChipTextSelected: {
+    color: '#FF9D66',
+    fontWeight: '800',
   },
 
   // ── Transfer Hero Card ──
@@ -3020,5 +3294,176 @@ const styles = StyleSheet.create({
     color: '#7E8394',
     fontSize: 10,
     fontStyle: 'italic',
+  },
+
+  // ── Multi-Goal Split Allocation Styles ──
+  inlineAddGoalBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(255, 157, 102, 0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 157, 102, 0.25)',
+  },
+  inlineAddGoalBtnText: {
+    color: '#FF9D66',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  emptyGoalPromptCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#1A1D23',
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: 'rgba(255, 157, 102, 0.35)',
+  },
+  emptyGoalTitle: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  emptyGoalSub: {
+    color: '#7E8394',
+    fontSize: 11,
+  },
+  goalAllocationsContainer: {
+    gap: 8,
+  },
+  goalAllocCard: {
+    backgroundColor: '#1A1D23',
+    borderRadius: 16,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  goalAllocCardActive: {
+    borderColor: 'rgba(112, 214, 188, 0.4)',
+    backgroundColor: '#1E232B',
+  },
+  goalAllocHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  goalAllocLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  goalCheckbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  goalCheckboxActive: {
+    backgroundColor: '#70D6BC',
+    borderColor: '#70D6BC',
+  },
+  goalAllocEmoji: {
+    fontSize: 18,
+  },
+  goalAllocName: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  goalAllocMeta: {
+    color: '#7E8394',
+    fontSize: 10,
+    marginTop: 1,
+  },
+  goalAllocStatus: {
+    color: '#656A7B',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  goalAllocInputSection: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  goalInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#101114',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  goalInputPrefix: {
+    color: '#70D6BC',
+    fontSize: 14,
+    fontWeight: '700',
+    marginRight: 6,
+  },
+  goalAmountInput: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+    paddingVertical: 8,
+  },
+  goalQuickPercentRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 8,
+  },
+  goalQuickPercentChip: {
+    flex: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderRadius: 8,
+    paddingVertical: 5,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  goalQuickPercentText: {
+    color: '#9CA3AF',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  goalSplitSummaryBox: {
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    gap: 6,
+    marginTop: 4,
+  },
+  goalSummaryLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  goalSummaryLabel: {
+    color: '#7E8394',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  goalSummaryValGreen: {
+    color: '#70D6BC',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  goalSummaryValWhite: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
   },
 });

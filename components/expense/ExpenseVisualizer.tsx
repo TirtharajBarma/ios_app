@@ -410,15 +410,20 @@ export const ExpenseVisualizer: React.FC = () => {
 
     let weekdaySum = 0;
     let weekendSum = 0;
+    const weekdayCatMap: Record<string, number> = {};
+    const weekendCatMap: Record<string, number> = {};
 
     exp.forEach(tx => {
       const tDate = parseTxDate(tx.date);
       const day = tDate.getDay();
       const share = tx.split ? tx.split.yourShare : tx.amount;
+      const catId = tx.categoryId || 'other';
       if (day === 0 || day === 6) {
         weekendSum += share;
+        weekendCatMap[catId] = (weekendCatMap[catId] || 0) + share;
       } else {
         weekdaySum += share;
+        weekdayCatMap[catId] = (weekdayCatMap[catId] || 0) + share;
       }
     });
 
@@ -464,6 +469,27 @@ export const ExpenseVisualizer: React.FC = () => {
     const avgWeekday = weekdayDays > 0 ? weekdaySum / weekdayDays : 0;
     const ratio = avgWeekday > 0 ? (avgWeekend / avgWeekday).toFixed(1) : (avgWeekend > 0 ? '∞' : '1.0');
 
+    // Leisure Leak algorithm: identify which category surges most on weekends vs weekday pace
+    let topLeakCatId = '';
+    let maxLeakAmount = 0;
+
+    const allCatIds = Array.from(new Set([...Object.keys(weekdayCatMap), ...Object.keys(weekendCatMap)]));
+    allCatIds.forEach(catId => {
+      const wEndAmt = weekendCatMap[catId] || 0;
+      const wDayAmt = weekdayCatMap[catId] || 0;
+      const avgWEnd = weekendDays > 0 ? wEndAmt / weekendDays : 0;
+      const avgWDay = weekdayDays > 0 ? wDayAmt / weekdayDays : 0;
+      const diffDaily = avgWEnd - avgWDay;
+      const excessSpend = Math.max(0, wEndAmt - (avgWDay * weekendDays));
+      if (diffDaily > 0 && excessSpend > maxLeakAmount) {
+        maxLeakAmount = excessSpend;
+        topLeakCatId = catId;
+      }
+    });
+
+    const topLeakCategory = topLeakCatId ? storeCategories.find(c => c.id === topLeakCatId) : null;
+    const weekendTax = Math.max(0, Math.round((avgWeekend - avgWeekday) * weekendDays));
+
     return {
       weekdaySum,
       weekendSum,
@@ -472,8 +498,10 @@ export const ExpenseVisualizer: React.FC = () => {
       avgWeekend,
       avgWeekday,
       ratio,
+      topLeakCategory,
+      weekendTax,
     };
-  }, [transactions, horizonExpenses, timeHorizon, curYear, curMonth, daysInMonth]);
+  }, [transactions, horizonExpenses, timeHorizon, curYear, curMonth, daysInMonth, storeCategories]);
 
   // Multi-Month Trend calculation for 6M, 1Y, ALL (Anchored to selectedMonth)
   const multiMonthTrend = useMemo(() => {
@@ -1536,6 +1564,16 @@ export const ExpenseVisualizer: React.FC = () => {
               <AppText style={st.statSub}>~{sym}{Math.round(weekendVsWeekday.avgWeekend).toLocaleString('en-IN')}/day</AppText>
             </View>
           </View>
+
+          {/* Natural Weekend Insight Footnote */}
+          {weekendVsWeekday.weekendTax > 0 && (
+            <View style={st.leisureFootnote}>
+              <AppText style={st.leisureFootnoteText} numberOfLines={1}>
+                <AppText style={{ color: '#FF9D66', fontWeight: '700' }}>+{sym}{weekendVsWeekday.weekendTax.toLocaleString('en-IN')} weekend surge</AppText>
+                {weekendVsWeekday.topLeakCategory ? ` driven primarily by ${weekendVsWeekday.topLeakCategory.emoji ? weekendVsWeekday.topLeakCategory.emoji + ' ' : ''}${weekendVsWeekday.topLeakCategory.name}` : ''}
+              </AppText>
+            </View>
+          )}
         </Animated.View>
 
         {/* ═══ CARD 4: VS LAST MONTH (Month-over-Month Comparison in 1M) ═══ */}
@@ -1906,6 +1944,19 @@ const st = StyleSheet.create({
   },
   statSub: {
     color: '#7C8092',
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  leisureFootnote: {
+    marginTop: 14,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.05)',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  leisureFootnoteText: {
+    color: '#8E919D',
     fontSize: 11,
     fontWeight: '500',
   },

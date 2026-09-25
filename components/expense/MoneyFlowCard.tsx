@@ -1,6 +1,6 @@
-import React, { useEffect, useRef } from 'react';
-import { View, StyleSheet, Animated, Easing } from 'react-native';
-import { ArrowDownLeft, ArrowUpRight, TrendingUp, Sparkles, Calendar } from 'lucide-react-native';
+import React, { useMemo } from 'react';
+import { View, StyleSheet } from 'react-native';
+import { ArrowDownLeft, ArrowUpRight, TrendingUp, Sparkles, Flame } from 'lucide-react-native';
 import { AppText } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
 import { expenseColors } from '@/constants/expenseColors';
@@ -38,88 +38,72 @@ const pastelColors = {
 
 export const MoneyFlowCard: React.FC = () => {
   const {
-    monthlyBudget,
     currencySymbol,
+    transactions,
+    selectedMonth,
+    monthlyBudget,
     getTotalIncome,
     getTotalSpent,
-    getTotalBalance,
-    getRemainingBudget,
-    getOverspentPercentage,
-    hasInitialAppLoaded,
   } = useExpenseStore();
 
   const sym = currencySymbol || '₹';
-  const progressAnim = useRef(new Animated.Value(hasInitialAppLoaded ? 1 : 0)).current;
-
-  useEffect(() => {
-    if (hasInitialAppLoaded) {
-      progressAnim.setValue(1);
-      return;
-    }
-
-    progressAnim.setValue(0);
-    Animated.timing(progressAnim, {
-      toValue: 1,
-      duration: 800,
-      delay: 150,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: false,
-    }).start();
-  }, [hasInitialAppLoaded]);
 
   const totalIncome = getTotalIncome();
   const totalSpent = getTotalSpent();
-  const totalBalance = getTotalBalance();
-  const remainingBudget = getRemainingBudget();
-  const overspentPct = getOverspentPercentage();
+  const netCashFlow = totalIncome - totalSpent;
+  const savingsRate = totalIncome > 0
+    ? Math.round(((totalIncome - totalSpent) / totalIncome) * 100)
+    : 0;
 
-  const spentPct = monthlyBudget > 0 ? Math.round((totalSpent / monthlyBudget) * 100) : 0;
-  const spentProgressPct = Math.min(Math.max(spentPct, 0), 100);
-  const isOverspent = overspentPct > 0;
+  // Streak Calculation
+  const streakDays = useMemo(() => {
+    const now = new Date();
+    const currentDay = now.getDate();
+    if (currentDay <= 1) return 1;
 
-  // ── Predictive Runway Algorithm ──
-  const now = new Date();
-  const currentDay = Math.max(now.getDate(), 1);
-  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  const remainingDays = Math.max(daysInMonth - currentDay, 1);
+    const dailySpendMap: Record<number, number> = {};
+    for (let d = 1; d <= currentDay; d++) {
+      dailySpendMap[d] = 0;
+    }
 
-  const dailyVelocity = totalSpent > 0 ? Math.round(totalSpent / currentDay) : 0;
-  const projectedSpend = dailyVelocity * daysInMonth;
+    transactions
+      .filter((t) => t.type === 'expense')
+      .forEach((t) => {
+        const d = new Date(t.date);
+        if (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) {
+          const day = d.getDate();
+          dailySpendMap[day] = (dailySpendMap[day] || 0) + (t.split ? t.split.yourShare : t.amount);
+        }
+      });
 
-  // Safe daily allowance capped by physical cash balance so we never recommend spending more than what exists in the bank
-  const theoreticalDaily = remainingBudget > 0 ? Math.round(remainingBudget / remainingDays) : 0;
-  const maxDailyFromCash = totalBalance > 0 ? Math.round(totalBalance / remainingDays) : 0;
-  const safeDailyAllowance = Math.min(theoreticalDaily, maxDailyFromCash);
-  const isVelocityHigh = monthlyBudget > 0 && projectedSpend > monthlyBudget && remainingBudget > 0;
+    const averageDailyLimit = monthlyBudget > 0 ? Math.round(monthlyBudget / 30) : 1000;
+    let streak = 0;
+    for (let day = currentDay; day >= 1; day--) {
+      const daySpend = dailySpendMap[day] || 0;
+      if (daySpend <= averageDailyLimit * 1.25) {
+        streak++;
+      } else {
+        break;
+      }
+    }
+    return Math.max(1, streak);
+  }, [transactions, monthlyBudget]);
 
   return (
     <View style={styles.cardContainer}>
-      {/* 1. Header: Icon + Title + Dynamic Status Badge */}
+      {/* 1. Header: Icon + Title + Streak */}
       <View style={styles.headerRow}>
         <View style={styles.titleWithIcon}>
           <View style={styles.iconCircle}>
             <TrendingUp size={13} color={pastelColors.purple} strokeWidth={2.5} />
           </View>
-          <AppText style={styles.cardTitle}>MONEY FLOW</AppText>
+          <AppText style={styles.cardTitle}>CASH FLOW</AppText>
         </View>
 
-        {isOverspent ? (
-          <View style={[styles.statusPill, { backgroundColor: pastelColors.coralBg }]}>
-            <AppText style={[styles.statusPillText, { color: pastelColors.coral }]}>
-              Overspent by {overspentPct}%
-            </AppText>
-          </View>
-        ) : isVelocityHigh ? (
-          <View style={[styles.statusPill, { backgroundColor: pastelColors.peachBg }]}>
-            <AppText style={[styles.statusPillText, { color: pastelColors.peach }]}>
-              Pace: {sym}{dailyVelocity}/day
-            </AppText>
-          </View>
-        ) : (
-          <View style={[styles.statusPill, { backgroundColor: pastelColors.mintBg }]}>
-            <AppText style={[styles.statusPillText, { color: pastelColors.mint }]}>
-              {safeDailyAllowance > 0 ? `${sym}${safeDailyAllowance}/day limit` : '🟢 On track'}
-            </AppText>
+        {streakDays > 0 && (
+          <View style={styles.streakPill}>
+            <Flame size={12} color="#FF9D66" />
+            <AppText style={styles.streakPillText}>{streakDays}d streak</AppText>
           </View>
         )}
       </View>
@@ -129,81 +113,59 @@ export const MoneyFlowCard: React.FC = () => {
         {/* Spent Tile */}
         <View style={styles.metricTile}>
           <View style={styles.tileHeader}>
-            <View style={[styles.arrowBadge, { backgroundColor: 'rgba(242, 139, 130, 0.12)' }]}>
+            <View style={[styles.arrowBadge, { backgroundColor: 'rgba(244, 139, 139, 0.12)' }]}>
               <ArrowDownLeft size={12} color={pastelColors.coral} strokeWidth={2.5} />
             </View>
             <AppText style={styles.tileLabel}>SPENT</AppText>
           </View>
           <AppText style={styles.tileAmount}>{sym}{totalSpent.toLocaleString('en-IN')}</AppText>
-          <AppText style={styles.tileSub}>
-            Pace: ~{sym}{dailyVelocity}/day
-          </AppText>
+          <AppText style={styles.tileSub}>Total Outflow</AppText>
         </View>
 
         {/* Income Tile */}
         <View style={styles.metricTile}>
           <View style={styles.tileHeader}>
-            <View style={[styles.arrowBadge, { backgroundColor: 'rgba(124, 217, 168, 0.12)' }]}>
+            <View style={[styles.arrowBadge, { backgroundColor: 'rgba(112, 214, 188, 0.12)' }]}>
               <ArrowUpRight size={12} color={pastelColors.mint} strokeWidth={2.5} />
             </View>
             <AppText style={styles.tileLabel}>INCOME</AppText>
           </View>
-          <AppText style={[styles.tileAmount, totalIncome > 0 && { color: pastelColors.mint }]}>
+          <AppText style={styles.tileAmount}>
             {sym}{totalIncome.toLocaleString('en-IN')}
           </AppText>
           <AppText style={styles.tileSub} numberOfLines={1}>
-            Monthly Inflow
+            {totalIncome > 0 ? 'Total Inflow' : 'No Inflow'}
           </AppText>
         </View>
       </View>
 
-      {/* 3. Budget Consumption Progress Bar */}
-      {monthlyBudget > 0 && (
-        <View style={styles.progressSection}>
-          <View style={styles.progressHeaderRow}>
-            <AppText style={styles.progressLabel}>BUDGET UTILIZATION</AppText>
-            <AppText style={styles.progressValue}>
-              {spentPct}% ({formatCompactCurrency(totalSpent, sym)} of {formatCompactCurrency(monthlyBudget, sym)})
+      {/* 3. Footer Cashflow & Net Retention Summary */}
+      <View style={styles.footerRow}>
+        {totalIncome > 0 ? (
+          <>
+            <View style={styles.footerLeft}>
+              <Sparkles size={12} color={pastelColors.purple} />
+              <AppText style={styles.footerLabel}>Month Leftover</AppText>
+              <AppText style={[styles.footerAmount, { color: netCashFlow >= 0 ? pastelColors.mint : pastelColors.coral }]}>
+                {netCashFlow >= 0
+                  ? `+${sym}${netCashFlow.toLocaleString('en-IN')}`
+                  : `-${sym}${Math.abs(netCashFlow).toLocaleString('en-IN')}`}
+              </AppText>
+            </View>
+            <View style={styles.ratePill}>
+              <AppText style={styles.ratePillText}>
+                {savingsRate >= 0 ? `${savingsRate}% unspent` : `${Math.abs(savingsRate)}% deficit`}
+              </AppText>
+            </View>
+          </>
+        ) : (
+          <View style={styles.footerLeft}>
+            <Sparkles size={12} color={pastelColors.purple} />
+            <AppText style={styles.footerLabel}>
+              Log monthly income to see month leftover & unspent %
             </AppText>
           </View>
-
-          <View style={styles.track}>
-            <Animated.View
-              style={[
-                styles.fill,
-                {
-                  backgroundColor: isOverspent
-                    ? pastelColors.coral
-                    : spentPct > 85
-                    ? pastelColors.peach
-                    : pastelColors.mint,
-                  width: totalSpent > 0
-                    ? progressAnim.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: ['0%', `${Math.max(spentProgressPct, 3)}%`],
-                      })
-                    : '0%',
-                },
-              ]}
-            />
-          </View>
-        </View>
-      )}
-
-      {/* 4. Footer Insight Bar */}
-      <View style={styles.footerRow}>
-        <View style={styles.footerItem}>
-          <Sparkles size={12} color={pastelColors.purple} />
-          <AppText style={styles.footerText}>
-            On Track: ~{sym}{projectedSpend.toLocaleString('en-IN')} by month-end
-          </AppText>
-        </View>
-        <View style={styles.footerItem}>
-          <Calendar size={11} color={pastelColors.subtle} />
-          <AppText style={styles.footerSub}>
-            {remainingDays}d left in {now.toLocaleString('default', { month: 'short' })}
-          </AppText>
-        </View>
+        )}
       </View>
     </View>
   );
@@ -244,14 +206,22 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 1.1,
   },
-  statusPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 10,
+  streakPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 157, 102, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 157, 102, 0.22)',
   },
-  statusPillText: {
+  streakPillText: {
+    color: '#FF9D66',
     fontSize: 11,
     fontWeight: '700',
+    lineHeight: 14,
   },
   tilesContainer: {
     flexDirection: 'row',
@@ -336,21 +306,39 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: 4,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.06)',
+    gap: 8,
   },
-  footerItem: {
+  footerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    flexShrink: 1,
   },
-  footerText: {
-    color: '#9CA3AF',
+  footerLabel: {
+    color: '#8E919D',
     fontSize: 11,
-    fontWeight: '500',
+    fontWeight: '600',
   },
-  footerSub: {
-    color: pastelColors.subtle,
+  footerAmount: {
     fontSize: 11,
-    fontWeight: '500',
+    fontWeight: '800',
+  },
+  ratePill: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    flexShrink: 0,
+  },
+  ratePillText: {
+    color: '#D1D5DB',
+    fontSize: 11,
+    fontWeight: '700',
+    lineHeight: 14,
   },
 });

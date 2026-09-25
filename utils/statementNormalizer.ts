@@ -188,14 +188,15 @@ export function classifyNarration(
 
   // Income / Salary / Refund / Cashback
   if (/salary|payroll|dividend|refund|cashback|bonus|stipend|interest credit/.test(text)) {
-    const incCat = categories.find((c) => c.id === 'cat_income' || c.name.toLowerCase().includes('income'));
+    const incCat = categories.find((c) => c.id === 'cat_income' || c.name.toLowerCase().includes('income') || c.id === 'cat_salary');
     if (incCat) return { categoryId: incCat.id, confidence: 'high' };
+    return { categoryId: 'cat_salary', confidence: 'high' };
   }
 
-  // Tier 4: Fallback
+  // Tier 4: Fallback (Never fall back to index 0 which could be cigarettes)
   const miscCat = categories.find((c) => c.id === 'cat_misc' || c.name.toLowerCase().includes('misc'));
   return {
-    categoryId: miscCat?.id || categories[0]?.id || 'cat_shop',
+    categoryId: miscCat?.id || 'cat_misc',
     confidence: 'low',
   };
 }
@@ -361,7 +362,12 @@ export function normalizeStatementData(
         if (parsedAmount <= 0) continue;
 
         // Check if Credit (Income) or Debit (Expense)
+        const isSalaryOrIncome =
+          /salary|payroll|dividend|refund|cashback|bonus|stipend|interest credit/i.test(lineStr) ||
+          row.items.some((it) => /salary|payroll|deposit/i.test(it.text.trim()));
+
         let isIncome =
+          isSalaryOrIncome ||
           lineStr.toLowerCase().includes('credit') ||
           lineStr.toLowerCase().includes('cr.') ||
           lineStr.toLowerCase().includes('refund') ||
@@ -402,7 +408,7 @@ export function normalizeStatementData(
           )
           .map((x) => x.text);
 
-        let narration = cleanTokens[0] || 'Transaction';
+        let narration = cleanTokens[0] || (isSalaryOrIncome ? 'Salary' : 'Transaction');
         let categorySuggestion = cleanTokens.length > 1 ? cleanTokens[1] : undefined;
 
         if (narration.toLowerCase() === 'cigarettes' && !categorySuggestion) {
@@ -410,7 +416,7 @@ export function normalizeStatementData(
         }
 
         // Categorize
-        let matchedCatId = existingCategories[0]?.id || 'cat_shop';
+        let matchedCatId = isIncome ? 'cat_salary' : (existingCategories.find((c) => c.id === 'cat_misc')?.id || 'cat_misc');
         let confidence: 'high' | 'medium' | 'low' = 'low';
 
         if (categorySuggestion) {
@@ -525,9 +531,10 @@ export function normalizeStatementData(
           .map((n) => parseFloat(n.replace(/[₹$, INR\s]/g, '')))
           .filter((n) => !isNaN(n) && n > 0 && n < 10000000);
 
+        const isSalaryOrIncome = /salary|payroll|dividend|refund|cashback|bonus|stipend|interest credit/i.test(line);
         if (cleanNums.length > 0) {
           amount = cleanNums[0];
-          if (cleanNums.length >= 2 && line.toLowerCase().includes('cr') && !line.toLowerCase().includes('dr')) {
+          if (isSalaryOrIncome || (cleanNums.length >= 2 && line.toLowerCase().includes('cr') && !line.toLowerCase().includes('dr'))) {
             isIncome = true;
           }
         }

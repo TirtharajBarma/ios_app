@@ -40,6 +40,8 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
     getTotalSpent,
     getRemainingBudget,
     getCategoryBreakdown,
+    accounts,
+    transactions,
     hasInitialAppLoaded,
     setHasInitialAppLoaded,
     formatAmount,
@@ -57,6 +59,14 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
   const totalSpent = getTotalSpent();
   const remainingBudget = getRemainingBudget();
   const breakdown = getCategoryBreakdown();
+
+  // Active accounts breakdown for transparent net balance explanation
+  const bankCash = accounts
+    .filter((a) => a.type !== 'credit' && !a.isArchived)
+    .reduce((sum, a) => sum + Math.max(0, a.balance), 0);
+  const cardDues = accounts
+    .filter((a) => a.type === 'credit' && !a.isArchived)
+    .reduce((sum, a) => sum + (a.dueAmount || 0), 0);
 
   // ── Predictive Runway Algorithm ──
   const now = new Date();
@@ -211,7 +221,7 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
         {/* Month Label */}
         <AppText style={styles.monthLabel}>{selectedMonth}</AppText>
 
-        {/* Primary Focus: Total Liquid Wealth Across Accounts */}
+        {/* Primary Focus: Total Net Balance Across Accounts */}
         <View style={styles.balanceSection}>
           <AppText style={styles.balanceTitle}>TOTAL BALANCE</AppText>
 
@@ -219,15 +229,19 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
             {formatAmount(totalBalance)}
           </AppText>
 
-          {/* Budget Allowance Subtext */}
-          {monthlyBudget > 0 && (
-            <View style={styles.budgetRow}>
-              <View style={styles.paceBadge} />
-              <AppText style={styles.budgetSub}>
-                {formatAmount(remainingBudget)} budget left
-              </AppText>
+          {/* Clean, separated breakdown badges */}
+          <View style={styles.accountChipsRow}>
+            <View style={styles.accountChip}>
+              <AppText style={styles.accountChipLabel}>Bank </AppText>
+              <AppText style={styles.accountChipVal}>{formatAmount(bankCash)}</AppText>
             </View>
-          )}
+            {cardDues > 0 ? (
+              <View style={[styles.accountChip, styles.accountChipDue]}>
+                <AppText style={styles.accountChipDueLabel}>Bills </AppText>
+                <AppText style={styles.accountChipDueVal}>{formatAmount(cardDues)}</AppText>
+              </View>
+            ) : null}
+          </View>
         </View>
 
         {/* Selected Category Highlight Chip */}
@@ -384,29 +398,45 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: -0.6,
   },
-  budgetRow: {
+  accountChipsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
     marginTop: 6,
   },
-  paceBadge: {
-    backgroundColor: 'rgba(112, 214, 188, 0.14)',
-    paddingHorizontal: 7,
+  accountChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    paddingHorizontal: 8,
     paddingVertical: 3,
-    borderRadius: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.07)',
   },
-  paceBadgeText: {
-    color: expenseColors.accentGreen,
+  accountChipLabel: {
+    color: '#8E919D',
     fontSize: 11,
-    lineHeight: 14,
+    fontWeight: '600',
+  },
+  accountChipVal: {
+    color: '#E1E4EA',
+    fontSize: 11,
     fontWeight: '700',
   },
-  budgetSub: {
-    color: '#707587',
-    fontSize: 12,
-    lineHeight: 15,
+  accountChipDue: {
+    backgroundColor: 'rgba(244, 139, 139, 0.08)',
+    borderColor: 'rgba(244, 139, 139, 0.18)',
+  },
+  accountChipDueLabel: {
+    color: '#F48B8B',
+    fontSize: 11,
     fontWeight: '600',
+  },
+  accountChipDueVal: {
+    color: '#F48B8B',
+    fontSize: 11,
+    fontWeight: '700',
   },
   categoryChip: {
     flexDirection: 'row',

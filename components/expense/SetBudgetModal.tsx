@@ -39,6 +39,7 @@ export const SetBudgetModal: React.FC<SetBudgetModalProps> = ({
   );
 
   const handleSelectPreset = (amount: number) => {
+    Keyboard.dismiss();
     Haptics.selectionAsync().catch(() => {});
     setBudgetInput(amount.toString());
   };
@@ -65,7 +66,10 @@ export const SetBudgetModal: React.FC<SetBudgetModalProps> = ({
       visible={visible}
       animationType="slide"
       presentationStyle="pageSheet"
-      onRequestClose={onClose}
+      onRequestClose={() => {
+        Keyboard.dismiss();
+        onClose();
+      }}
     >
       <KeyboardAvoidingView
         style={styles.container}
@@ -93,6 +97,7 @@ export const SetBudgetModal: React.FC<SetBudgetModalProps> = ({
           </View>
           <TouchableOpacity
             onPress={() => {
+              Keyboard.dismiss();
               Haptics.selectionAsync().catch(() => {});
               onClose();
             }}
