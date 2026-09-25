@@ -10,9 +10,13 @@ export type NotificationTiming = "1day" | "3days" | "1week";
 interface SettingsState {
   // Personalization
   userName: string;
+  userEmail: string;
   userTagline: string;
+  userAvatarId: string;
   setUserName: (name: string) => Promise<void>;
+  setUserEmail: (email: string) => Promise<void>;
   setUserTagline: (tagline: string) => Promise<void>;
+  setUserAvatarId: (avatarId: string) => Promise<void>;
 
   // Currency (stored as code: "INR", "USD", etc.)
   currencyCode: string;
@@ -47,11 +51,14 @@ interface SettingsState {
   shareGroup: ShareGroup | null;
   setShareGroup: (group: ShareGroup | null) => Promise<void>;
 
-  // Load from storage
+  // Reset & Load
+  resetSettings: () => Promise<void>;
   loadSettings: () => Promise<void>;
 }
 
-const STORAGE_KEY = "@subo_settings_v3";
+const STORAGE_KEY = "@expense_settings_v3";
+const LEGACY_STORAGE_KEY_V3 = "@subo_settings_v3";
+const LEGACY_STORAGE_KEY_V2 = "@subo_settings_v2";
 
 async function save(patch: Record<string, unknown>) {
   try {
@@ -77,7 +84,9 @@ async function saveNameToServer(userName: string) {
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   userName: "",
+  userEmail: "",
   userTagline: "",
+  userAvatarId: "avatar_astro",
   currencyCode: "INR",
   appearance: "system",
   notificationsEnabled: true,
@@ -90,7 +99,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   shareGroup: null,
 
   setUserName: async (userName) => { set({ userName }); await save({ userName }); await saveNameToServer(userName); if (userName) logAction('settings', 'Display name updated'); },
+  setUserEmail: async (userEmail) => { set({ userEmail }); await save({ userEmail }); if (userEmail) logAction('settings', 'Profile email updated'); },
   setUserTagline: async (userTagline) => { set({ userTagline }); await save({ userTagline }); },
+  setUserAvatarId: async (userAvatarId) => { set({ userAvatarId }); await save({ userAvatarId }); logAction('settings', 'Profile avatar updated', { userAvatarId }); },
   setCurrencyCode: async (currencyCode) => { set({ currencyCode }); await save({ currencyCode }); logAction('settings', `Display currency changed to ${currencyCode}`, { currencyCode }); },
   setAppearance: async (appearance) => { set({ appearance }); await save({ appearance }); logAction('settings', `Appearance changed to ${appearance}`, { appearance }); },
   setNotificationsEnabled: async (notificationsEnabled) => { set({ notificationsEnabled }); await save({ notificationsEnabled }); logAction('settings', `Notifications ${notificationsEnabled ? 'enabled' : 'disabled'}`); },
@@ -124,9 +135,37 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     if (group) logAction('sync', `Joined share group: ${group.name}`, { id: group.id });
   },
 
+  resetSettings: async () => {
+    const cleanSettings = {
+      userName: "",
+      userEmail: "",
+      userTagline: "",
+      userAvatarId: "avatar_astro",
+      currencyCode: "INR",
+      appearance: "system" as AppearanceMode,
+      notificationsEnabled: true,
+      notificationTiming: "1day" as NotificationTiming,
+      faceIdEnabled: false,
+      analyticsEnabled: false,
+      crashReportsEnabled: true,
+      customCategories: [],
+      shareGroups: [],
+      shareGroup: null,
+    };
+    set(cleanSettings);
+    await AsyncStorage.removeItem(STORAGE_KEY);
+    await AsyncStorage.removeItem(LEGACY_STORAGE_KEY_V3);
+    await AsyncStorage.removeItem(LEGACY_STORAGE_KEY_V2);
+    await save(cleanSettings);
+    logAction('security', 'Settings were reset to factory defaults');
+  },
+
   loadSettings: async () => {
     try {
-      const stored = await AsyncStorage.getItem(STORAGE_KEY);
+      let stored = await AsyncStorage.getItem(STORAGE_KEY);
+      if (!stored) {
+        stored = await AsyncStorage.getItem(LEGACY_STORAGE_KEY_V3);
+      }
       if (stored) {
         const p = JSON.parse(stored);
         const shareGroups = Array.isArray(p.shareGroups)
@@ -136,7 +175,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
             : [];
         set({
           userName: p.userName ?? "",
+          userEmail: p.userEmail ?? "",
           userTagline: p.userTagline ?? "",
+          userAvatarId: p.userAvatarId ?? "avatar_astro",
           currencyCode: p.currencyCode ?? "INR",
           appearance: p.appearance ?? "system",
           notificationsEnabled: p.notificationsEnabled ?? true,
@@ -150,7 +191,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         });
       } else {
         // First run (or pre-v3): honor a legacy single-group entry if present.
-        const legacy = await AsyncStorage.getItem("@subo_settings_v2");
+        const legacy = await AsyncStorage.getItem(LEGACY_STORAGE_KEY_V2);
         if (legacy) {
           const p = JSON.parse(legacy);
           const shareGroups = p.shareGroup ? [p.shareGroup] : [];

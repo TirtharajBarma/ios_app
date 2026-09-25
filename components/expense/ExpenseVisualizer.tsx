@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo, useEffect } from 'react';
+import React, { useState, useRef, useMemo, useEffect, useCallback } from 'react';
 import {
   View,
   StyleSheet,
@@ -21,7 +21,7 @@ import { useSubscriptionStore } from '@/store/useSubscriptionStore';
 import { expenseColors } from '@/constants/expenseColors';
 import { ExpenseTransaction } from '@/types/expense';
 
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -321,6 +321,18 @@ export const ExpenseVisualizer: React.FC = () => {
       setSelectedBandId(catId);
     }
   };
+
+  const scrollRef = useRef<ScrollView>(null);
+
+  // Reset scroll to top on tab focus
+  useFocusEffect(
+    useCallback(() => {
+      const rafId = requestAnimationFrame(() => {
+        scrollRef.current?.scrollTo({ y: 0, animated: false });
+      });
+      return () => cancelAnimationFrame(rafId);
+    }, [])
+  );
 
   // Animated values for professional expand/collapse and smooth cross-fade
   const expandAnim = useRef(new Animated.Value(0)).current;
@@ -884,6 +896,7 @@ export const ExpenseVisualizer: React.FC = () => {
       <View style={{ height: insets.top, backgroundColor: expenseColors.bgPrimary }} />
 
       <ScrollView
+        ref={scrollRef}
         style={st.scroll}
         contentContainerStyle={{ paddingBottom: insets.bottom + 80, paddingTop: 4 }}
         showsVerticalScrollIndicator={false}

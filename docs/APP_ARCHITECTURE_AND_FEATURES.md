@@ -1,11 +1,11 @@
-# Subo Expense & Subscription Tracker
+# Expense Expense & Subscription Tracker
 ## Complete Architecture, Features & On-Device AI Technical Documentation
 
 ---
 
 ## 1. Executive Summary & Design Philosophy
 
-**Subo** is a high-performance, privacy-first personal finance application built for iOS and Android using React Native, Expo, and TypeScript. 
+**Expense** is a high-performance, privacy-first personal finance application built for iOS and Android using React Native, Expo, and TypeScript. 
 
 ### Key Tenets
 1. **100% On-Device & Zero Cloud Leakage**: No bank accounts, merchant names, amounts, or spending habits ever leave the device.
@@ -52,7 +52,7 @@ graph TD
         ExpenseStore["useExpenseStore (Zustand + Persist)"]
         SubStore["useSubscriptionStore"]
         SettingsStore["useSettingsStore"]
-        AsyncStorage["AsyncStorage (@subo_expense_v1)"]
+        AsyncStorage["AsyncStorage (@expense_expense_v1)"]
         FileSystem["expo-file-system (CSV Export & Import)"]
     end
 
@@ -86,7 +86,7 @@ graph TD
 
 ## 3. On-Device AI Engine Deep Dive (`services/onDeviceAi.ts`)
 
-Instead of sending private financial records to cloud servers (which incurs high latency, API expenses, internet dependency, and LLM math hallucinations), Subo uses an **On-Device Symbolic NLU Engine**.
+Instead of sending private financial records to cloud servers (which incurs high latency, API expenses, internet dependency, and LLM math hallucinations), Expense uses an **On-Device Symbolic NLU Engine**.
 
 ### 5-Stage On-Device NLU Pipeline
 
@@ -264,7 +264,7 @@ graph TD
 
 ## 5. Universal Category Styling Architecture (`CategoryIcon.tsx`)
 
-To ensure category icons and colors are 100% consistent across every component, Subo centralizes icon resolution in [`CategoryIcon.tsx`](file:///Users/tirtharaj/Desktop/Desktop/github/subscription/components/expense/CategoryIcon.tsx):
+To ensure category icons and colors are 100% consistent across every component, Expense centralizes icon resolution in [`CategoryIcon.tsx`](file:///Users/tirtharaj/Desktop/Desktop/github/subscription/components/expense/CategoryIcon.tsx):
 
 ```mermaid
 graph TD
@@ -282,10 +282,10 @@ graph TD
 
 ## 6. Persistence & Store Architecture
 
-Subo uses Zustand with `persist` middleware backed by `AsyncStorage`:
+Expense uses Zustand with `persist` middleware backed by `AsyncStorage`:
 
 ```typescript
-// Store Key: @subo_expense_v1
+// Store Key: @expense_expense_v1
 partialize: (state) => ({
   categories: state.categories,             // Preserves user order, custom icons & colors
   categoryBudgets: state.categoryBudgets,   // Custom category budget goals

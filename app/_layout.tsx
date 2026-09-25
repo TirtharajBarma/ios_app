@@ -102,7 +102,10 @@ export default function RootLayout() {
           triggerSharedSync();
         }
 
-        const settingsStr = await AsyncStorage.getItem("@subo_settings_v3");
+        let settingsStr = await AsyncStorage.getItem("@expense_settings_v3");
+        if (!settingsStr) {
+          settingsStr = await AsyncStorage.getItem("@subo_settings_v3");
+        }
         if (settingsStr) {
           const parsed = JSON.parse(settingsStr);
           if (parsed.faceIdEnabled) {

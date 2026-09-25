@@ -94,3 +94,4 @@ export type { LiquidPopoverMenuProps, LiquidPopoverItem } from "./LiquidPopoverM
 export { default as NativeLiquidMenu } from "./NativeLiquidMenu";
 export type { NativeLiquidMenuProps } from "./NativeLiquidMenu";
 
+export { ProfileAvatar } from "./ProfileAvatar";

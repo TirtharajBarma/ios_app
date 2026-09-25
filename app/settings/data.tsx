@@ -24,22 +24,26 @@ import {
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import * as Sharing from 'expo-sharing';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 
 import { AppText } from '@/components/ui';
 import { expenseColors } from '@/constants/expenseColors';
 import { useExpenseStore } from '@/store/useExpenseStore';
+import { useSubscriptionStore } from '@/store/useSubscriptionStore';
+import { useSettingsStore } from '@/store/useSettingsStore';
 import { getDeviceAiEngineInfo } from '@/services/onDeviceAi';
 import { logAction, logException } from '@/utils/auditLog';
 import AsyncStorage from '@/utils/storage';
 
-const EXCHANGE_RATE_CACHE_KEY = '@subo_exchange_rates';
+const EXCHANGE_RATE_CACHE_KEY = '@expense_exchange_rates';
 
 export default function YourDataScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { transactions, accounts, categories, resetAllData, currencySymbol } = useExpenseStore();
+  const { clearAllSubscriptions } = useSubscriptionStore();
+  const { resetSettings } = useSettingsStore();
   const aiEngineInfo = useMemo(() => getDeviceAiEngineInfo(), []);
 
   const handleExportPdf = async () => {
@@ -226,17 +230,28 @@ export default function YourDataScreen() {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     Alert.alert(
       'Delete All Stored Data',
-      'This action is irreversible. All transactions, accounts, and custom settings will be permanently erased. The hidden activity/audit log is intentionally retained as a permanent record.',
+      'This action is irreversible. All transactions, accounts, subscriptions, and profile settings will be permanently erased. The hidden activity/audit log is intentionally retained as a permanent record.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Erase Everything',
           style: 'destructive',
-          onPress: () => {
-            resetAllData();
+          onPress: async () => {
+            try {
+              // 1. Reset Expense Store (transactions, accounts, categories, vaults, folders, budget, rules, walkthrough flag)
+              resetAllData();
+              // 2. Reset Subscriptions SQLite database and store
+              await clearAllSubscriptions();
+              // 3. Reset Settings profile (name, email, tagline, avatar)
+              await resetSettings();
+              // 4. Clear exchange rate and transient caches
+              await AsyncStorage.removeItem(EXCHANGE_RATE_CACHE_KEY).catch(() => {});
+            } catch (err) {
+              console.warn('Error during full fresh start wipe:', err);
+            }
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            logAction('security', 'User erased all stored data from Settings');
-            Alert.alert('Data Erased', 'All data on this device has been erased and restored to clean initial state.');
+            logAction('security', 'User performed Fresh Start / erased all stored data from Settings');
+            router.replace('/(tabs)');
           },
         },
       ]

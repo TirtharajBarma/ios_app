@@ -8,6 +8,8 @@ import * as Haptics from "expo-haptics";
 import { Card, AppText, SubscriptionLogo } from "@/components/ui";
 import { colors, spacing, radius, hexToRGBA, getCurrencySymbol } from "@/constants";
 import { getSubscriptionActivePrice, formatBillingCycleLabel } from "@/utils/date";
+import { formatConvertedCurrency } from "@/utils/currency";
+import { useSettingsStore } from "@/store/useSettingsStore";
 import type { Subscription } from "@/types/subscription";
 
 export interface SubscriptionCardProps {
@@ -60,11 +62,11 @@ function SubscriptionCard({
   onEdit,
   style,
 }: SubscriptionCardProps) {
+  const { currencyCode } = useSettingsStore();
   const { name, billingCycle, nextBillingDate, color, isTrial, currency } = subscription;
   const status = getRenewalStatus(nextBillingDate);
   const activePrice = getSubscriptionActivePrice(subscription);
-  const symbol = getCurrencySymbol(currency);
-  const formattedPrice = `${symbol}${activePrice.toFixed(2)}`;
+  const formattedPrice = formatConvertedCurrency(activePrice, currency || 'USD', currencyCode);
 
   const handleLongPress = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);

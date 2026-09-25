@@ -19,12 +19,12 @@ import {
   requestNotificationPermissions,
 } from "@/utils/notifications";
 
-const REMOTE_IDS_KEY = "@subo_shared_remote_ids_v2";
+const REMOTE_IDS_KEY = "@expense_shared_remote_ids_v2";
 
 // Tombstones for shared subscriptions deleted while offline. Deletes that
 // can't reach the server are queued here and flushed on the next successful
 // sync — otherwise a pull would happily re-create a locally-deleted row.
-const PENDING_DELETE_KEY = "@subo_shared_pending_deletes_v1";
+const PENDING_DELETE_KEY = "@expense_shared_pending_deletes_v1";
 
 interface PendingDelete {
   id: string;

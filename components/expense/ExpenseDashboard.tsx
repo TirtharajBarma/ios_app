@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, StyleSheet, ScrollView, StatusBar, TouchableOpacity, Animated } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Sparkles,
@@ -26,18 +26,39 @@ import { FixedBottomNav, ExpenseTabType } from './FixedBottomNav';
 import { AddTransactionModal } from './AddTransactionModal';
 import { AccountsListModal } from './AccountsListModal';
 import { EditAccountModal } from './EditAccountModal';
+import { AppWalkthroughModal } from './AppWalkthroughModal';
 import { ExpenseAccount } from '@/types/expense';
 
 export const ExpenseDashboard: React.FC = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { transactions, accounts, monthlyBudget, currencySymbol, hasInitialAppLoaded } = useExpenseStore();
+  const scrollRef = useRef<ScrollView>(null);
+  const {
+    transactions,
+    accounts,
+    monthlyBudget,
+    currencySymbol,
+    hasInitialAppLoaded,
+    hasSeenWalkthrough,
+    setHasSeenWalkthrough,
+  } = useExpenseStore();
   const [dismissOnboarding, setDismissOnboarding] = useState<boolean>(false);
+  const [showWalkthroughModal, setShowWalkthroughModal] = useState<boolean>(false);
 
   const [showAddTxModal, setShowAddTxModal] = useState<boolean>(false);
   const [showAccountsModal, setShowAccountsModal] = useState<boolean>(false);
   const [selectedAccountForEdit, setSelectedAccountForEdit] = useState<ExpenseAccount | null>(null);
   const [showEditAccountModal, setShowEditAccountModal] = useState<boolean>(false);
+
+  // Reset scroll to top on tab switch
+  useFocusEffect(
+    useCallback(() => {
+      const rafId = requestAnimationFrame(() => {
+        scrollRef.current?.scrollTo({ y: 0, animated: false });
+      });
+      return () => cancelAnimationFrame(rafId);
+    }, [])
+  );
 
   // Staggered load animation values
   const headerAnim = useRef(new Animated.Value(hasInitialAppLoaded ? 1 : 0)).current;
@@ -113,6 +134,7 @@ export const ExpenseDashboard: React.FC = () => {
 
       {/* Main Vertically Scrollable Content */}
       <ScrollView
+        ref={scrollRef}
         style={styles.scrollView}
         contentContainerStyle={[
           styles.scrollContent,
@@ -356,6 +378,15 @@ export const ExpenseDashboard: React.FC = () => {
         visible={showEditAccountModal}
         account={selectedAccountForEdit}
         onClose={() => setShowEditAccountModal(false)}
+      />
+
+      {/* Interactive App Walkthrough & Feature Guide Modal */}
+      <AppWalkthroughModal
+        visible={!hasSeenWalkthrough || showWalkthroughModal}
+        onClose={() => {
+          setShowWalkthroughModal(false);
+          setHasSeenWalkthrough(true);
+        }}
       />
     </View>
   );

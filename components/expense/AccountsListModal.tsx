@@ -244,81 +244,44 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
                   const txCount = getAccountTxCount(account.id) || account.txnCountThisMonth || 0;
                   const isDue = account.statusType === 'due' && (account.dueAmount ?? 0) > 0;
 
-                  const accountActions: MenuAction[] = [
-                    {
-                      id: 'edit',
-                      title: 'Edit Details',
-                      image: 'pencil' as any,
-                    },
-                    {
-                      id: 'archive',
-                      title: 'Archive Account',
-                      image: 'archivebox.fill' as any,
-                    },
-                    {
-                      id: 'delete',
-                      title: 'Delete Account',
-                      image: 'trash.fill' as any,
-                      attributes: { destructive: true },
-                    },
-                  ];
-
                   return (
-                    <NativeLiquidMenu
+                    <TouchableOpacity
                       key={account.id}
-                      title={account.name}
-                      actions={accountActions}
-                      shouldOpenOnLongPress={true}
-                      onSelect={(actionId) => {
-                        if (actionId === 'edit') {
-                          handleOpenEdit(account);
-                        } else if (actionId === 'archive') {
-                          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-                          archiveAccount(account.id);
-                        } else if (actionId === 'delete') {
-                          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
-                          deleteAccount(account.id);
-                        }
-                      }}
-                      style={{ width: '100%' }}
+                      style={styles.accountRow}
+                      onPress={() => handleOpenEdit(account)}
+                      activeOpacity={0.7}
                     >
-                      <TouchableOpacity
-                        style={styles.accountRow}
-                        onPress={() => handleOpenEdit(account)}
-                        activeOpacity={0.75}
-                      >
-                        {/* Left Icon */}
-                        <View style={styles.iconCircle}>
-                          {getAccountIcon(account)}
-                        </View>
+                      {/* Left Icon */}
+                      <View style={styles.iconCircle}>
+                        {getAccountIcon(account)}
+                      </View>
 
-                        {/* Middle Info */}
-                        <View style={styles.infoCol}>
-                          <AppText style={styles.accountName}>
-                            {account.name}
+                      {/* Middle Info */}
+                      <View style={styles.infoCol}>
+                        <AppText style={styles.accountName}>
+                          {account.name}
+                        </AppText>
+                        {account.type === 'credit' ? (
+                          <AppText style={styles.dueText}>
+                            Due: {sym}{(account.dueAmount || 0).toLocaleString('en-IN')}
                           </AppText>
-                          {isDue ? (
-                            <AppText style={styles.dueText}>
-                              Due: {sym}{account.dueAmount?.toLocaleString('en-IN')}
-                            </AppText>
-                          ) : (
-                            <AppText style={styles.balanceText}>
-                              {sym}{account.balance.toLocaleString('en-IN')}
-                            </AppText>
-                          )}
-                        </View>
+                        ) : (
+                          <AppText style={styles.balanceText}>
+                            {sym}{account.balance.toLocaleString('en-IN')}
+                          </AppText>
+                        )}
+                      </View>
 
-                        {/* Right: Badge + Chevron */}
-                        <View style={styles.rightGroup}>
-                          <View style={styles.txBadge}>
-                            <AppText style={styles.txBadgeText}>
-                              {txCount} txns
-                            </AppText>
-                          </View>
-                          <ChevronRight size={18} color="#555866" />
+                      {/* Right: Badge + Chevron */}
+                      <View style={styles.rightGroup}>
+                        <View style={styles.txBadge}>
+                          <AppText style={styles.txBadgeText}>
+                            {txCount} txns
+                          </AppText>
                         </View>
-                      </TouchableOpacity>
-                    </NativeLiquidMenu>
+                        <ChevronRight size={18} color="#555866" />
+                      </View>
+                    </TouchableOpacity>
                   );
                 })}
               </View>

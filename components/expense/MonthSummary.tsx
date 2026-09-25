@@ -42,6 +42,7 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
     getCategoryBreakdown,
     hasInitialAppLoaded,
     setHasInitialAppLoaded,
+    formatAmount,
   } = useExpenseStore();
 
   const sym = currencySymbol || '₹';
@@ -100,15 +101,13 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
       },
     ];
   } else {
-    const candidates = [...categoriesWithSpend, ...categoriesZeroSpend];
-    arcItems = candidates.slice(0, 6);
+    arcItems = categoriesWithSpend;
   }
 
   // Active category: user selection or the top category by default
   const currentCategoryInfo =
     (selectedCatId ? arcItems.find((c) => c.category.id === selectedCatId) : null) ||
-    arcItems[0] ||
-    null;
+    (arcItems.length > 0 ? arcItems[0] : null);
 
   const currentSelectedId = currentCategoryInfo?.category.id || null;
   const totalArcCount = arcItems.length;
@@ -195,6 +194,7 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
       <Animated.View
         style={[
           styles.leftColumn,
+          arcItems.length === 0 && { paddingRight: 0 },
           {
             opacity: balanceAnim,
             transform: [
@@ -216,7 +216,7 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
           <AppText style={styles.balanceTitle}>TOTAL BALANCE</AppText>
 
           <AppText style={styles.balanceAmount} numberOfLines={1}>
-            {sym}{totalBalance.toLocaleString('en-IN')}
+            {formatAmount(totalBalance)}
           </AppText>
 
           {/* Budget Allowance Subtext */}
@@ -224,7 +224,7 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
             <View style={styles.budgetRow}>
               <View style={styles.paceBadge} />
               <AppText style={styles.budgetSub}>
-                {sym}{remainingBudget.toLocaleString('en-IN')} budget left
+                {formatAmount(remainingBudget)} budget left
               </AppText>
             </View>
           )}
@@ -259,7 +259,7 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
               {currentCategoryInfo.category.name}
             </AppText>
             <AppText style={styles.categoryChipAmount}>
-              {sym}{currentCategoryInfo.amount.toLocaleString('en-IN')}
+              {formatAmount(currentCategoryInfo.amount)}
             </AppText>
             <AppText style={styles.categoryChipPct}>
               ({currentCategoryInfo.percentage}%)
@@ -269,75 +269,77 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
       </Animated.View>
 
       {/* Right Column: Dynamic Floating Overlapping Category Arc */}
-      <View style={styles.floatingMenuContainer}>
-        {arcItems.map((item, index) => {
-          const isSelected = currentSelectedId === item.category.id;
-          const marginRight = getArcMarginRight(index, totalArcCount, isSelected);
-          const isFilled =
-            item.category.id === 'cat_cig' ||
-            item.category.iconName === 'Star' ||
-            item.category.iconName === 'Heart';
+      {arcItems.length > 0 && (
+        <View style={styles.floatingMenuContainer}>
+          {arcItems.map((item, index) => {
+            const isSelected = currentSelectedId === item.category.id;
+            const marginRight = getArcMarginRight(index, totalArcCount, isSelected);
+            const isFilled =
+              item.category.id === 'cat_cig' ||
+              item.category.iconName === 'Star' ||
+              item.category.iconName === 'Heart';
 
-          const anim = arcAnimValues[index] || new Animated.Value(1);
+            const anim = arcAnimValues[index] || new Animated.Value(1);
 
-          return (
-            <Animated.View
-              key={item.category.id}
-              style={{
-                opacity: anim,
-                transform: [
-                  {
-                    scale: anim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [0.35, 1],
-                    }),
-                  },
-                  {
-                    translateX: anim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [30, 0],
-                    }),
-                  },
-                ],
-              }}
-            >
-              <TouchableOpacity
-                style={[
-                  isSelected
-                    ? [
-                        styles.selectedMenuCircle,
-                        {
-                          backgroundColor: item.category.color,
-                          marginRight,
-                          shadowColor: item.category.color,
-                          marginTop: index === 0 ? 0 : -6,
-                          zIndex: 30,
-                        },
-                      ]
-                    : [
-                        styles.menuCircle,
-                        {
-                          marginRight,
-                          marginTop: index === 0 ? 0 : -6,
-                          zIndex: 10 - index,
-                        },
-                      ],
-                ]}
-                activeOpacity={0.8}
-                onPress={() => handleCategoryPress(item.category.id)}
+            return (
+              <Animated.View
+                key={item.category.id}
+                style={{
+                  opacity: anim,
+                  transform: [
+                    {
+                      scale: anim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0.35, 1],
+                      }),
+                    },
+                    {
+                      translateX: anim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [30, 0],
+                      }),
+                    },
+                  ],
+                }}
               >
-                <CategoryIcon
-                  category={item.category}
-                  size={isSelected ? 26 : 18}
-                  color={isSelected ? '#0F1015' : item.category.color}
-                  strokeWidth={isSelected ? 2.5 : 2}
-                  fill={isFilled}
-                />
-              </TouchableOpacity>
-            </Animated.View>
-          );
-        })}
-      </View>
+                <TouchableOpacity
+                  style={[
+                    isSelected
+                      ? [
+                          styles.selectedMenuCircle,
+                          {
+                            backgroundColor: item.category.color,
+                            marginRight,
+                            shadowColor: item.category.color,
+                            marginTop: index === 0 ? 0 : -6,
+                            zIndex: 30,
+                          },
+                        ]
+                      : [
+                          styles.menuCircle,
+                          {
+                            marginRight,
+                            marginTop: index === 0 ? 0 : -6,
+                            zIndex: 10 - index,
+                          },
+                        ],
+                  ]}
+                  activeOpacity={0.8}
+                  onPress={() => handleCategoryPress(item.category.id)}
+                >
+                  <CategoryIcon
+                    category={item.category}
+                    size={isSelected ? 26 : 18}
+                    color={isSelected ? '#0F1015' : item.category.color}
+                    strokeWidth={isSelected ? 2.5 : 2}
+                    fill={isFilled}
+                  />
+                </TouchableOpacity>
+              </Animated.View>
+            );
+          })}
+        </View>
+      )}
     </View>
   );
 };

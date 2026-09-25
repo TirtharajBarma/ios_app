@@ -46,6 +46,7 @@ import {
   Leaf,
   Coffee,
   Shield,
+  ShieldCheck,
   Tag,
   Sparkles,
   Smile,
@@ -63,8 +64,8 @@ import {
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import * as Sharing from 'expo-sharing';
-import * as FileSystem from 'expo-file-system';
-import { AppText } from '@/components/ui';
+import * as FileSystem from 'expo-file-system/legacy';
+import { AppText, ProfileAvatar } from '@/components/ui';
 import { useExpenseStore, AppThemeMode } from '@/store/useExpenseStore';
 import { useSettingsStore } from '@/store/useSettingsStore';
 import { useSubscriptionStore } from '@/store/useSubscriptionStore';
@@ -73,6 +74,12 @@ import { expenseColors } from '@/constants/expenseColors';
 import { CURRENCIES } from '@/constants';
 import { ExpenseCategory } from '@/types/expense';
 import { CategoryIcon, getCategoryBgColor } from './CategoryIcon';
+import { AppWalkthroughModal } from './AppWalkthroughModal';
+import {
+  convertCurrency,
+  getCachedExchangeRatesData,
+  FALLBACK_EXCHANGE_RATES,
+} from '@/utils/currency';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -164,6 +171,7 @@ export const ExpenseSettings: React.FC = () => {
     categoryBudgets,
     setThemeMode,
     setCurrency,
+    convertAllCurrencies: convertExpenseCurrencies,
     addCategory,
     updateCategory,
     deleteCategory,
@@ -171,8 +179,10 @@ export const ExpenseSettings: React.FC = () => {
     resetAllData,
   } = useExpenseStore();
 
-  const { userName, setCurrencyCode } = useSettingsStore();
+  const { userName, userEmail, userAvatarId, setCurrencyCode } = useSettingsStore();
   const { convertAllCurrencies } = useSubscriptionStore();
+
+  const scrollRef = useRef<ScrollView>(null);
 
   // Grid width measurement to ensure exactly 3 columns with tight spacing
   const [gridMeasuredWidth, setGridMeasuredWidth] = useState(0);
@@ -183,7 +193,7 @@ export const ExpenseSettings: React.FC = () => {
   const [isEditingCategories, setIsEditingCategories] = useState(false);
   const [isDraggingAnyTile, setIsDraggingAnyTile] = useState(false);
 
-  // Automatically exit category edit mode when switching tabs or navigating away
+  // Exit category edit mode when switching tabs or unfocusing
   useFocusEffect(
     useCallback(() => {
       return () => {
@@ -201,11 +211,22 @@ export const ExpenseSettings: React.FC = () => {
     return unsubscribe;
   }, [navigation]);
 
+  const [rates, setRates] = useState<Record<string, number>>(FALLBACK_EXCHANGE_RATES);
+
+  useEffect(() => {
+    getCachedExchangeRatesData()
+      .then((data) => {
+        if (data?.rates) setRates(data.rates);
+      })
+      .catch(() => {});
+  }, []);
+
   const [isCategoryModalVisible, setIsCategoryModalVisible] = useState(false);
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [categoryName, setCategoryName] = useState('');
   const [selectedIcon, setSelectedIcon] = useState('Star');
   const [selectedColor, setSelectedColor] = useState('#F8A888');
+  const [showWalkthroughModal, setShowWalkthroughModal] = useState(false);
 
   // Currency Picker State
   const [isCurrencyModalVisible, setIsCurrencyModalVisible] = useState(false);
@@ -428,14 +449,18 @@ export const ExpenseSettings: React.FC = () => {
 
   const handleSelectCurrency = async (item: { code: string; symbol: string; name: string }) => {
     Haptics.selectionAsync();
-    const oldCode = currencyCode;
+    const oldCode = currencyCode || 'INR';
     try {
-      await convertAllCurrencies(oldCode, item.code);
+      await Promise.all([
+        convertAllCurrencies(oldCode, item.code),
+        convertExpenseCurrencies(oldCode, item.code, item.symbol),
+        setCurrencyCode(item.code),
+      ]);
     } catch (err) {
       console.warn('Currency conversion failed, continuing without converting balances:', err);
+      await setCurrencyCode(item.code);
+      setCurrency(item.code, item.symbol);
     }
-    await setCurrencyCode(item.code);
-    setCurrency(item.code, item.symbol);
     closeCurrencyModal();
   };
 
@@ -515,6 +540,7 @@ export const ExpenseSettings: React.FC = () => {
       <View style={{ height: insets.top, backgroundColor: expenseColors.bgPrimary, zIndex: 10 }} />
 
       <ScrollView
+        ref={scrollRef}
         style={styles.scrollView}
         scrollEnabled={!isDraggingAnyTile}
         contentContainerStyle={[
@@ -724,7 +750,10 @@ export const ExpenseSettings: React.FC = () => {
           </TouchableOpacity>
         </Animated.View>
 
-        {/* 5. Your Data Card */}
+        {/* 5. App Feature Guide Walkthrough Card */}
+
+
+        {/* 6. Your Data Card */}
         <Animated.View
           style={{
             opacity: animData,
@@ -760,10 +789,10 @@ export const ExpenseSettings: React.FC = () => {
           </TouchableOpacity>
         </Animated.View>
 
-        {/* 7. Profile Card */}
+        {/* 7. Redesigned Premium Profile Card */}
         <Animated.View
           style={[
-            styles.cardContainer,
+            styles.profileCardContainer,
             {
               opacity: animProfile,
               transform: [
@@ -777,26 +806,53 @@ export const ExpenseSettings: React.FC = () => {
             },
           ]}
         >
-          <AppText style={styles.cardTitle}>PROFILE</AppText>
-
-          <View style={styles.profileRow}>
-            <View style={styles.avatarCircle}>
-              <AppText style={styles.avatarInitial}>T</AppText>
+          <TouchableOpacity
+            style={styles.profileCardPressable}
+            activeOpacity={0.78}
+            onPress={() => {
+              Haptics.selectionAsync().catch(() => {});
+              router.push('/settings/personalization');
+            }}
+          >
+            {/* Avatar Focal Point with Frosted Glow Border */}
+            <View style={styles.avatarFocalWrapper}>
+              <ProfileAvatar
+                avatarId={userAvatarId}
+                name={userName}
+                size={54}
+                showBorder={true}
+              />
+              <View style={styles.avatarPrivateBadge}>
+                <ShieldCheck size={10} color="#70D6BC" strokeWidth={2.5} />
+              </View>
             </View>
-            <View style={styles.profileTextCol}>
-              <AppText style={styles.profileName}>
-                {userName || 'Tirtharaj Barma'}
+
+            {/* Profile Hierarchy Info */}
+            <View style={styles.profileMetaCol}>
+              <View style={styles.profileHeaderLine}>
+                <AppText style={styles.profileNamePrimary} numberOfLines={1}>
+                  {userName.trim() || 'Personal Vault'}
+                </AppText>
+                <View style={styles.profileTypeBadge}>
+                  <AppText style={styles.profileTypeBadgeText}>LOCAL</AppText>
+                </View>
+              </View>
+
+              <AppText style={styles.profileEmailSub} numberOfLines={1}>
+                {userEmail.trim() || '100% on-device & private'}
               </AppText>
-              <AppText style={styles.profileEmail}>
-                tirtharajbarma3@gmail.com
-              </AppText>
+
+              <View style={styles.profileActionPromptRow}>
+                <AppText style={styles.profileActionPromptText}>
+                  Personalization & Avatar
+                </AppText>
+              </View>
             </View>
-          </View>
 
-          <View style={styles.profileDivider} />
-
-          <TouchableOpacity style={styles.destructiveActionRow} onPress={handleEraseAllData}>
-            <AppText style={styles.destructiveActionText}>Erase All Expense Data</AppText>
+            {/* Subtle Chevron Action Affordance */}
+            <View style={styles.profileChevronCircle}>
+              <ChevronRight size={15} color="#A2AEBB" strokeWidth={2.4} />
+            </View>
           </TouchableOpacity>
         </Animated.View>
       </ScrollView>
@@ -840,7 +896,8 @@ export const ExpenseSettings: React.FC = () => {
               keyboardDismissMode="on-drag"
               showsVerticalScrollIndicator={false}
               automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
-              contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 24) + 40 }}
+              style={{ backgroundColor: '#1A1D23' }}
+              contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 24) + 40, backgroundColor: '#1A1D23' }}
             >
             {/* Gesture Handle Bar Area (Swipe down anywhere here closes like iPhone) */}
             <View {...categoryPanResponder.panHandlers} style={styles.dragHeaderArea}>
@@ -1021,6 +1078,26 @@ export const ExpenseSettings: React.FC = () => {
             >
               {filteredCurrencies.map((item) => {
                 const isSelected = currencyCode === item.code;
+                const activeCode = currencyCode || 'INR';
+                const activeCurObj = CURRENCIES.find((c) => c.code === activeCode) || CURRENCIES[0];
+                const baseAmt = ['JPY', 'KRW', 'IDR', 'VND'].includes(activeCode)
+                  ? 10000
+                  : ['INR', 'RUB', 'THB', 'ZAR', 'BRL'].includes(activeCode)
+                  ? 1000
+                  : 100;
+                const sampleConverted = convertCurrency(baseAmt, activeCode, item.code, rates);
+                let sampleRateStr = '';
+                if (item.code === activeCode) {
+                  sampleRateStr = 'Active';
+                } else if (sampleConverted > 0) {
+                  const formattedAmt = sampleConverted < 1
+                    ? sampleConverted.toFixed(3)
+                    : sampleConverted < 100
+                    ? sampleConverted.toFixed(2)
+                    : Math.round(sampleConverted).toLocaleString();
+                  sampleRateStr = `${activeCurObj.symbol}${baseAmt.toLocaleString()} ≈ ${item.symbol}${formattedAmt}`;
+                }
+
                 return (
                   <TouchableOpacity
                     key={item.code}
@@ -1043,7 +1120,7 @@ export const ExpenseSettings: React.FC = () => {
                           {item.name}
                         </AppText>
                         <AppText style={styles.currencyCodeSub}>
-                          {item.code} · {item.symbol}
+                          {item.code} · {item.symbol} {sampleRateStr ? `· ${sampleRateStr}` : ''}
                         </AppText>
                       </View>
                     </View>
@@ -1061,6 +1138,12 @@ export const ExpenseSettings: React.FC = () => {
           </Animated.View>
         </View>
       </Modal>
+
+      {/* App Feature Walkthrough Modal */}
+      <AppWalkthroughModal
+        visible={showWalkthroughModal}
+        onClose={() => setShowWalkthroughModal(false)}
+      />
     </View>
   );
 };
@@ -1275,7 +1358,7 @@ const DraggableCategoriesGrid: React.FC<DraggableCategoriesGridProps> = ({
                 useNativeDriver: true,
               }),
             ]).start(() => {
-              // Synchronously reset animated offsets and drag state before reordering to prevent glitching/flashing
+              // Reset animated values synchronously first to avoid flash on re-render
               dragPan.setValue({ x: 0, y: 0 });
               Object.values(shiftAnims.current).forEach((a) => a.setValue({ x: 0, y: 0 }));
               setDraggingCatId(null);
@@ -1284,7 +1367,11 @@ const DraggableCategoriesGrid: React.FC<DraggableCategoriesGridProps> = ({
 
               if (fromIdx !== toIdx) {
                 Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                onReorder(fromIdx, toIdx);
+                // Use requestAnimationFrame to let the reset render flush before
+                // triggering the store reorder (prevents visible flash)
+                requestAnimationFrame(() => {
+                  onReorder(fromIdx, toIdx);
+                });
               }
             });
           } else {
@@ -1640,40 +1727,103 @@ const styles = StyleSheet.create({
     lineHeight: 12,
   },
 
-  profileRow: {
+  // ── Redesigned Premium Profile Card Styles ──
+  profileCardContainer: {
+    backgroundColor: '#16171E',
+    borderRadius: 22,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  profileCardPressable: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
     gap: 14,
-    marginVertical: 6,
   },
-  avatarCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: expenseColors.accentPeach,
+  avatarFocalWrapper: {
+    position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarInitial: {
-    color: '#0F1015',
-    fontSize: 20,
-    fontWeight: '800',
-  },
-  profileTextCol: {
+  avatarPrivateBadge: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#16171E',
+    borderWidth: 1.2,
+    borderColor: 'rgba(112, 214, 188, 0.4)',
+    alignItems: 'center',
     justifyContent: 'center',
+  },
+  profileMetaCol: {
     flex: 1,
+    justifyContent: 'center',
+    gap: 2,
   },
-  profileName: {
-    color: expenseColors.textPrimary,
-    fontSize: 15,
-    lineHeight: 19,
-    fontWeight: '700',
-    marginBottom: 2,
+  profileHeaderLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
-  profileEmail: {
+  profileNamePrimary: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    lineHeight: 20,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
+  profileTypeBadge: {
+    backgroundColor: 'rgba(112, 214, 188, 0.15)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 0.8,
+    borderColor: 'rgba(112, 214, 188, 0.3)',
+  },
+  profileTypeBadgeText: {
+    color: '#70D6BC',
+    fontSize: 9.5,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+  },
+  profileEmailSub: {
     color: expenseColors.textMuted,
     fontSize: 12,
     lineHeight: 16,
+    marginTop: 1,
+  },
+  profileActionPromptRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 3,
+  },
+  profileActionPromptText: {
+    color: expenseColors.accentPeach,
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.2,
+  },
+  profileChevronCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   profileDivider: {
     height: 1,

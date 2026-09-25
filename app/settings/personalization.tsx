@@ -5,66 +5,84 @@ import {
   TouchableOpacity,
   TextInput,
   ScrollView,
+  KeyboardAvoidingView,
+  Platform,
+  Keyboard,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { ChevronLeft, Check } from "lucide-react-native";
+import { ChevronLeft, Check, Sparkles } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 
-import { colors, spacing, radius, hexToRGBA } from "@/constants";
-import { AppText } from "@/components/ui";
+import { colors, spacing, radius } from "@/constants";
+import { AppText, ProfileAvatar } from "@/components/ui";
 import { useSettingsStore } from "@/store/useSettingsStore";
+import { AVATAR_OPTIONS, AvatarOption } from "@/constants/avatars";
 
 export default function PersonalizationScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { userName, userTagline, setUserName, setUserTagline } = useSettingsStore();
+  const {
+    userName,
+    userEmail,
+    userTagline,
+    userAvatarId,
+    setUserName,
+    setUserEmail,
+    setUserTagline,
+    setUserAvatarId,
+  } = useSettingsStore();
 
   const [nameInput, setNameInput] = useState(userName);
+  const [emailInput, setEmailInput] = useState(userEmail);
   const [taglineInput, setTaglineInput] = useState(userTagline);
+  const [selectedAvatar, setSelectedAvatar] = useState(userAvatarId || "avatar_solaris");
   const [saved, setSaved] = useState(false);
   
   const scrollRef = useRef<ScrollView>(null);
+  const nameRef = useRef<TextInput>(null);
+  const emailRef = useRef<TextInput>(null);
   const taglineRef = useRef<TextInput>(null);
 
   useEffect(() => {
     setNameInput(userName);
+    setEmailInput(userEmail);
     setTaglineInput(userTagline);
-  }, [userName, userTagline]);
+    setSelectedAvatar(userAvatarId || "avatar_solaris");
+  }, [userName, userEmail, userTagline, userAvatarId]);
 
   const handleSave = async () => {
+    Keyboard.dismiss();
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     await setUserName(nameInput.trim());
+    await setUserEmail(emailInput.trim());
     await setUserTagline(taglineInput.trim());
+    await setUserAvatarId(selectedAvatar);
     setSaved(true);
     setTimeout(() => {
       setSaved(false);
       router.back();
-    }, 600);
+    }, 500);
   };
 
   const hasChanges =
-    nameInput.trim() !== userName || taglineInput.trim() !== userTagline;
-
-  const initials = nameInput.trim()
-    ? nameInput
-        .trim()
-        .split(" ")
-        .filter(Boolean)
-        .map((w) => w[0])
-        .join("")
-        .toUpperCase()
-        .slice(0, 2)
-    : "?";
+    nameInput.trim() !== userName ||
+    emailInput.trim() !== userEmail ||
+    taglineInput.trim() !== userTagline ||
+    selectedAvatar !== (userAvatarId || "avatar_solaris");
 
   const handleFocus = (offset: number) => {
     setTimeout(() => {
       scrollRef.current?.scrollTo({ y: offset, animated: true });
-    }, 150);
+    }, 120);
   };
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      style={[styles.container, { paddingTop: insets.top }]}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 10 : 0}
+    >
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} activeOpacity={0.7}>
@@ -96,36 +114,99 @@ export default function PersonalizationScreen() {
       <ScrollView
         ref={scrollRef}
         showsVerticalScrollIndicator={false}
-        keyboardDismissMode="on-drag"
+        keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets={true}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingBottom: insets.bottom + spacing[48] },
+          { paddingBottom: insets.bottom + spacing[48] + 160 },
         ]}
       >
-        {/* Avatar Preview */}
+        {/* Avatar Live Preview */}
         <View style={styles.avatarSection}>
-          <View style={styles.avatarCircle}>
-            <AppText style={styles.avatarInitials}>{initials}</AppText>
-          </View>
+          <ProfileAvatar
+            avatarId={selectedAvatar}
+            name={nameInput}
+            size={80}
+            showBorder={true}
+          />
           {nameInput.trim() ? (
-            <AppText variant="title3" weight="700" color={colors.white}>
+            <AppText variant="title3" weight="700" color={colors.white} style={{ marginTop: 8 }}>
               {nameInput.trim()}
             </AppText>
           ) : (
-            <AppText variant="body" color={colors.textMuted}>
-              Enter your name below
+            <AppText variant="body" color={colors.textMuted} style={{ marginTop: 8 }}>
+              Enter your profile name
             </AppText>
           )}
-          {taglineInput.trim() ? (
-            <AppText variant="footnote" color={colors.textMuted}>
-              {taglineInput.trim()}
+          {emailInput.trim() ? (
+            <AppText variant="footnote" color={colors.textMuted} style={{ marginTop: 2 }}>
+              {emailInput.trim()}
             </AppText>
           ) : null}
         </View>
 
-        {/* Form */}
+        {/* 1. Illustrated Logo / Avatar Selection Grid */}
+        <View>
+          <View style={styles.sectionTitleRow}>
+            <Sparkles size={13} color="#FF9D66" />
+            <AppText
+              variant="footnote"
+              weight="700"
+              color={colors.textMuted}
+              style={styles.sectionLabel}
+            >
+              CHOOSE BESPOKE IDENTITY AVATAR
+            </AppText>
+          </View>
+
+          <View style={styles.avatarGridCard}>
+            <View style={styles.avatarGrid}>
+              {AVATAR_OPTIONS.map((item) => {
+                const isSelected = selectedAvatar === item.id;
+                return (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={[
+                      styles.avatarTile,
+                      isSelected && {
+                        borderColor: item.accentColor,
+                        backgroundColor: `${item.accentColor}18`,
+                      },
+                    ]}
+                    activeOpacity={0.75}
+                    onPress={() => {
+                      Haptics.selectionAsync();
+                      setSelectedAvatar(item.id);
+                    }}
+                  >
+                    <ProfileAvatar
+                      avatarId={item.id}
+                      size={44}
+                      showBorder={false}
+                    />
+                    <AppText
+                      style={[
+                        styles.avatarTileName,
+                        isSelected && { color: item.accentColor, fontWeight: '700' },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {item.name}
+                    </AppText>
+                    {isSelected && (
+                      <View style={[styles.selectedCheckBadge, { backgroundColor: item.accentColor }]}>
+                        <Check size={9} color="#0E1015" strokeWidth={3.5} />
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        </View>
+
+        {/* 2. Profile Details Form */}
         <View>
           <AppText
             variant="footnote"
@@ -133,7 +214,7 @@ export default function PersonalizationScreen() {
             color={colors.textMuted}
             style={styles.sectionLabel}
           >
-            YOUR PROFILE
+            PROFILE DETAILS
           </AppText>
           <View style={styles.formCard}>
             {/* Name */}
@@ -142,6 +223,7 @@ export default function PersonalizationScreen() {
                 NAME
               </AppText>
               <TextInput
+                ref={nameRef}
                 style={styles.textInput}
                 value={nameInput}
                 onChangeText={setNameInput}
@@ -151,12 +233,37 @@ export default function PersonalizationScreen() {
                 returnKeyType="next"
                 autoCapitalize="words"
                 autoCorrect={false}
-                onSubmitEditing={() => taglineRef.current?.focus()}
+                onSubmitEditing={() => emailRef.current?.focus()}
                 blurOnSubmit={false}
-                onFocus={() => handleFocus(0)}
+                onFocus={() => handleFocus(360)}
               />
             </View>
             <View style={styles.inputDivider} />
+
+            {/* Email */}
+            <View style={styles.inputRow}>
+              <AppText variant="footnote" weight="600" color={colors.textMuted} style={styles.inputLabel}>
+                EMAIL
+              </AppText>
+              <TextInput
+                ref={emailRef}
+                style={styles.textInput}
+                value={emailInput}
+                onChangeText={setEmailInput}
+                placeholder="e.g. alex@example.com"
+                placeholderTextColor={colors.textMuted}
+                maxLength={60}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="next"
+                onSubmitEditing={() => taglineRef.current?.focus()}
+                blurOnSubmit={false}
+                onFocus={() => handleFocus(440)}
+              />
+            </View>
+            <View style={styles.inputDivider} />
+
             {/* Tagline */}
             <View style={styles.inputRow}>
               <AppText variant="footnote" weight="600" color={colors.textMuted} style={styles.inputLabel}>
@@ -167,13 +274,13 @@ export default function PersonalizationScreen() {
                 style={styles.textInput}
                 value={taglineInput}
                 onChangeText={setTaglineInput}
-                placeholder="e.g. Keeping tabs on chaos"
+                placeholder="e.g. Tracking wealth locally"
                 placeholderTextColor={colors.textMuted}
                 maxLength={60}
                 returnKeyType="done"
                 onSubmitEditing={handleSave}
                 autoCapitalize="sentences"
-                onFocus={() => handleFocus(180)}
+                onFocus={() => handleFocus(520)}
               />
             </View>
           </View>
@@ -182,18 +289,18 @@ export default function PersonalizationScreen() {
         {/* Info */}
         <View style={styles.infoCard}>
           <AppText variant="footnote" color={colors.textMuted} style={{ lineHeight: 18 }}>
-            Your name shows as initials on the Overview profile button. Your tagline is just for you — a little reminder of your vibe. Everything stays on your device.
+            Your custom identity avatar and name personalize your on-device dashboard. All information is stored 100% locally with zero cloud telemetry.
           </AppText>
         </View>
       </ScrollView>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#111113",
+    backgroundColor: "#101114",
   },
   header: {
     flexDirection: "row",
@@ -223,65 +330,89 @@ const styles = StyleSheet.create({
   },
   avatarSection: {
     alignItems: "center",
-    gap: spacing[8],
-    paddingVertical: spacing[20],
+    paddingVertical: spacing[12],
   },
-  avatarCircle: {
-    width: 84,
-    height: 84,
-    borderRadius: 42,
-    backgroundColor: hexToRGBA(colors.accent, 0.15),
-    borderWidth: 2,
-    borderColor: hexToRGBA(colors.accent, 0.3),
+  sectionTitleRow: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    marginBottom: spacing[4],
-    overflow: "hidden",
-  },
-  avatarInitials: {
-    fontSize: 28,
-    lineHeight: 34,
-    fontWeight: "800",
-    color: colors.accent,
-    textAlign: "center",
-    textAlignVertical: "center",
-  },
-  sectionLabel: {
+    gap: 6,
     marginBottom: spacing[8],
     paddingHorizontal: spacing[4],
   },
-  formCard: {
-    backgroundColor: "#1C1C1E",
+  sectionLabel: {
+    letterSpacing: 0.8,
+  },
+  avatarGridCard: {
+    backgroundColor: "#171920",
     borderRadius: radius[16],
+    padding: spacing[16],
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+  },
+  avatarGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    justifyContent: "space-between",
+  },
+  avatarTile: {
+    width: "22.5%",
+    aspectRatio: 0.9,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radius[12],
+    borderWidth: 1.5,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    backgroundColor: "rgba(255, 255, 255, 0.02)",
+    paddingVertical: 6,
+    position: "relative",
+  },
+  avatarTileName: {
+    fontSize: 10,
+    fontWeight: "500",
+    color: "#9CA3AF",
+    marginTop: 4,
+  },
+  selectedCheckBadge: {
+    position: "absolute",
+    top: 4,
+    right: 4,
+    width: 15,
+    height: 15,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  formCard: {
+    backgroundColor: "#171920",
+    borderRadius: radius[16],
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
     overflow: "hidden",
-    borderWidth: 0.5,
-    borderColor: "rgba(255,255,255,0.08)",
   },
   inputRow: {
     paddingHorizontal: spacing[16],
     paddingVertical: spacing[12],
-    gap: spacing[4],
   },
   inputLabel: {
-    letterSpacing: 0.5,
-    fontSize: 11,
+    letterSpacing: 0.8,
+    marginBottom: 4,
   },
   textInput: {
-    fontSize: 17,
     color: colors.white,
-    fontWeight: "500",
-    paddingVertical: spacing[4],
+    fontSize: 15,
+    paddingVertical: 4,
   },
   inputDivider: {
     height: 0.5,
-    backgroundColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(255, 255, 255, 0.06)",
     marginLeft: spacing[16],
   },
   infoCard: {
-    backgroundColor: "rgba(255,255,255,0.04)",
-    borderRadius: radius[12],
     padding: spacing[16],
-    borderWidth: 0.5,
-    borderColor: "rgba(255,255,255,0.06)",
+    backgroundColor: "rgba(255, 255, 255, 0.03)",
+    borderRadius: radius[12],
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.06)",
   },
 });

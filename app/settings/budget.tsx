@@ -98,7 +98,9 @@ export default function MonthlyBudgetScreen() {
 
   const handleSaveAll = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    const finalBudget = Math.max(0, parseFloat(budgetInput) || monthlyBudget);
+    const clean = budgetInput.trim().replace(/,/g, '');
+    const parsed = clean === '' ? 0 : parseFloat(clean);
+    const finalBudget = isNaN(parsed) ? 0 : Math.max(0, parsed);
     setMonthlyBudget(finalBudget);
     setAllCategoryBudgets(localCategoryBudgets);
     router.back();

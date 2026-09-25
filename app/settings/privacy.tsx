@@ -18,6 +18,10 @@ import {
   ShieldCheck,
   Database,
   Eye,
+  WifiOff,
+  Globe,
+  Cpu,
+  Lock,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 
@@ -188,6 +192,22 @@ export default function PrivacyScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + spacing[40] }]}
       >
+        {/* Local-First Architecture Badge */}
+        <View style={styles.localFirstBanner}>
+          <View style={styles.bannerHeaderRow}>
+            <View style={styles.bannerBadge}>
+              <ShieldCheck size={14} color="#70D6BC" />
+              <AppText style={styles.bannerBadgeText}>OFFLINE-FIRST ARCHITECTURE</AppText>
+            </View>
+          </View>
+          <AppText variant="subheadline" weight="700" color={colors.white} style={{ marginBottom: 4 }}>
+            100% Private, On-Device Financial Intelligence
+          </AppText>
+          <AppText variant="footnote" color={colors.textMuted} style={{ lineHeight: 18 }}>
+            Your bank statements, account balances, transaction records, and personal budgets are processed and stored exclusively on your device. We do not operate remote servers for financial storage.
+          </AppText>
+        </View>
+
         {/* Security */}
         <View>
           <AppText variant="footnote" weight="700" color={colors.textMuted} style={styles.sectionLabel}>
@@ -211,18 +231,66 @@ export default function PrivacyScreen() {
           </AppText>
         </View>
 
-        {/* Privacy */}
+        {/* How Network & Calculations Work */}
         <View>
           <AppText variant="footnote" weight="700" color={colors.textMuted} style={styles.sectionLabel}>
-            PRIVACY
+            NETWORK & DATA USAGE
+          </AppText>
+          <View style={[styles.sectionCard, { padding: spacing[16], gap: spacing[16] }]}>
+            <View style={styles.dataRow}>
+              <View style={[styles.iconBox, { backgroundColor: "rgba(112, 214, 188, 0.15)" }]}>
+                <WifiOff size={16} color="#70D6BC" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <AppText variant="footnote" weight="600" color={colors.white}>Zero Financial Telemetry</AppText>
+                <AppText variant="caption2" color={colors.textMuted} style={{ marginTop: 2, lineHeight: 16 }}>
+                  Financial data is never transmitted across the network. All expense analytics and budgets run entirely offline.
+                </AppText>
+              </View>
+            </View>
+
+            <View style={styles.separatorNoMargin} />
+
+            <View style={styles.dataRow}>
+              <View style={[styles.iconBox, { backgroundColor: "rgba(255, 157, 102, 0.15)" }]}>
+                <Globe size={16} color="#FF9D66" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <AppText variant="footnote" weight="600" color={colors.white}>Selective Network Use (Exchange Rates)</AppText>
+                <AppText variant="caption2" color={colors.textMuted} style={{ marginTop: 2, lineHeight: 16 }}>
+                  Internet is only required for fetching public currency exchange rate tables. Currency conversion math is computed locally without transmitting transaction amounts.
+                </AppText>
+              </View>
+            </View>
+
+            <View style={styles.separatorNoMargin} />
+
+            <View style={styles.dataRow}>
+              <View style={[styles.iconBox, { backgroundColor: "rgba(167, 139, 250, 0.15)" }]}>
+                <Cpu size={16} color="#A78BFA" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <AppText variant="footnote" weight="600" color={colors.white}>100% On-Device AI Classification</AppText>
+                <AppText variant="caption2" color={colors.textMuted} style={{ marginTop: 2, lineHeight: 16 }}>
+                  Smart Search and statement merchant parsing run locally on your Apple Neural Engine / device hardware without cloud APIs.
+                </AppText>
+              </View>
+            </View>
+          </View>
+        </View>
+
+        {/* Optional Diagnostics */}
+        <View>
+          <AppText variant="footnote" weight="700" color={colors.textMuted} style={styles.sectionLabel}>
+            OPTIONAL DIAGNOSTICS
           </AppText>
           <View style={styles.sectionCard}>
             <ToggleRow
               icon={<BarChart2 size={18} color="#fff" />}
               iconBg="#C4A7E7"
               label="Usage Analytics"
-              description="Share anonymous usage data to improve the app"
-              statusText={analyticsEnabled ? "Active (Sending anonymous telemetry)" : "Paused"}
+              description="Share anonymous navigation metrics to improve the UI"
+              statusText={analyticsEnabled ? "Active (Anonymous UI telemetry)" : "Paused"}
               statusColor={analyticsEnabled ? colors.success : colors.textMuted}
               value={analyticsEnabled}
               onChange={async (v) => { await setAnalyticsEnabled(v); }}
@@ -232,52 +300,16 @@ export default function PrivacyScreen() {
               icon={<AlertTriangle size={18} color="#fff" />}
               iconBg="#F8A888"
               label="Crash Reports"
-              description="Automatically send crash logs to the dev team"
-              statusText={crashReportsEnabled ? "Active (Reporting crashes)" : "Paused"}
+              description="Automatically send crash logs for app stability"
+              statusText={crashReportsEnabled ? "Active (Crash reporting)" : "Paused"}
               statusColor={crashReportsEnabled ? colors.success : colors.textMuted}
               value={crashReportsEnabled}
               onChange={async (v) => { await setCrashReportsEnabled(v); }}
             />
           </View>
           <AppText variant="caption2" color={colors.textMuted} style={styles.footnote}>
-            Analytics and crash reports never contain your private subscription details.
+            Analytics and crash reports never include transaction details, account numbers, notes, or balances.
           </AppText>
-        </View>
-
-        {/* What we store */}
-        <View>
-          <AppText variant="footnote" weight="700" color={colors.textMuted} style={styles.sectionLabel}>
-            DATA STORAGE
-          </AppText>
-          <View style={[styles.sectionCard, { paddingHorizontal: spacing[16], paddingVertical: spacing[16], gap: spacing[16] }]}>
-            <View style={styles.dataRow}>
-              <View style={[styles.iconBox, { backgroundColor: hexToRGBA(colors.success, 0.15) }]}>
-                <Database size={16} color={colors.success} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <AppText variant="footnote" weight="600" color={colors.white}>Stored locally on device</AppText>
-                <AppText variant="caption2" color={colors.textMuted} style={{ marginTop: 2 }}>Your subscriptions never leave your phone</AppText>
-              </View>
-            </View>
-            <View style={styles.dataRow}>
-              <View style={[styles.iconBox, { backgroundColor: hexToRGBA(colors.success, 0.15) }]}>
-                <Eye size={16} color={colors.success} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <AppText variant="footnote" weight="600" color={colors.white}>No account required</AppText>
-                <AppText variant="caption2" color={colors.textMuted} style={{ marginTop: 2 }}>Use the app without signing up for anything</AppText>
-              </View>
-            </View>
-            <View style={styles.dataRow}>
-              <View style={[styles.iconBox, { backgroundColor: hexToRGBA(colors.success, 0.15) }]}>
-                <ShieldCheck size={16} color={colors.success} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <AppText variant="footnote" weight="600" color={colors.white}>No data sold, ever</AppText>
-                <AppText variant="caption2" color={colors.textMuted} style={{ marginTop: 2 }}>We don't sell or share your data with anyone</AppText>
-              </View>
-            </View>
-          </View>
         </View>
       </ScrollView>
     </View>
@@ -285,7 +317,7 @@ export default function PrivacyScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#111113" },
+  container: { flex: 1, backgroundColor: "#101114" },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -295,13 +327,39 @@ const styles = StyleSheet.create({
   },
   backBtn: { width: 44, height: 44, alignItems: "flex-start", justifyContent: "center" },
   scrollContent: { paddingHorizontal: spacing[16], gap: spacing[24] },
+  localFirstBanner: {
+    backgroundColor: "#161920",
+    borderRadius: radius[16],
+    padding: spacing[16],
+    borderWidth: 1,
+    borderColor: "rgba(112, 214, 188, 0.25)",
+  },
+  bannerHeaderRow: {
+    marginBottom: 8,
+  },
+  bannerBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(112, 214, 188, 0.12)",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    alignSelf: "flex-start",
+  },
+  bannerBadgeText: {
+    color: "#70D6BC",
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.6,
+  },
   sectionLabel: { marginBottom: spacing[8], paddingHorizontal: spacing[4] },
   sectionCard: {
-    backgroundColor: "#1C1C1E",
+    backgroundColor: "#171920",
     borderRadius: radius[16],
     overflow: "hidden",
-    borderWidth: 0.5,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
   },
   toggleRow: {
     flexDirection: "row",
@@ -312,7 +370,8 @@ const styles = StyleSheet.create({
   },
   toggleText: { flex: 1 },
   iconBox: { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center" },
-  separator: { height: 0.5, backgroundColor: "rgba(255,255,255,0.08)", marginLeft: 64 },
+  separator: { height: 0.5, backgroundColor: "rgba(255, 255, 255, 0.06)", marginLeft: 64 },
+  separatorNoMargin: { height: 0.5, backgroundColor: "rgba(255, 255, 255, 0.06)" },
   footnote: { marginTop: spacing[8], paddingHorizontal: spacing[4], lineHeight: 16 },
   dataRow: { flexDirection: "row", alignItems: "flex-start", gap: spacing[12] },
 });

@@ -44,8 +44,7 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
 
   const [name, setName] = useState<string>('');
   const [type, setType] = useState<AccountType>('savings');
-  const [balance, setBalance] = useState<string>('0');
-  const [dueAmount, setDueAmount] = useState<string>('0');
+  const [openingBalance, setOpeningBalance] = useState<string>('0');
   const [showBalanceInput, setShowBalanceInput] = useState<boolean>(false);
 
   const isEditMode = account !== null;
@@ -54,20 +53,24 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
     if (account) {
       setName(account.name);
       setType(account.type || 'savings');
-      setBalance(account.balance.toString());
-      setDueAmount((account.dueAmount || 0).toString());
+      setOpeningBalance((account.openingBalance ?? 0).toString());
     } else {
       setName('');
       setType('savings');
-      setBalance('0');
-      setDueAmount('0');
+      setOpeningBalance('0');
     }
     setShowBalanceInput(false);
   }, [account, visible]);
 
   // Number of transactions linked to this account
   const linkedTxCount = account
-    ? transactions.filter(t => t.accountId === account.id).length
+    ? transactions.filter(
+        (t) =>
+          t.accountId === account.id ||
+          t.toAccountId === account.id ||
+          (t.accountName && account.name && t.accountName.trim().toLowerCase() === account.name.trim().toLowerCase()) ||
+          (t.toAccountName && account.name && t.toAccountName.trim().toLowerCase() === account.name.trim().toLowerCase())
+      ).length
     : 0;
 
   const handleSave = () => {
@@ -76,24 +79,23 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
       return;
     }
 
-    const numBalance = parseFloat(balance) || 0;
-    const numDue = parseFloat(dueAmount) || 0;
+    const isCreditType = type === 'credit';
+    const numOpening = parseFloat(openingBalance.trim().replace(/,/g, '')) || 0;
 
     if (isEditMode && account) {
       updateAccount(account.id, {
         name: name.trim(),
         type,
-        balance: numBalance,
-        dueAmount: numDue > 0 ? numDue : undefined,
-        statusType: numDue > 0 ? 'due' : 'positive',
+        openingBalance: numOpening,
       });
     } else {
       addAccount({
         name: name.trim(),
         type,
-        balance: numBalance,
-        dueAmount: numDue > 0 ? numDue : undefined,
-        statusType: numDue > 0 ? 'due' : 'positive',
+        openingBalance: numOpening,
+        balance: isCreditType ? 0 : numOpening,
+        dueAmount: isCreditType && numOpening > 0 ? numOpening : undefined,
+        statusType: isCreditType && numOpening > 0 ? 'due' : 'positive',
       });
     }
 
@@ -274,11 +276,14 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
             </View>
             <View style={{ flex: 1 }}>
               <AppText style={styles.balanceCardTitle}>
-                Adjust Opening Balance
+                {type === 'credit' ? 'Opening Card Due' : 'Opening Balance'}
               </AppText>
               <AppText style={styles.balanceCardSub}>
-                Currently {sym}{parseFloat(balance || '0').toLocaleString('en-IN')}
-                {parseFloat(dueAmount || '0') > 0 ? ` (Due: ${sym}${parseFloat(dueAmount).toLocaleString('en-IN')})` : ''}
+                {isEditMode && account
+                  ? type === 'credit'
+                    ? `Current Due: ${sym}${(account.dueAmount || 0).toLocaleString('en-IN')} • Base: ${sym}${parseFloat(openingBalance || '0').toLocaleString('en-IN')}`
+                    : `Current: ${sym}${account.balance.toLocaleString('en-IN')} • Base: ${sym}${parseFloat(openingBalance || '0').toLocaleString('en-IN')}`
+                  : `Base Opening: ${sym}${parseFloat(openingBalance || '0').toLocaleString('en-IN')}`}
               </AppText>
             </View>
             <ChevronRight size={18} color="#8E919D" />
@@ -288,30 +293,18 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
           {showBalanceInput && (
             <View style={styles.balanceInputBlock}>
               <View style={styles.section}>
-                <AppText style={styles.label}>BALANCE AMOUNT ({sym})</AppText>
+                <AppText style={styles.label}>
+                  {type === 'credit' ? `STARTING OPENING DUE (${sym})` : `STARTING OPENING BALANCE (${sym})`}
+                </AppText>
                 <TextInput
                   style={styles.textInput}
                   placeholder="0"
                   placeholderTextColor="#555866"
                   keyboardType="numeric"
-                  value={balance}
-                  onChangeText={setBalance}
+                  value={openingBalance}
+                  onChangeText={setOpeningBalance}
                 />
               </View>
-
-              {type === 'credit' && (
-                <View style={styles.section}>
-                  <AppText style={styles.label}>DUE AMOUNT ({sym})</AppText>
-                  <TextInput
-                    style={styles.textInput}
-                    placeholder="0"
-                    placeholderTextColor="#555866"
-                    keyboardType="numeric"
-                    value={dueAmount}
-                    onChangeText={setDueAmount}
-                  />
-                </View>
-              )}
             </View>
           )}
 

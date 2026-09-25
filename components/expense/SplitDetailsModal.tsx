@@ -140,7 +140,7 @@ export const SplitDetailsModal: React.FC<SplitDetailsModalProps> = ({
     if (lower.includes('wallet') || lower.includes('paytm')) {
       return <Wallet size={15} color="#8E919D" />;
     }
-    if (lower.includes('credit') || lower.includes('card') || lower.includes('slice')) {
+    if (lower.includes('credit') || lower.includes('card')) {
       return <CreditCard size={15} color="#8E919D" />;
     }
     return <Building2 size={15} color="#8E919D" />;

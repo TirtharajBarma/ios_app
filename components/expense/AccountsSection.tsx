@@ -11,15 +11,14 @@ interface AccountsSectionProps {
 }
 
 export const AccountsSection: React.FC<AccountsSectionProps> = ({ onAccountPress }) => {
-  const { accounts, currencySymbol } = useExpenseStore();
+  const { accounts, currencySymbol, formatAmount } = useExpenseStore();
   const sym = currencySymbol || '₹';
 
-  const renderAccountIcon = (name: string) => {
-    const upper = name.toUpperCase();
-    if (upper.includes('WALLET')) {
+  const renderAccountIcon = (acc: ExpenseAccount) => {
+    if (acc.type === 'wallet') {
       return <Wallet size={16} color={expenseColors.textSubtle} strokeWidth={2} />;
     }
-    if (upper.includes('AXIS') || upper.includes('SLICE')) {
+    if (acc.type === 'credit') {
       return <CreditCard size={16} color={expenseColors.textSubtle} strokeWidth={2} />;
     }
     return <Banknote size={16} color={expenseColors.textSubtle} strokeWidth={2} />;
@@ -35,13 +34,11 @@ export const AccountsSection: React.FC<AccountsSectionProps> = ({ onAccountPress
       {/* Account Cards */}
       <View style={styles.cardsStack}>
         {activeAccounts.map((acc) => {
-          const isPositive = acc.statusType === 'positive';
-          const isDue = acc.statusType === 'due';
-          const isNoChange = acc.statusType === 'no_change';
+          const isCredit = acc.type === 'credit';
+          const hasDue = isCredit && (acc.dueAmount || 0) > 0;
 
-          const formattedBalance = acc.balance.toLocaleString('en-IN');
-          const formattedDue = acc.dueAmount ? acc.dueAmount.toLocaleString('en-IN') : '0';
-          const formattedChange = Math.abs(acc.monthlyChange).toLocaleString('en-IN');
+          const isOutflow = acc.monthlyChange < 0;
+          const isInflow = acc.monthlyChange > 0;
 
           return (
             <TouchableOpacity
@@ -53,49 +50,44 @@ export const AccountsSection: React.FC<AccountsSectionProps> = ({ onAccountPress
               {/* Left side icon & info */}
               <View style={styles.leftContent}>
                 <View style={styles.iconBox}>
-                  {renderAccountIcon(acc.name)}
+                  {renderAccountIcon(acc)}
                 </View>
                 <View style={styles.textContainer}>
                   <AppText style={styles.accountName} numberOfLines={1}>
                     {acc.name.toUpperCase()}
                   </AppText>
                   <AppText style={styles.txnSubtitle} numberOfLines={1}>
-                    {acc.txnCountThisMonth} txns this month
+                    {acc.txnCountThisMonth} txn{acc.txnCountThisMonth !== 1 ? 's' : ''} this month
                   </AppText>
                 </View>
               </View>
 
               {/* Right side balance & change status */}
               <View style={styles.rightContent}>
-                {isDue ? (
-                  <>
-                    <AppText style={styles.dueBalanceText}>
-                      Due: {`${sym}${formattedDue}`}
-                    </AppText>
-                    <View style={styles.duePill}>
-                      <AppText style={styles.duePillText}>
-                        ↘ -{`${sym}${formattedChange}`}
-                      </AppText>
-                    </View>
-                  </>
-                ) : isPositive ? (
-                  <>
-                    <AppText style={styles.positiveBalanceText}>
-                      {`${sym}${formattedBalance}`}
-                    </AppText>
-                    <View style={styles.positivePill}>
-                      <AppText style={styles.positivePillText}>
-                        ↗ +{`${sym}${formattedChange}`}
-                      </AppText>
-                    </View>
-                  </>
+                {isCredit ? (
+                  <AppText style={styles.dueBalanceText}>
+                    {(acc.dueAmount || 0) > 0 ? `Due: ${formatAmount(acc.dueAmount || 0)}` : `Due: ${sym}0`}
+                  </AppText>
                 ) : (
-                  <>
-                    <AppText style={styles.neutralBalanceText}>
-                      {`${sym}${formattedBalance}`}
+                  <AppText style={styles.positiveBalanceText}>
+                    {formatAmount(acc.balance)}
+                  </AppText>
+                )}
+
+                {isOutflow ? (
+                  <View style={styles.duePill}>
+                    <AppText style={styles.duePillText}>
+                      ↘ -{formatAmount(Math.abs(acc.monthlyChange))}
                     </AppText>
-                    <AppText style={styles.noChangeText}>No change</AppText>
-                  </>
+                  </View>
+                ) : isInflow ? (
+                  <View style={styles.positivePill}>
+                    <AppText style={styles.positivePillText}>
+                      ↗ +{formatAmount(Math.abs(acc.monthlyChange))}
+                    </AppText>
+                  </View>
+                ) : (
+                  <AppText style={styles.noChangeText}>No change</AppText>
                 )}
               </View>
             </TouchableOpacity>

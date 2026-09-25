@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   StyleSheet,
@@ -17,7 +17,7 @@ import {
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ArrowRightLeft,
@@ -69,6 +69,7 @@ const ROTATING_SEARCH_PLACEHOLDERS = [
 export const ExpenseLedger: React.FC = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const scrollRef = useRef<ScrollView>(null);
   const {
     accounts,
     categories,
@@ -78,6 +79,7 @@ export const ExpenseLedger: React.FC = () => {
     smartSearchQuery,
     selectedTransactionIds,
     currencySymbol,
+    formatAmount,
     setActiveAccountFilter,
     setSmartSearchQuery,
     getFilteredTransactions,
@@ -90,6 +92,7 @@ export const ExpenseLedger: React.FC = () => {
   } = useExpenseStore();
 
   const [isSelectMode, setIsSelectMode] = useState(false);
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('All');
   const [editingTx, setEditingTx] = useState<ExpenseTransaction | null>(null);
   const [selectedSplitTx, setSelectedSplitTx] = useState<ExpenseTransaction | null>(null);
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
@@ -102,6 +105,16 @@ export const ExpenseLedger: React.FC = () => {
   const animSearch = useRef(new Animated.Value(1)).current;
   const animFilters = useRef(new Animated.Value(1)).current;
   const animList = useRef(new Animated.Value(1)).current;
+
+  // Reset scroll to top on tab focus
+  useFocusEffect(
+    useCallback(() => {
+      const rafId = requestAnimationFrame(() => {
+        scrollRef.current?.scrollTo({ y: 0, animated: false });
+      });
+      return () => cancelAnimationFrame(rafId);
+    }, [])
+  );
 
   // Rotate smart search placeholder smoothly every 4 seconds
   useEffect(() => {
@@ -204,8 +217,32 @@ export const ExpenseLedger: React.FC = () => {
   const aiResult = useMemo(() => getSmartSearchResult(), [transactions, activeAccountFilter, smartSearchQuery, accounts, categories]);
 
   const filteredTxs = useMemo(() => {
-    return getFilteredTransactions();
-  }, [transactions, activeAccountFilter, smartSearchQuery, accounts, categories]);
+    let list = getFilteredTransactions();
+    if (selectedCategoryFilter !== 'All') {
+      list = list.filter((t) => t.categoryId === selectedCategoryFilter);
+    }
+    return list;
+  }, [transactions, activeAccountFilter, smartSearchQuery, accounts, categories, selectedCategoryFilter]);
+
+  const categoryFilterDropdownActions: MenuAction[] = useMemo(() => {
+    const isAll = selectedCategoryFilter === 'All';
+    return [
+      {
+        id: 'All',
+        title: 'All Categories',
+        image: 'tag.fill' as any,
+        state: isAll ? 'on' : 'off',
+      },
+      ...categories
+        .filter((c) => c.id !== 'cat_income')
+        .map((c) => ({
+          id: c.id,
+          title: c.name,
+          image: 'tag' as any,
+          state: (selectedCategoryFilter === c.id ? 'on' : 'off') as 'on' | 'off',
+        })),
+    ];
+  }, [categories, selectedCategoryFilter]);
 
   const getCategoryObj = (catId: string) => {
     return categories.find((c) => c.id === catId) || categories[0];
@@ -232,10 +269,24 @@ export const ExpenseLedger: React.FC = () => {
 
   const accountFilterList = ['All', ...accounts.map((a) => a.name)];
 
-  // Group All Transactions by Date and Folder (No Pagination Limit)
-  const dateGrouped = useMemo(() => {
-    const groups: Record<string, LedgerGroupItem[]> = {};
-    filteredTxs.forEach((tx) => {
+  // Sort All Transactions Strictly Reverse-Chronologically (Newest Date First)
+  const sortedFilteredTxs = useMemo(() => {
+    return [...filteredTxs].sort((a, b) => {
+      const timeA = new Date(a.date).getTime();
+      const timeB = new Date(b.date).getTime();
+      if (timeB !== timeA) {
+        return timeB - timeA;
+      }
+      return b.id.localeCompare(a.id);
+    });
+  }, [filteredTxs]);
+
+  // Group All Transactions by Date and Folder with Guaranteed Descending Date Order
+  const dateGroups = useMemo(() => {
+    const groupsMap = new Map<string, { dateHeading: string; items: LedgerGroupItem[] }>();
+
+    sortedFilteredTxs.forEach((tx) => {
+      const dateKey = tx.date; // e.g. "2026-09-25"
       const dateObj = new Date(tx.date);
       const dateHeading = dateObj
         .toLocaleDateString('en-US', {
@@ -245,13 +296,15 @@ export const ExpenseLedger: React.FC = () => {
         })
         .toUpperCase();
 
-      if (!groups[dateHeading]) {
-        groups[dateHeading] = [];
+      if (!groupsMap.has(dateKey)) {
+        groupsMap.set(dateKey, { dateHeading, items: [] });
       }
 
+      const currentGroup = groupsMap.get(dateKey)!;
       const folderKey = tx.folderId || (tx.folderName ? `name_${tx.folderName.toLowerCase()}` : null);
+
       if (folderKey) {
-        const existing = groups[dateHeading].find(
+        const existing = currentGroup.items.find(
           (item) => item.type === 'folder' && item.folderKey === folderKey
         );
         const folderObj = eventFolders.find((f) => f.id === tx.folderId);
@@ -262,7 +315,7 @@ export const ExpenseLedger: React.FC = () => {
           existing.folderTxs.push(tx);
           existing.folderTotal = (existing.folderTotal || 0) + (tx.type === 'expense' ? tx.amount : 0);
         } else {
-          groups[dateHeading].push({
+          currentGroup.items.push({
             type: 'folder',
             folderKey,
             folderName,
@@ -272,14 +325,22 @@ export const ExpenseLedger: React.FC = () => {
           });
         }
       } else {
-        groups[dateHeading].push({
+        currentGroup.items.push({
           type: 'single',
           tx,
         });
       }
     });
-    return groups;
-  }, [filteredTxs, eventFolders]);
+
+    // Return as array sorted strictly by ISO date descending (newest at top)
+    return Array.from(groupsMap.entries())
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([dateKey, val]) => ({
+        dateKey,
+        dateHeading: val.dateHeading,
+        items: val.items,
+      }));
+  }, [sortedFilteredTxs, eventFolders]);
 
   const renderTransactionItem = (tx: ExpenseTransaction, isLast: boolean) => {
     const cat = getCategoryObj(tx.categoryId);
@@ -298,21 +359,22 @@ export const ExpenseLedger: React.FC = () => {
 
     const isSettled = isDebtLend ? tx.isSettled : isDebtBorrow ? tx.isSettled : tx.split?.settled;
 
-    let amountDisplay = `${sym}${tx.amount.toLocaleString('en-IN')}`;
+    const formattedVal = formatAmount(tx.amount);
+    let amountDisplay = formattedVal;
     if (isDebtLend) {
       amountDisplay = isSettled
-        ? `✓ ${sym}${tx.amount.toLocaleString('en-IN')}`
-        : `-${sym}${tx.amount.toLocaleString('en-IN')}`;
+        ? `✓ ${formattedVal}`
+        : `-${formattedVal}`;
     } else if (isDebtBorrow) {
       amountDisplay = isSettled
-        ? `✓ ${sym}${tx.amount.toLocaleString('en-IN')}`
-        : `+${sym}${tx.amount.toLocaleString('en-IN')}`;
+        ? `✓ ${formattedVal}`
+        : `+${formattedVal}`;
     } else if (isExpense) {
-      amountDisplay = `-${sym}${tx.amount.toLocaleString('en-IN')}`;
+      amountDisplay = `-${formattedVal}`;
     } else if (isIncome) {
-      amountDisplay = `+${sym}${tx.amount.toLocaleString('en-IN')}`;
+      amountDisplay = `+${formattedVal}`;
     } else if (isTransfer) {
-      amountDisplay = `⇄ ${sym}${tx.amount.toLocaleString('en-IN')}`;
+      amountDisplay = `⇄ ${formattedVal}`;
     }
 
     const catStats = categoryAverages[tx.categoryId];
@@ -843,6 +905,52 @@ export const ExpenseLedger: React.FC = () => {
           </ScrollView>
         </Animated.View>
 
+        {/* Compact Category Filter Dropdown (Directly below horizontal account/card chips & above date-wise list) */}
+        <View style={styles.categoryFilterRow}>
+          <NativeLiquidMenu
+            title="Filter by Category"
+            actions={categoryFilterDropdownActions}
+            onSelect={(catId) => {
+              Haptics.selectionAsync().catch(() => {});
+              LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+              setSelectedCategoryFilter(catId);
+            }}
+          >
+            <View style={[styles.categoryFilterTrigger, selectedCategoryFilter !== 'All' && styles.categoryFilterTriggerActive]}>
+              <View style={styles.categoryFilterTriggerLeft}>
+                <Tag size={13} color={selectedCategoryFilter !== 'All' ? expenseColors.accentPeach : '#8E919D'} />
+                <AppText
+                  style={[
+                    styles.categoryFilterTriggerText,
+                    selectedCategoryFilter !== 'All' && styles.categoryFilterTriggerTextActive,
+                  ]}
+                  numberOfLines={1}
+                >
+                  {selectedCategoryFilter === 'All'
+                    ? 'All Categories'
+                    : getCategoryObj(selectedCategoryFilter)?.name || 'Category'}
+                </AppText>
+              </View>
+              <ChevronDown size={13} color={selectedCategoryFilter !== 'All' ? expenseColors.accentPeach : '#8E919D'} />
+            </View>
+          </NativeLiquidMenu>
+
+          {selectedCategoryFilter !== 'All' && (
+            <TouchableOpacity
+              style={styles.clearCategoryPill}
+              activeOpacity={0.7}
+              onPress={() => {
+                Haptics.selectionAsync().catch(() => {});
+                LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                setSelectedCategoryFilter('All');
+              }}
+            >
+              <AppText style={styles.clearCategoryPillText}>Reset</AppText>
+              <X size={11} color="#FF9D66" />
+            </TouchableOpacity>
+          )}
+        </View>
+
         {/* Compact Debts & Receivables Summary Bar (Links to /receivables) */}
         {hasPendingDebts && !isSelectMode && (
           <TouchableOpacity
@@ -885,6 +993,7 @@ export const ExpenseLedger: React.FC = () => {
 
       {/* ── INDEPENDENT SCROLLABLE TRANSACTIONS LIST ── */}
       <ScrollView
+        ref={scrollRef}
         style={styles.transactionsScroll}
         contentContainerStyle={[
           styles.transactionsScrollContent,
@@ -914,7 +1023,7 @@ export const ExpenseLedger: React.FC = () => {
             ],
           }}
         >
-          {Object.keys(dateGrouped).length === 0 ? (
+          {dateGroups.length === 0 ? (
             <View style={styles.emptyStateContainer}>
               <View style={styles.emptyIconCircle}>
                 <Search size={22} color={expenseColors.textMuted} />
@@ -941,8 +1050,8 @@ export const ExpenseLedger: React.FC = () => {
               )}
             </View>
           ) : (
-            Object.entries(dateGrouped).map(([dateHeading, items]) => (
-              <View key={dateHeading} style={styles.dateGroupContainer}>
+            dateGroups.map(({ dateKey, dateHeading, items }) => (
+              <View key={dateKey} style={styles.dateGroupContainer}>
                 {/* Centered Date Header */}
                 <AppText style={styles.dateHeadingText}>{dateHeading}</AppText>
 
@@ -1286,6 +1395,61 @@ const styles = StyleSheet.create({
   },
   filterTextInactive: {
     color: '#7E8394',
+  },
+
+  // ── Compact Category Filter Dropdown (Directly below horizontal account chips) ──
+  categoryFilterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    marginBottom: 14,
+  },
+  categoryFilterTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    backgroundColor: '#171922',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  categoryFilterTriggerActive: {
+    backgroundColor: 'rgba(255, 157, 102, 0.12)',
+    borderColor: 'rgba(255, 157, 102, 0.3)',
+  },
+  categoryFilterTriggerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  categoryFilterTriggerText: {
+    color: '#8E919D',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  categoryFilterTriggerTextActive: {
+    color: '#FF9D66',
+  },
+  clearCategoryPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(255, 157, 102, 0.1)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 157, 102, 0.2)',
+  },
+  clearCategoryPillText: {
+    color: '#FF9D66',
+    fontSize: 11,
+    fontWeight: '700',
   },
 
   // ── Date Group Header (Centered, matching exact reference) ──

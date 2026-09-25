@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
-import { SlidersHorizontal, Plus, Scan } from 'lucide-react-native';
-import { AppText } from '@/components/ui';
+import { SlidersHorizontal, Plus } from 'lucide-react-native';
+import { AppText, ProfileAvatar } from '@/components/ui';
 import { useSettingsStore } from '@/store/useSettingsStore';
 import { expenseColors } from '@/constants/expenseColors';
 
@@ -14,7 +14,7 @@ export const ExpenseHeader: React.FC<ExpenseHeaderProps> = ({
   onAddPress,
   onFilterPress,
 }) => {
-  const { userName } = useSettingsStore();
+  const { userName, userAvatarId } = useSettingsStore();
 
   const nameToUse = userName && userName.trim().length > 0 ? userName.trim() : 'Expense Tracker';
   const parts = nameToUse.split(/\s+/);
@@ -25,9 +25,12 @@ export const ExpenseHeader: React.FC<ExpenseHeaderProps> = ({
     <View style={styles.container}>
       {/* Left side profile/app icon & greeting */}
       <View style={styles.leftSection}>
-        <View style={styles.appIconContainer}>
-          <Scan size={22} color="#0F1015" strokeWidth={2.2} />
-        </View>
+        <ProfileAvatar
+          avatarId={userAvatarId}
+          name={userName}
+          size={46}
+          showBorder={true}
+        />
 
         <View style={styles.nameContainer}>
           <AppText style={styles.greetingText}>

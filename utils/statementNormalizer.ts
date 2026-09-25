@@ -13,6 +13,8 @@ export interface StagedStatementTxn {
   categoryConfidence: 'high' | 'medium' | 'low';
   accountName: string;
   accountId?: string;
+  toAccountId?: string;
+  toAccountName?: string;
   refNo?: string;
   balance?: number;
   isDuplicate: boolean;
@@ -35,6 +37,8 @@ export interface NormalizedStatementResult {
   accountNumberMasked?: string;
   statementPeriod?: string;
   reconciliation: StatementReconciliation;
+  accountBalances?: Record<string, number>;
+  accountDueAmounts?: Record<string, number>;
   accountsDetected: string[];
   transactions: StagedStatementTxn[];
   duplicateCount: number;
@@ -214,11 +218,14 @@ export function normalizeStatementData(
   let closingBalance: number | undefined;
 
   const accountsDetectedSet = new Set<string>();
+  const accountBalances: Record<string, number> = {};
+  const accountDueAmounts: Record<string, number> = {};
   const stagedTxs: StagedStatementTxn[] = [];
   let currentAccountName = existingAccounts[0]?.name || 'Primary Account';
 
   // Helper to match account name against existing accounts
-  function resolveAccountId(accName: string): string {
+  function resolveAccountId(accName: string): string | undefined {
+    if (!accName) return undefined;
     const directMatch = existingAccounts.find(
       (a) => a.name.toLowerCase() === accName.toLowerCase()
     );
@@ -232,7 +239,7 @@ export function normalizeStatementData(
     );
     if (partialMatch) return partialMatch.id;
 
-    return existingAccounts[0]?.id || 'acc_default';
+    return undefined;
   }
 
   // ══════════════════════════════════════════════════════════
@@ -263,29 +270,54 @@ export function normalizeStatementData(
 
       // 3. Statement Period detection (e.g. "01 Sep 2026 to 25 Sep 2026")
       const periodMatch = lineStr.match(
-        /(\d{1,2}[\s\-/]+[A-Za-z]{3}[\s\-/]+\d{2,4}|\d{1,2}[\s\-/]+\d{1,2}[\s\-/]+\d{2,4})\s*(?:Ñ|to|-|–)\s*(\d{1,2}[\s\-/]+[A-Za-z]{3}[\s\-/]+\d{2,4}|\d{1,2}[\s\-/]+\d{1,2}[\s\-/]+\d{2,4})/i
+        /(\d{1,2}[\s\-/]+[A-Za-z]{3}[\s\-/]+\d{2,4}|\d{1,2}[\s\-/]+\d{1,2}[\s\-/]+\d{2,4})\s*(?:Ñ|to|-|–|—|through)\s*(\d{1,2}[\s\-/]+[A-Za-z]{3}[\s\-/]+\d{2,4}|\d{1,2}[\s\-/]+\d{1,2}[\s\-/]+\d{2,4})/i
       );
       if (periodMatch && !statementPeriod) {
         statementPeriod = `${periodMatch[1]} to ${periodMatch[2]}`;
       }
 
       // 4. Multi-Account Section header detection (e.g. "Amazon Pay wallet 1 transactions", "Slice 13 transactions")
-      const accHeaderMatch = lineStr.match(/^([A-Za-z0-9\s]+?)\s+(\d+)\s+transactions/i);
+      const accHeaderMatch = lineStr.match(/^([A-Za-z0-9\s/]+?)\s+(\d+)\s+transactions/i);
       if (accHeaderMatch) {
         currentAccountName = accHeaderMatch[1].trim();
         accountsDetectedSet.add(currentAccountName);
         continue;
       }
 
-      // 5. Opening / Closing Balance detection
-      const openBalMatch = lineStr.match(/opening\s+balance[:\s]+(?:₹|\$|INR)?\s*([0-9,]+(?:\.[0-9]+)?)/i);
-      if (openBalMatch && openingBalance === undefined) {
-        openingBalance = parseFloat(openBalMatch[1].replace(/,/g, ''));
+      // 5. Opening / Closing Balance detection per account
+      if (/closing\s+balance/i.test(lineStr)) {
+        let amtStr = '';
+        const isNegative = lineStr.includes('-') || lineStr.toLowerCase().includes('dr');
+        for (const it of row.items) {
+          if (it.text.includes('₹') || it.text.includes('$') || /^[0-9,.]+$/.test(it.text)) {
+            amtStr += it.text.replace(/[₹$,\s]/g, '');
+          }
+        }
+        const val = parseFloat(amtStr);
+        if (!isNaN(val)) {
+          closingBalance = val;
+          const isCreditCard = /axis|credit|card|zone/i.test(currentAccountName);
+          if (isCreditCard) {
+            accountDueAmounts[currentAccountName] = val;
+          } else if (!isNegative) {
+            accountBalances[currentAccountName] = val;
+          }
+        }
+        continue;
       }
 
-      const closeBalMatch = lineStr.match(/closing\s+balance[:\s]+(?:₹|\$|INR)?\s*([0-9,]+(?:\.[0-9]+)?)/i);
-      if (closeBalMatch) {
-        closingBalance = parseFloat(closeBalMatch[1].replace(/,/g, ''));
+      if (/opening\s+balance/i.test(lineStr)) {
+        let amtStr = '';
+        for (const it of row.items) {
+          if (it.text.includes('₹') || it.text.includes('$') || /^[0-9,.]+$/.test(it.text)) {
+            amtStr += it.text.replace(/[₹$,\s]/g, '');
+          }
+        }
+        const val = parseFloat(amtStr);
+        if (!isNaN(val)) {
+          openingBalance = val;
+        }
+        continue;
       }
 
       // 6. Transaction Row Detection
@@ -335,10 +367,27 @@ export function normalizeStatementData(
           lineStr.toLowerCase().includes('refund') ||
           lineStr.toLowerCase().includes('deposit');
 
-        // Check for Internal Self-Transfer / ATM
+        // Check for Internal Self-Transfer / Card Payment / ATM
         let txnType: TransactionType = isIncome ? 'income' : 'expense';
-        if (/atm\s+wdl|atm\s+cash|self\s+transfer|transfer\s+to\s+self|fund\s+transfer/i.test(lineStr)) {
+        let toAccName: string | undefined;
+
+        if (
+          /atm\s+wdl|atm\s+cash|self\s*transfer|transfer\s+to\s+self|fund\s*transfer|card\s*bill\s*payment|credit\s*card\s*payment|payment\s+to\s+card|neft\s+to\s+self|imps\s+to\s+self|\btransfer\b|\btrf\b/i.test(lineStr) ||
+          row.items.some((it) => /^transfer$/i.test(it.text.trim()) || /^self\s*transfer$/i.test(it.text.trim()))
+        ) {
           txnType = 'transfer';
+
+          // Detect target account if mentioned
+          const allKnownNames = [...existingAccounts.map((a) => a.name), ...Array.from(accountsDetectedSet)];
+          for (const known of allKnownNames) {
+            if (
+              known.toLowerCase() !== currentAccountName.toLowerCase() &&
+              new RegExp(`\\b${known}\\b`, 'i').test(lineStr)
+            ) {
+              toAccName = known;
+              break;
+            }
+          }
         }
 
         // Extract narration tokens (exclude dates, amounts, "Debit", "Credit", dashes)
@@ -403,6 +452,8 @@ export function normalizeStatementData(
           categoryConfidence: confidence,
           accountName: currentAccountName,
           accountId: targetAccId,
+          toAccountId: toAccName ? resolveAccountId(toAccName) : undefined,
+          toAccountName: toAccName,
           balance: parsedBalance,
           isDuplicate,
           compositeHash,
@@ -565,6 +616,8 @@ export function normalizeStatementData(
       isReconciled,
       reconciledDiff,
     },
+    accountBalances,
+    accountDueAmounts,
     accountsDetected: Array.from(accountsDetectedSet),
     transactions: stagedTxs,
     duplicateCount,
