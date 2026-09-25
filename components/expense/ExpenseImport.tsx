@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -7,7 +7,6 @@ import {
   Platform,
   Alert,
   ActivityIndicator,
-  Modal,
   Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -17,13 +16,9 @@ import {
   ChevronDown,
   CheckCircle,
   FileText,
-  X,
   ArrowRight,
-  CheckSquare,
-  Square,
-  Sparkles,
-  Tag,
-  Clock,
+  ShieldCheck,
+  FileSpreadsheet,
 } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
@@ -33,192 +28,42 @@ import * as Haptics from 'expo-haptics';
 import { AppText, NativeLiquidMenu } from '@/components/ui';
 import { MenuAction } from '@expo/ui/community/menu';
 import { useExpenseStore } from '@/store/useExpenseStore';
-import { FixedBottomNav } from './FixedBottomNav';
 import { expenseColors } from '@/constants/expenseColors';
-import { ExpenseCategory } from '@/types/expense';
-
-interface ParsedStagedTxn {
-  id: string;
-  selected: boolean;
-  date: string;
-  amount: number;
-  type: 'expense' | 'income';
-  categoryId: string;
-  note: string;
-  rawText?: string;
-}
-
-// Keyword-based auto-categorizer for Indian & global merchants
-function guessCategory(narration: string, categories: ExpenseCategory[]): string {
-  const text = narration.toLowerCase();
-
-  // Food & Dining
-  if (/swiggy|zomato|mcdonald|kfc|starbucks|burger|pizza|cafe|restaurant|hotel|bhojanalay|blinkit|zepto|instamart|bakery|diner|food|chai|tea|coffee/.test(text)) {
-    const foodCat = categories.find((c) => c.id === 'cat_food' || c.name.toLowerCase().includes('food'));
-    if (foodCat) return foodCat.id;
-  }
-
-  // Transport & Travel
-  if (/uber|ola|rapido|metro|fuel|petrol|diesel|shell|hpcl|bpcl|irctc|flight|indigo|airindia|toll|fastag|parking|auto|cab|bus|railway|transport/.test(text)) {
-    const transCat = categories.find((c) => c.id === 'cat_trans' || c.name.toLowerCase().includes('trans'));
-    if (transCat) return transCat.id;
-  }
-
-  // Shopping & Ecommerce
-  if (/amazon|flipkart|myntra|zara|h&m|nykaa|meesho|ajio|croma|reliance|retail|apple|croma|decathlon|store|mart|mall|cloth|apparel/.test(text)) {
-    const shopCat = categories.find((c) => c.id === 'cat_shop' || c.name.toLowerCase().includes('shop'));
-    if (shopCat) return shopCat.id;
-  }
-
-  // Entertainment & Subscriptions
-  if (/netflix|spotify|prime|hotstar|youtube|bookmyshow|pvr|inox|steam|playstation|movie|cinema|game|disney/.test(text)) {
-    const entCat = categories.find((c) => c.id === 'cat_ent' || c.name.toLowerCase().includes('ent'));
-    if (entCat) return entCat.id;
-  }
-
-  // Utilities & Bills
-  if (/electricity|bescom|tata power|airtel|jio|vi |vodafone|broadband|wifi|water|gas|cylinder|bill|recharge|dth/.test(text)) {
-    const utilCat = categories.find((c) => c.id === 'cat_util' || c.name.toLowerCase().includes('util'));
-    if (utilCat) return utilCat.id;
-  }
-
-  // Cigarettes / Habits
-  if (/smoke|cig|paan|tobacco|vape/.test(text)) {
-    const cigCat = categories.find((c) => c.id === 'cat_cig' || c.name.toLowerCase().includes('cig'));
-    if (cigCat) return cigCat.id;
-  }
-
-  // Income / Salary
-  if (/salary|interest|dividend|credit|refund|cashback|bonus|payroll/.test(text)) {
-    const incCat = categories.find((c) => c.id === 'cat_income' || c.name.toLowerCase().includes('income'));
-    if (incCat) return incCat.id;
-  }
-
-  return categories[0]?.id || 'cat_shop';
-}
+import { parsePdfDocument, base64ToUint8Array, isPdfEncrypted } from '@/utils/pdfParser';
+import {
+  normalizeStatementData,
+  NormalizedStatementResult,
+  StagedStatementTxn,
+} from '@/utils/statementNormalizer';
+import { StatementReviewModal } from './StatementReviewModal';
+import { ExpenseAccount } from '@/types/expense';
 
 export const ExpenseImport: React.FC = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { accounts, categories, addTransaction, currencySymbol } = useExpenseStore();
+  const {
+    accounts,
+    categories,
+    transactions,
+    addBatchTransactions,
+    currencySymbol,
+    learnedMerchantRules,
+  } = useExpenseStore();
   const sym = currencySymbol || '₹';
 
   const [selectedAccount, setSelectedAccount] = useState<string>('');
   const [importStatus, setImportStatus] = useState<'idle' | 'uploading' | 'processing' | 'success'>('idle');
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
+  const [importedTxnCount, setImportedTxnCount] = useState<number>(0);
+  const [importedTotalAmount, setImportedTotalAmount] = useState<number>(0);
 
-  // Staged transactions review modal state
-  const [stagedTransactions, setStagedTransactions] = useState<ParsedStagedTxn[]>([]);
+  // Staged Statement Review Result
+  const [parsedStatementResult, setParsedStatementResult] = useState<NormalizedStatementResult | null>(null);
   const [isReviewModalVisible, setIsReviewModalVisible] = useState<boolean>(false);
-  const [stagedAccountId, setStagedAccountId] = useState<string>(accounts[0]?.id || '');
 
   const animHeader = useRef(new Animated.Value(1)).current;
   const animDropzone = useRef(new Animated.Value(1)).current;
   const animAccount = useRef(new Animated.Value(1)).current;
-
-  const selectedStagedCount = useMemo(() => {
-    return stagedTransactions.filter((t) => t.selected).length;
-  }, [stagedTransactions]);
-
-  const selectedStagedTotal = useMemo(() => {
-    return stagedTransactions
-      .filter((t) => t.selected)
-      .reduce((sum, t) => sum + t.amount, 0);
-  }, [stagedTransactions]);
-
-  // Universal Bank Statement / CSV / PDF Parser Engine
-  const parseRawContentToStaged = (content: string, fileName: string): ParsedStagedTxn[] => {
-    const lines = content.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
-    const results: ParsedStagedTxn[] = [];
-    const todayStr = new Date().toISOString().split('T')[0];
-
-    // Check if standard app export format
-    const isStandardHeader = lines[0]?.toLowerCase().includes('id') && lines[0]?.toLowerCase().includes('category');
-    const startIdx = isStandardHeader || lines[0]?.toLowerCase().includes('amount') || lines[0]?.toLowerCase().includes('date') ? 1 : 0;
-
-    for (let i = startIdx; i < lines.length; i++) {
-      const line = lines[i];
-      if (!line || line.length < 5) continue;
-
-      // Handle CSV comma split with quotes
-      const parts = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || line.split(',');
-      const cleanParts = parts.map((p) => p.replace(/^"|"$/g, '').trim());
-
-      let amount = 0;
-      let date = todayStr;
-      let note = `Imported: ${fileName}`;
-      let isIncome = false;
-      let categoryId = categories[0]?.id || 'cat_shop';
-
-      // 1. Standard format matching
-      if (isStandardHeader && cleanParts.length >= 5) {
-        date = cleanParts[1] || todayStr;
-        amount = Math.abs(parseFloat(cleanParts[2])) || 0;
-        const typeStr = cleanParts[3]?.toLowerCase();
-        isIncome = typeStr === 'income';
-        const catMatch = categories.find((c) => c.id === cleanParts[4] || c.name.toLowerCase() === cleanParts[4]?.toLowerCase());
-        if (catMatch) categoryId = catMatch.id;
-        if (cleanParts[6]) note = cleanParts[6];
-      } else {
-        // 2. Multi-Bank Statement Regex Heuristics (HDFC, SBI, ICICI, Axis, Slice, Cred, PhonePe, Paytm)
-        // Date detector (DD/MM/YYYY, YYYY-MM-DD, DD-MM-YYYY, DD MMM YYYY)
-        const dateMatch = line.match(/(\d{4}[-/]\d{2}[-/]\d{2}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\d{1,2}\s+[A-Za-z]{3}\s+\d{2,4})/);
-        if (dateMatch) {
-          const rawDate = dateMatch[1];
-          const dParts = rawDate.split(/[-/]/);
-          if (dParts.length === 3) {
-            if (dParts[0].length === 4) {
-              date = `${dParts[0]}-${dParts[1].padStart(2, '0')}-${dParts[2].padStart(2, '0')}`;
-            } else {
-              const yr = dParts[2].length === 2 ? `20${dParts[2]}` : dParts[2];
-              date = `${yr}-${dParts[1].padStart(2, '0')}-${dParts[0].padStart(2, '0')}`;
-            }
-          }
-        }
-
-        // Numbers / Amounts extraction (dates stripped first so a day/year like
-        // "22" or "2026" is never mistaken for the amount as the leading figure)
-        const lineWithoutDate = line.replace(/(\d{4}[-/]\d{2}[-/]\d{2}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\d{1,2}\s+[A-Za-z]{3}\s+\d{2,4})/g, ' ');
-        const numbers = lineWithoutDate.match(/(?:₹|\$|INR)?\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]{1,2})?|[0-9]+(?:\.[0-9]{1,2})?)/g) || [];
-        const cleanNums = numbers
-          .map((n) => parseFloat(n.replace(/[₹$, INR\s]/g, '')))
-          .filter((n) => !isNaN(n) && n > 0 && n < 10000000);
-
-        if (cleanNums.length > 0) {
-          // In standard bank statements, withdrawal is before balance
-          amount = cleanNums[0];
-          if (cleanNums.length >= 2 && line.toLowerCase().includes('cr') && !line.toLowerCase().includes('dr')) {
-            isIncome = true;
-          }
-        }
-
-        // Text narration
-        const cleanedText = line.replace(/(\d{4}[-/]\d{2}[-/]\d{2}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4})/g, '').replace(/[0-9,.]+/g, '').replace(/[|;,\t]/g, ' ').trim();
-        if (cleanedText.length > 2) {
-          note = cleanedText.slice(0, 50).trim();
-        }
-
-        categoryId = guessCategory(note || line, categories);
-      }
-
-      if (amount > 0) {
-        results.push({
-          id: `staged_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`,
-          selected: true,
-          date,
-          amount,
-          type: isIncome ? 'income' : 'expense',
-          categoryId,
-          note: note.toUpperCase(),
-          rawText: line,
-        });
-      }
-    }
-
-    // No mock data: if nothing was parsed from the real file the caller surfaces
-    // a clear "could not detect" message instead of inventing transactions.
-    return results;
-  };
 
   const handlePickDocument = async () => {
     if (accounts.length === 0) {
@@ -237,7 +82,13 @@ export const ExpenseImport: React.FC = () => {
       Haptics.selectionAsync();
       setImportStatus('uploading');
       const result = await DocumentPicker.getDocumentAsync({
-        type: ['text/csv', 'text/comma-separated-values', 'application/csv', 'text/plain'],
+        type: [
+          'application/pdf',
+          'text/csv',
+          'text/comma-separated-values',
+          'application/csv',
+          'text/plain',
+        ],
         copyToCacheDirectory: true,
       });
 
@@ -246,36 +97,80 @@ export const ExpenseImport: React.FC = () => {
         setUploadedFileName(file.name);
         setImportStatus('processing');
 
-        let rawContent = '';
-        if (file.uri) {
+        const isPdf =
+          file.name.toLowerCase().endsWith('.pdf') ||
+          file.mimeType === 'application/pdf';
+
+        let normalizedResult: NormalizedStatementResult;
+
+        if (isPdf) {
+          // PDF Parsing Pipeline
           try {
-            rawContent = await FileSystem.readAsStringAsync(file.uri, {
-              encoding: FileSystem.EncodingType.UTF8,
+            const base64Data = await FileSystem.readAsStringAsync(file.uri, {
+              encoding: FileSystem.EncodingType.Base64,
             });
-          } catch (readErr) {
-            console.warn('Failed to read file as text:', readErr);
+            const uint8Data = base64ToUint8Array(base64Data);
+
+            if (isPdfEncrypted(uint8Data)) {
+              setImportStatus('idle');
+              Alert.alert(
+                'Password Protected PDF',
+                'This bank statement is encrypted with a password. Please unlock the PDF or export an unencrypted statement to import.'
+              );
+              return;
+            }
+
+            const parsedDoc = parsePdfDocument(uint8Data);
+            normalizedResult = normalizeStatementData(
+              { pdfRows: parsedDoc.allRows, fileName: file.name },
+              accounts,
+              categories,
+              transactions,
+              learnedMerchantRules
+            );
+          } catch (pdfErr) {
+            console.warn('PDF Parsing Error:', pdfErr);
             setImportStatus('idle');
             Alert.alert(
-              'Unsupported File',
-              'Only CSV / text bank statements can be imported. PDFs, spreadsheets and image receipts cannot be read on-device.'
+              'PDF Parsing Error',
+              'Could not extract transactions from this PDF. Please ensure it is a digital bank statement.'
+            );
+            return;
+          }
+        } else {
+          // CSV / Plain Text Pipeline
+          try {
+            const rawContent = await FileSystem.readAsStringAsync(file.uri, {
+              encoding: FileSystem.EncodingType.UTF8,
+            });
+            normalizedResult = normalizeStatementData(
+              { csvContent: rawContent, fileName: file.name },
+              accounts,
+              categories,
+              transactions,
+              learnedMerchantRules
+            );
+          } catch (csvErr) {
+            console.warn('CSV Reading Error:', csvErr);
+            setImportStatus('idle');
+            Alert.alert(
+              'File Error',
+              'Could not read the statement file.'
             );
             return;
           }
         }
 
-        const parsed = parseRawContentToStaged(rawContent, file.name);
-        if (parsed.length === 0) {
+        if (normalizedResult.transactions.length === 0) {
           setImportStatus('idle');
           Alert.alert(
-            'No Transactions Found',
-            'We could not detect any transactions in this file. Make sure it is a standard CSV bank statement with columns like date, narration, amount and balance.'
+            'No Transactions Detected',
+            'We could not find any recognizable transaction records in this statement. Please make sure the statement contains dates, amounts, and descriptions.'
           );
           return;
         }
 
-        setStagedTransactions(parsed);
-        const targetAcc = accounts.find((a) => a.name === selectedAccount) || accounts[0];
-        setStagedAccountId(targetAcc ? targetAcc.id : accounts[0]?.id || '');
+        setParsedStatementResult(normalizedResult);
         setImportStatus('idle');
         setIsReviewModalVisible(true);
       } else {
@@ -287,59 +182,68 @@ export const ExpenseImport: React.FC = () => {
     }
   };
 
-  const handlePickReceipt = async () => {
-    Alert.alert(
-      'Receipt Scanning Unavailable',
-      'Photo receipts cannot be parsed on-device yet. Export your statement as CSV and import that instead.'
-    );
-    setImportStatus('idle');
-  };
-
-  const toggleStagedSelect = (id: string) => {
-    Haptics.selectionAsync();
-    setStagedTransactions((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, selected: !t.selected } : t))
-    );
-  };
-
-  const toggleSelectAll = () => {
-    Haptics.selectionAsync();
-    const allSelected = stagedTransactions.every((t) => t.selected);
-    setStagedTransactions((prev) => prev.map((t) => ({ ...t, selected: !allSelected })));
-  };
-
-  const cycleCategory = (txnId: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    setStagedTransactions((prev) =>
-      prev.map((t) => {
-        if (t.id !== txnId) return t;
-        const currentIdx = categories.findIndex((c) => c.id === t.categoryId);
-        const nextIdx = (currentIdx + 1) % categories.length;
-        return { ...t, categoryId: categories[nextIdx]?.id || t.categoryId };
-      })
-    );
-  };
-
-  const handleConfirmImport = () => {
-    const toImport = stagedTransactions.filter((t) => t.selected);
-    if (toImport.length === 0) {
-      Alert.alert('No Transactions Selected', 'Please select at least one transaction to import.');
+  const handleConfirmBatchImport = (
+    selectedTxs: StagedStatementTxn[],
+    targetAccountId?: string
+  ) => {
+    if (selectedTxs.length === 0) {
+      setIsReviewModalVisible(false);
       return;
     }
 
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    // Identify any newly detected accounts that do not exist yet
+    const newAccountsToCreate: ExpenseAccount[] = [];
+    if (parsedStatementResult?.accountsDetected) {
+      parsedStatementResult.accountsDetected.forEach((detectedName) => {
+        const exists = accounts.some(
+          (a) => a.name.toLowerCase() === detectedName.toLowerCase()
+        );
+        if (!exists && detectedName !== 'Primary Account' && detectedName !== 'Default Account') {
+          const isCredit = /axis|slice|card|zone/i.test(detectedName);
+          newAccountsToCreate.push({
+            id: `acc_${detectedName.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${Date.now()}`,
+            name: detectedName,
+            type: isCredit ? 'credit' : 'savings',
+            balance: 0,
+            dueAmount: isCredit ? 0 : undefined,
+            txnCountThisMonth: 0,
+            monthlyChange: 0,
+            statusType: isCredit ? 'due' : 'positive',
+          });
+        }
+      });
+    }
 
-    toImport.forEach((t) => {
-      addTransaction({
+    const defaultFallbackAccId = targetAccountId || accounts[0]?.id || 'acc_default';
+
+    const txsToInsert = selectedTxs.map((t) => {
+      // Resolve account
+      let accId = t.accountId;
+      if (!accId || accId === 'acc_default') {
+        const matchingNew = newAccountsToCreate.find(
+          (na) => na.name.toLowerCase() === t.accountName.toLowerCase()
+        );
+        if (matchingNew) {
+          accId = matchingNew.id;
+        } else {
+          accId = defaultFallbackAccId;
+        }
+      }
+
+      return {
         amount: t.amount,
         type: t.type,
         categoryId: t.categoryId,
-        accountId: stagedAccountId,
+        accountId: accId,
         date: t.date,
-        note: t.note,
-      });
+        note: t.narration,
+      };
     });
 
+    addBatchTransactions(txsToInsert, newAccountsToCreate);
+
+    setImportedTxnCount(selectedTxs.length);
+    setImportedTotalAmount(selectedTxs.reduce((sum, t) => sum + t.amount, 0));
     setIsReviewModalVisible(false);
     setImportStatus('success');
   };
@@ -382,10 +286,10 @@ export const ExpenseImport: React.FC = () => {
             <AppText style={styles.titleHub}>HUB</AppText>
           </View>
 
-          <AppText style={styles.uploadTitle}>UPLOAD FILES</AppText>
+          <AppText style={styles.uploadTitle}>UNIVERSAL STATEMENT IMPORTER</AppText>
           <AppText style={styles.uploadDescription}>
-            Upload a CSV bank statement.{'\n'}
-            Parsed transactions go to your staging inbox for review before being added.
+            Import PDF or CSV statements from ANY bank.{'\n'}
+            100% on-device AI classification, duplicate detection & balance reconciliation.
           </AppText>
         </Animated.View>
 
@@ -412,17 +316,17 @@ export const ExpenseImport: React.FC = () => {
               <View style={styles.dropzoneInnerContent}>
                 <ActivityIndicator size="large" color={expenseColors.accentPeach} />
                 <AppText style={styles.dropzoneTitle}>
-                  {importStatus === 'uploading' ? 'Reading statement...' : 'Extracting & auto-categorizing...'}
+                  {importStatus === 'uploading' ? 'Reading PDF & CMap encodings...' : 'Normalizing & reconciling statement...'}
                 </AppText>
               </View>
             ) : importStatus === 'success' ? (
               <View style={styles.dropzoneInnerContent}>
                 <CheckCircle size={44} color={expenseColors.accentGreen} strokeWidth={2} />
                 <AppText style={styles.dropzoneTitle}>
-                  Imported {selectedStagedCount} Transaction{selectedStagedCount !== 1 ? 's' : ''}!
+                  Imported {importedTxnCount} Transaction{importedTxnCount !== 1 ? 's' : ''}!
                 </AppText>
                 <AppText style={styles.dropzoneSubtext}>
-                  {uploadedFileName || 'Bank Statement'} added to Ledger
+                  {uploadedFileName || 'Bank Statement'} ({sym}{importedTotalAmount.toLocaleString('en-IN')}) added to Ledger
                 </AppText>
 
                 <View style={styles.successActionsRow}>
@@ -462,14 +366,30 @@ export const ExpenseImport: React.FC = () => {
                 </AppText>
 
                 <AppText style={styles.dropzoneSubtext}>
-                  CSV • TEXT BANK STATEMENTS
+                  PDF • CSV • TEXT BANK STATEMENTS
                 </AppText>
+
+                {/* Privacy & Feature Badges */}
+                <View style={styles.badgesRow}>
+                  <View style={styles.featureBadge}>
+                    <ShieldCheck size={11} color={expenseColors.accentGreen} />
+                    <AppText style={styles.featureBadgeText}>100% On-Device</AppText>
+                  </View>
+                  <View style={styles.featureBadge}>
+                    <FileText size={11} color={expenseColors.accentPeach} />
+                    <AppText style={styles.featureBadgeText}>Multi-Page PDF</AppText>
+                  </View>
+                  <View style={styles.featureBadge}>
+                    <FileSpreadsheet size={11} color="#60A5FA" />
+                    <AppText style={styles.featureBadgeText}>Auto Reconciled</AppText>
+                  </View>
+                </View>
               </View>
             )}
           </TouchableOpacity>
         </Animated.View>
 
-        {/* Account Selection Card */}
+        {/* Default Target Account Card */}
         <Animated.View
           style={[
             styles.accountCard,
@@ -488,7 +408,7 @@ export const ExpenseImport: React.FC = () => {
         >
           <View style={styles.accountHeaderRow}>
             <CreditCard size={18} color={expenseColors.textPrimary} />
-            <AppText style={styles.accountCardTitle}>DEFAULT TARGET ACCOUNT</AppText>
+            <AppText style={styles.accountCardTitle}>DEFAULT FALLBACK ACCOUNT</AppText>
           </View>
 
           {/* Native Liquid Dropdown */}
@@ -496,11 +416,12 @@ export const ExpenseImport: React.FC = () => {
             const accountMenuActions: MenuAction[] = accounts.map((acc) => ({
               id: acc.name,
               title: acc.name,
-              image: (acc.statusType === 'due' || acc.type === 'credit')
-                ? 'creditcard.fill' as any
-                : acc.name.toLowerCase().includes('wallet') || acc.name.toLowerCase().includes('pay')
-                  ? 'wallet.pass.fill' as any
-                  : 'building.columns.fill' as any,
+              image:
+                acc.statusType === 'due' || acc.type === 'credit'
+                  ? ('creditcard.fill' as any)
+                  : acc.name.toLowerCase().includes('wallet') || acc.name.toLowerCase().includes('pay')
+                    ? ('wallet.pass.fill' as any)
+                    : ('building.columns.fill' as any),
               state: (selectedAccount === acc.name ? 'on' : 'off') as 'on' | 'off',
             }));
             return (
@@ -510,14 +431,17 @@ export const ExpenseImport: React.FC = () => {
                 onSelect={(name) => {
                   Haptics.selectionAsync().catch(() => {});
                   setSelectedAccount(name);
-                  const acc = accounts.find((a) => a.name === name);
-                  if (acc) setStagedAccountId(acc.id);
                 }}
                 style={{ width: '100%' }}
               >
                 <View style={styles.dropdownSelector}>
-                  <AppText style={[styles.dropdownSelectedText, !selectedAccount && { color: expenseColors.textMuted }]}>
-                    {selectedAccount || 'Select Account'}
+                  <AppText
+                    style={[
+                      styles.dropdownSelectedText,
+                      !selectedAccount && { color: expenseColors.textMuted },
+                    ]}
+                  >
+                    {selectedAccount || accounts[0]?.name || 'Select Account'}
                   </AppText>
                   <ChevronDown size={18} color={expenseColors.textSubtle} />
                 </View>
@@ -526,161 +450,18 @@ export const ExpenseImport: React.FC = () => {
           })()}
 
           <AppText style={styles.accountCardDescription}>
-            Transactions will be assigned to this account upon import.
+            Used as default when the statement does not specify individual account headers.
           </AppText>
         </Animated.View>
       </ScrollView>
 
-      {/* ══════════════════════════════════════════════════════════
-          INTERACTIVE STAGING & RECONCILIATION REVIEW MODAL
-      ══════════════════════════════════════════════════════════ */}
-      <Modal
+      {/* Interactive Statement Review & Reconciliation Modal */}
+      <StatementReviewModal
         visible={isReviewModalVisible}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setIsReviewModalVisible(false)}
-      >
-        <View style={[styles.modalContainer, { paddingTop: Platform.OS === 'ios' ? 16 : insets.top }]}>
-          {/* Modal Header */}
-          <View style={styles.modalHeader}>
-            <View>
-              <AppText style={styles.modalHeading}>Review & Reconcile</AppText>
-              <AppText style={styles.modalSubheading}>
-                {selectedStagedCount} of {stagedTransactions.length} selected • Total: {sym}{selectedStagedTotal.toLocaleString('en-IN')}
-              </AppText>
-            </View>
-            <TouchableOpacity
-              style={styles.closeCircleBtn}
-              onPress={() => {
-                Haptics.selectionAsync();
-                setIsReviewModalVisible(false);
-              }}
-            >
-              <X size={18} color="#FFFFFF" />
-            </TouchableOpacity>
-          </View>
-
-          {/* Account Destination Selector Bar */}
-          <View style={styles.modalAccountBar}>
-            <AppText style={styles.modalAccountLabel}>Account:</AppText>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-              {accounts.map((acc) => {
-                const isSelected = stagedAccountId === acc.id;
-                return (
-                  <TouchableOpacity
-                    key={acc.id}
-                    style={[
-                      styles.modalAccountPill,
-                      isSelected && styles.modalAccountPillActive,
-                    ]}
-                    onPress={() => {
-                      Haptics.selectionAsync();
-                      setStagedAccountId(acc.id);
-                    }}
-                  >
-                    <AppText
-                      style={[
-                        styles.modalAccountPillText,
-                        isSelected && styles.modalAccountPillTextActive,
-                      ]}
-                    >
-                      {acc.name}
-                    </AppText>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          </View>
-
-          {/* Select All Action Bar */}
-          <View style={styles.modalActionBar}>
-            <TouchableOpacity style={styles.selectAllBtn} onPress={toggleSelectAll}>
-              {stagedTransactions.every((t) => t.selected) ? (
-                <CheckSquare size={16} color={expenseColors.accentPeach} />
-              ) : (
-                <Square size={16} color={expenseColors.textMuted} />
-              )}
-              <AppText style={styles.selectAllText}>
-                {stagedTransactions.every((t) => t.selected) ? 'Deselect All' : 'Select All'}
-              </AppText>
-            </TouchableOpacity>
-            <AppText style={styles.tapHint}>Tap category pill to change</AppText>
-          </View>
-
-          {/* Transactions Staging List */}
-          <ScrollView style={styles.stagedList} showsVerticalScrollIndicator={false}>
-            {stagedTransactions.map((item) => {
-              const cat = categories.find((c) => c.id === item.categoryId) || categories[0];
-              return (
-                <TouchableOpacity
-                  key={item.id}
-                  style={[
-                    styles.stagedItemRow,
-                    !item.selected && { opacity: 0.45 },
-                  ]}
-                  activeOpacity={0.8}
-                  onPress={() => toggleStagedSelect(item.id)}
-                >
-                  {/* Left Checkbox */}
-                  <View style={styles.checkboxArea}>
-                    {item.selected ? (
-                      <CheckSquare size={18} color={expenseColors.accentGreen} />
-                    ) : (
-                      <Square size={18} color={expenseColors.textMuted} />
-                    )}
-                  </View>
-
-                  {/* Middle Info */}
-                  <View style={styles.stagedMiddle}>
-                    <AppText style={styles.stagedNote} numberOfLines={1}>
-                      {item.note}
-                    </AppText>
-                    <View style={styles.stagedMetaRow}>
-                      <Clock size={11} color={expenseColors.textMuted} />
-                      <AppText style={styles.stagedDate}>{item.date}</AppText>
-
-                      {/* Interactive Category Pill */}
-                      <TouchableOpacity
-                        style={[styles.categoryPill, { borderColor: cat.color }]}
-                        onPress={(e) => {
-                          e.stopPropagation();
-                          cycleCategory(item.id);
-                        }}
-                      >
-                        <Tag size={10} color={cat.color} />
-                        <AppText style={[styles.categoryPillText, { color: cat.color }]}>
-                          {cat.name}
-                        </AppText>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-
-                  {/* Right Amount */}
-                  <View style={styles.stagedRight}>
-                    <AppText style={[styles.stagedAmount, item.type === 'income' && { color: expenseColors.accentGreen }]}>
-                      {item.type === 'income' ? '+' : '-'}{sym}{item.amount.toLocaleString('en-IN')}
-                    </AppText>
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-
-          {/* Bottom Confirmation Footer */}
-          <View style={[styles.modalFooter, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-            <TouchableOpacity
-              style={styles.confirmImportBtn}
-              activeOpacity={0.85}
-              onPress={handleConfirmImport}
-            >
-              <Sparkles size={16} color="#0F1015" />
-              <AppText style={styles.confirmImportBtnText}>
-                Import {selectedStagedCount} Transaction{selectedStagedCount !== 1 ? 's' : ''} ({sym}{selectedStagedTotal.toLocaleString('en-IN')})
-              </AppText>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+        onClose={() => setIsReviewModalVisible(false)}
+        result={parsedStatementResult}
+        onConfirmImport={handleConfirmBatchImport}
+      />
     </View>
   );
 };
@@ -743,7 +524,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderWidth: 1,
     borderColor: expenseColors.borderCard,
-    minHeight: 220,
+    minHeight: 230,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -776,6 +557,30 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     letterSpacing: 0.8,
     textAlign: 'center',
+    marginBottom: 14,
+  },
+  badgesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+  },
+  featureBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#1E212B',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  featureBadgeText: {
+    color: expenseColors.textSubtle,
+    fontSize: 10,
+    fontWeight: '700',
   },
   successActionsRow: {
     flexDirection: 'row',
@@ -847,199 +652,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  dropdownOptionsList: {
-    backgroundColor: '#1A1D23',
-    borderRadius: 12,
-    marginBottom: 10,
-    overflow: 'hidden',
-  },
-  dropdownOptionItem: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.04)',
-  },
-  dropdownOptionText: {
-    color: expenseColors.textSubtle,
-    fontSize: 14,
-  },
-  dropdownOptionSelectedText: {
-    color: expenseColors.accentPeach,
-    fontWeight: '700',
-  },
   accountCardDescription: {
     color: expenseColors.textMuted,
     fontSize: 13,
     lineHeight: 18,
-  },
-
-  // ── Modal Staging Styles ──
-  modalContainer: {
-    flex: 1,
-    backgroundColor: '#101114',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.06)',
-  },
-  modalHeading: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  modalSubheading: {
-    color: expenseColors.textSubtle,
-    fontSize: 12,
-    fontWeight: '500',
-    marginTop: 2,
-  },
-  closeCircleBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#232633',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalAccountBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    backgroundColor: '#1A1D23',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.04)',
-  },
-  modalAccountLabel: {
-    color: expenseColors.textMuted,
-    fontSize: 12,
-    fontWeight: '600',
-    marginRight: 10,
-  },
-  modalAccountPill: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-    backgroundColor: '#232633',
-  },
-  modalAccountPillActive: {
-    backgroundColor: expenseColors.accentPeach,
-  },
-  modalAccountPillText: {
-    color: expenseColors.textSubtle,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  modalAccountPillTextActive: {
-    color: '#0F1015',
-    fontWeight: '800',
-  },
-  modalActionBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.04)',
-  },
-  selectAllBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  selectAllText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  tapHint: {
-    color: expenseColors.textMuted,
-    fontSize: 11,
-    fontStyle: 'italic',
-  },
-  stagedList: {
-    flex: 1,
-    paddingHorizontal: 16,
-  },
-  stagedItemRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1A1D23',
-    borderRadius: 16,
-    padding: 14,
-    marginTop: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.04)',
-  },
-  checkboxArea: {
-    marginRight: 10,
-  },
-  stagedMiddle: {
-    flex: 1,
-    gap: 4,
-  },
-  stagedNote: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  stagedMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  stagedDate: {
-    color: expenseColors.textMuted,
-    fontSize: 11,
-  },
-  categoryPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 8,
-    borderWidth: 1,
-    backgroundColor: 'rgba(255,255,255,0.03)',
-  },
-  categoryPillText: {
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  stagedRight: {
-    alignItems: 'flex-end',
-    marginLeft: 8,
-  },
-  stagedAmount: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  modalFooter: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    backgroundColor: '#1A1D23',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.06)',
-  },
-  confirmImportBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: '#FF9D66',
-    borderRadius: 16,
-    paddingVertical: 14,
-  },
-  confirmImportBtnText: {
-    color: '#0F1015',
-    fontSize: 14,
-    fontWeight: '800',
   },
 });

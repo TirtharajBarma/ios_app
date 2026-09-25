@@ -88,8 +88,11 @@ interface ExpenseState {
   setCurrency: (code: string, symbol: string) => void;
   setActiveAccountFilter: (filter: string) => void;
   setSmartSearchQuery: (query: string) => void;
+  learnedMerchantRules: Record<string, string>; // normalized merchant -> categoryId
+  saveLearnedMerchantRule: (merchant: string, categoryId: string) => void;
 
   addTransaction: (tx: Omit<ExpenseTransaction, 'id'>) => void;
+  addBatchTransactions: (txs: Omit<ExpenseTransaction, 'id'>[], newAccounts?: ExpenseAccount[]) => void;
   updateTransaction: (id: string, updates: Partial<ExpenseTransaction>) => void;
   removeTransactions: (ids: string[]) => void;
   updateTransactionsCategory: (ids: string[], categoryId: string) => void;
@@ -290,8 +293,19 @@ export const useExpenseStore = create<ExpenseState>()(
     set({ currencyCode: code, currencySymbol: symbol });
     logAction('settings', `Changed currency to ${code}`, { code });
   },
-  setActiveAccountFilter: (filter) => set({ activeAccountFilter: filter }),
-  setSmartSearchQuery: (query) => set({ smartSearchQuery: query }),
+  setActiveAccountFilter: (filter: string) => set({ activeAccountFilter: filter }),
+  setSmartSearchQuery: (query: string) => set({ smartSearchQuery: query }),
+  learnedMerchantRules: {},
+  saveLearnedMerchantRule: (merchant, categoryId) => {
+    const norm = merchant.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 30);
+    if (!norm) return;
+    set((state) => ({
+      learnedMerchantRules: {
+        ...state.learnedMerchantRules,
+        [norm]: categoryId,
+      },
+    }));
+  },
 
   addTransaction: (txData) => {
     const fromAcc = get().accounts.find((a) => a.id === txData.accountId);
@@ -344,7 +358,6 @@ export const useExpenseStore = create<ExpenseState>()(
         if (newTx.type === 'transfer' && acc.id === newTx.toAccountId) {
           txnCountThisMonth += 1;
           if (isDue) {
-            // Bill payment reduces credit card due amount!
             dueAmount = Math.max(0, dueAmount - newTx.amount);
           } else {
             balance += newTx.amount;
@@ -405,6 +418,114 @@ export const useExpenseStore = create<ExpenseState>()(
       };
     });
     logAction('transaction', 'Added transaction', { id: newTx.id, amount: newTx.amount, type: newTx.type });
+  },
+
+  addBatchTransactions: (txsData, newAccountsList) => {
+    set((state) => {
+      let currentAccounts = [...state.accounts];
+
+      // Add any new accounts detected if not present
+      if (newAccountsList && newAccountsList.length > 0) {
+        newAccountsList.forEach((newAcc) => {
+          if (!currentAccounts.some((a) => a.id === newAcc.id || a.name.toLowerCase() === newAcc.name.toLowerCase())) {
+            currentAccounts.push(newAcc);
+          }
+        });
+      }
+
+      const createdTxs: ExpenseTransaction[] = [];
+
+      for (const txData of txsData) {
+        const fromAcc = currentAccounts.find(
+          (a) => a.id === txData.accountId || a.name.toLowerCase() === txData.accountName?.toLowerCase()
+        );
+        const toAcc = txData.toAccountId ? currentAccounts.find((a) => a.id === txData.toAccountId) : undefined;
+
+        const newTx: ExpenseTransaction = {
+          ...txData,
+          id: genId('tx'),
+          accountId: fromAcc?.id || txData.accountId || currentAccounts[0]?.id || 'acc_default',
+          accountName: fromAcc?.name || txData.accountName,
+          toAccountName: toAcc?.name || txData.toAccountName,
+        };
+        createdTxs.push(newTx);
+      }
+
+      // Recalculate account balances and txn counts in a single batch
+      const updatedAccounts = currentAccounts.map((acc) => {
+        let balance = acc.balance;
+        let dueAmount = acc.dueAmount || 0;
+        let monthlyChange = acc.monthlyChange;
+        let txnCountThisMonth = acc.txnCountThisMonth;
+        const isDue = acc.statusType === 'due' || acc.type === 'credit';
+
+        for (const newTx of createdTxs) {
+          if (newTx.type === 'expense' && acc.id === newTx.accountId) {
+            txnCountThisMonth += 1;
+            if (isDue) {
+              dueAmount += newTx.amount;
+              monthlyChange -= newTx.amount;
+            } else {
+              balance = Math.max(0, balance - newTx.amount);
+              monthlyChange -= newTx.amount;
+            }
+          } else if (newTx.type === 'income' && acc.id === newTx.accountId) {
+            txnCountThisMonth += 1;
+            balance += newTx.amount;
+            monthlyChange += newTx.amount;
+          } else if (newTx.type === 'transfer') {
+            if (acc.id === newTx.accountId) {
+              txnCountThisMonth += 1;
+              if (isDue) dueAmount += newTx.amount;
+              else balance = Math.max(0, balance - newTx.amount);
+            }
+            if (acc.id === newTx.toAccountId) {
+              txnCountThisMonth += 1;
+              if (isDue) dueAmount = Math.max(0, dueAmount - newTx.amount);
+              else balance += newTx.amount;
+            }
+          } else if (newTx.type === 'debt_lend' && acc.id === newTx.accountId) {
+            txnCountThisMonth += 1;
+            if (isDue) {
+              dueAmount += newTx.amount;
+              monthlyChange -= newTx.amount;
+            } else {
+              balance = Math.max(0, balance - newTx.amount);
+              monthlyChange -= newTx.amount;
+            }
+          } else if (newTx.type === 'debt_borrow' && acc.id === newTx.accountId) {
+            txnCountThisMonth += 1;
+            balance += newTx.amount;
+          } else if ((newTx.type === 'vault_deposit' || newTx.type === 'vault_withdraw') && acc.id === newTx.accountId) {
+            txnCountThisMonth += 1;
+            if (newTx.type === 'vault_deposit') {
+              if (isDue) dueAmount += newTx.amount;
+              else balance = Math.max(0, balance - newTx.amount);
+              monthlyChange -= newTx.amount;
+            } else {
+              if (isDue) dueAmount = Math.max(0, dueAmount - newTx.amount);
+              else balance += newTx.amount;
+              monthlyChange += newTx.amount;
+            }
+          }
+        }
+
+        return {
+          ...acc,
+          balance,
+          dueAmount: isDue ? dueAmount : undefined,
+          monthlyChange,
+          txnCountThisMonth,
+          statusType: isDue ? ('due' as const) : ('positive' as const),
+        };
+      });
+
+      return {
+        transactions: [...createdTxs, ...state.transactions],
+        accounts: updatedAccounts,
+      };
+    });
+    logAction('transaction', 'Added batch transactions', { count: txsData.length });
   },
 
   updateTransaction: (id, updates) => {
