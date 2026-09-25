@@ -256,7 +256,7 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
               ]}
             />
             <AppText style={styles.categoryChipName} numberOfLines={1}>
-              {currentCategoryInfo.category.name} {currentCategoryInfo.category.emoji || ''}
+              {currentCategoryInfo.category.name}
             </AppText>
             <AppText style={styles.categoryChipAmount}>
               {sym}{currentCategoryInfo.amount.toLocaleString('en-IN')}
@@ -389,13 +389,13 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   paceBadge: {
-    backgroundColor: 'rgba(52, 211, 153, 0.14)',
+    backgroundColor: 'rgba(112, 214, 188, 0.14)',
     paddingHorizontal: 7,
     paddingVertical: 3,
     borderRadius: 6,
   },
   paceBadgeText: {
-    color: '#34D399',
+    color: expenseColors.accentGreen,
     fontSize: 11,
     lineHeight: 14,
     fontWeight: '700',

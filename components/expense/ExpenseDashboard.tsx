@@ -456,24 +456,24 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   stepDoneBadge: {
-    backgroundColor: 'rgba(92, 228, 154, 0.12)',
+    backgroundColor: 'rgba(112, 214, 188, 0.12)',
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 6,
   },
   stepDoneText: {
-    color: '#5CE49A',
+    color: expenseColors.accentGreen,
     fontSize: 11,
     fontWeight: '700',
   },
   stepReqBadge: {
-    backgroundColor: 'rgba(255, 91, 91, 0.15)',
+    backgroundColor: 'rgba(244, 139, 139, 0.15)',
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 6,
   },
   stepReqText: {
-    color: '#FF5B5B',
+    color: expenseColors.accentRed,
     fontSize: 11,
     fontWeight: '700',
   },

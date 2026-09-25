@@ -44,16 +44,18 @@ import { MenuAction } from '@expo/ui/community/menu';
 import { AppText, NativeLiquidMenu } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
 import { useSubscriptionStore } from '@/store/useSubscriptionStore';
+import * as db from '@/database/database';
 import { expenseColors } from '@/constants/expenseColors';
 import { CategoryIcon, getCategoryBgColor } from './CategoryIcon';
 import { DatePickerModal } from './DatePickerModal';
 import { EditAccountModal } from './EditAccountModal';
 import { format } from 'date-fns';
-import { ExpenseAccount, ExpenseCategory, QuickExpensePreset, SavingsVault } from '@/types/expense';
+import { ExpenseAccount, ExpenseCategory, ExpenseTransaction, QuickExpensePreset, SavingsVault } from '@/types/expense';
 
 interface AddTransactionModalProps {
   visible: boolean;
   onClose: () => void;
+  initialTransaction?: ExpenseTransaction | null;
 }
 
 type TabMode = 'expense' | 'income' | 'transfer' | 'debt';
@@ -63,13 +65,13 @@ type BillingCycle = 'monthly' | 'yearly';
 const SUGGESTED_TAGS = ['🌴 Goa Trip', '🎉 Night Out', '💍 Wedding', '☕ Work Lunch', '🚗 Road Trip'];
 
 export const INCOME_CATEGORIES: ExpenseCategory[] = [
-  { id: 'cat_salary', name: 'Salary', emoji: '💼', color: '#34D399', iconName: 'Briefcase' },
-  { id: 'cat_freelance', name: 'Freelance', emoji: '💻', color: '#60A5FA', iconName: 'Laptop' },
-  { id: 'cat_invest', name: 'Investments', emoji: '📈', color: '#FBBF24', iconName: 'TrendingUp' },
-  { id: 'cat_bonus', name: 'Bonus', emoji: '🎁', color: '#F472B6', iconName: 'Gift' },
-  { id: 'cat_rental', name: 'Rental', emoji: '🏠', color: '#A78BFA', iconName: 'Home' },
-  { id: 'cat_refund', name: 'Refund', emoji: '🔄', color: '#38BDF8', iconName: 'RefreshCw' },
-  { id: 'cat_other_inc', name: 'Other Income', emoji: '💰', color: '#818CF8', iconName: 'Coins' },
+  { id: 'cat_salary', name: 'Salary', emoji: '💼', color: '#8CD9C8', iconName: 'Briefcase' },
+  { id: 'cat_freelance', name: 'Freelance', emoji: '💻', color: '#9DC6EB', iconName: 'Laptop' },
+  { id: 'cat_invest', name: 'Investments', emoji: '📈', color: '#F4CD89', iconName: 'TrendingUp' },
+  { id: 'cat_bonus', name: 'Bonus', emoji: '🎁', color: '#F2AEC4', iconName: 'Gift' },
+  { id: 'cat_rental', name: 'Rental', emoji: '🏠', color: '#C4A7E7', iconName: 'Home' },
+  { id: 'cat_refund', name: 'Refund', emoji: '🔄', color: '#82D0D8', iconName: 'RefreshCw' },
+  { id: 'cat_other_inc', name: 'Other Income', emoji: '💰', color: '#A8B8E8', iconName: 'Coins' },
 ];
 
 const VENDOR_CATEGORY_MAP: Record<string, string> = {
@@ -134,11 +136,6 @@ const VENDOR_CATEGORY_MAP: Record<string, string> = {
   supermarket: 'cat_shop',
 
   // Entertainment
-  netflix: 'cat_ent',
-  spotify: 'cat_ent',
-  prime: 'cat_ent',
-  hotstar: 'cat_ent',
-  youtube: 'cat_ent',
   movie: 'cat_ent',
   cinema: 'cat_ent',
   pvr: 'cat_ent',
@@ -146,6 +143,19 @@ const VENDOR_CATEGORY_MAP: Record<string, string> = {
   game: 'cat_ent',
   steam: 'cat_ent',
   playstation: 'cat_ent',
+
+  // Subscriptions & Streaming
+  netflix: 'cat_subs',
+  spotify: 'cat_subs',
+  prime: 'cat_subs',
+  hotstar: 'cat_subs',
+  youtube: 'cat_subs',
+  apple: 'cat_subs',
+  icloud: 'cat_subs',
+  google: 'cat_subs',
+  github: 'cat_subs',
+  openai: 'cat_subs',
+  chatgpt: 'cat_subs',
 
   // Health & Medical
   pharmacy: 'cat_health',
@@ -213,6 +223,7 @@ const getAccountSfSymbol = (name: string): string => {
 export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   visible,
   onClose,
+  initialTransaction,
 }) => {
   const {
     categories,
@@ -221,6 +232,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
     eventFolders,
     addEventFolder,
     addTransaction,
+    updateTransaction,
     depositToVault,
     addSavingsVault,
     currencySymbol,
@@ -229,7 +241,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
     deleteQuickPreset,
   } = useExpenseStore();
   const sym = currencySymbol || '₹';
-  const { addSubscription } = useSubscriptionStore();
+  const { subscriptions, addSubscription, updateSubscription } = useSubscriptionStore();
 
   const [tabMode, setTabMode] = useState<TabMode>('expense');
   const [debtType, setDebtType] = useState<DebtType>('lend');
@@ -243,7 +255,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
     accounts[1]?.id || accounts[0]?.id || 'acc_slice'
   );
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('');
-  const [txDate, setTxDate] = useState<Date>(new Date(2026, 8, 23)); // Sep 23, 2026 default
+  const [txDate, setTxDate] = useState<Date>(new Date());
   const [note, setNote] = useState<string>('');
   const [selectedTag, setSelectedTag] = useState<string>('');
   const [customTagInput, setCustomTagInput] = useState<string>('');
@@ -262,7 +274,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   const [isSubscription, setIsSubscription] = useState<boolean>(false);
   const [billingCycle, setBillingCycle] = useState<BillingCycle>('monthly');
   const [nextBillDate, setNextBillDate] = useState<Date>(() => {
-    const d = new Date(2026, 8, 23);
+    const d = new Date();
     d.setMonth(d.getMonth() + 1);
     return d;
   });
@@ -272,7 +284,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   const [inlineGoalName, setInlineGoalName] = useState<string>('');
   const [inlineGoalTarget, setInlineGoalTarget] = useState<string>('');
   const [inlineGoalEmoji, setInlineGoalEmoji] = useState<string>('🛡️');
-  const [inlineGoalColor, setInlineGoalColor] = useState<string>('#34D399');
+  const [inlineGoalColor, setInlineGoalColor] = useState<string>('#8CD9C8');
 
   // Event Folder creation sheet
   const [showNewFolderModal, setShowNewFolderModal] = useState<boolean>(false);
@@ -294,29 +306,88 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   const [showTxDatePicker, setShowTxDatePicker] = useState<boolean>(false);
   const [showNextBillDatePicker, setShowNextBillDatePicker] = useState<boolean>(false);
 
-  // Reset all fields whenever the modal is freshly opened
+  // Reset or populate fields whenever the modal is opened / initialTransaction changes
   useEffect(() => {
     if (visible) {
-      setTabMode('expense');
-      setDebtType('lend');
-      setAmount('');
-      setMerchant('');
-      setSelectedAccountId('');
-      setSelectedGoalId('');
-      setGoalAllocationAmount('');
-      setSelectedFolderId('');
-      setSelectedCategoryId('');
-      setTxDate(new Date(2026, 8, 23));
-      setNote('');
-      setSelectedTag('');
-      setCustomTagInput('');
-      setIsSplitEnabled(false);
-      setYourShare('');
-      setSplitFriends([{ id: `f_${Date.now()}`, name: '', amount: '' }]);
-      setDebtPerson('');
-      setIsSubscription(false);
+      if (initialTransaction) {
+        const tx = initialTransaction;
+        if (tx.type === 'income') {
+          setTabMode('income');
+        } else if (tx.type === 'transfer') {
+          setTabMode('transfer');
+        } else if (tx.type === 'debt_lend') {
+          setTabMode('debt');
+          setDebtType('lend');
+        } else if (tx.type === 'debt_borrow') {
+          setTabMode('debt');
+          setDebtType('borrow');
+        } else {
+          setTabMode('expense');
+        }
+
+        setAmount(tx.amount.toString());
+        setMerchant(tx.note || '');
+        setSelectedAccountId(tx.accountId || '');
+        setToAccountId(tx.toAccountId || accounts[1]?.id || accounts[0]?.id || 'acc_slice');
+        setSelectedCategoryId(tx.categoryId || '');
+        setSelectedFolderId(tx.folderId || '');
+        setSelectedTag(tx.tag || '');
+        setCustomTagInput('');
+        setDebtPerson(tx.borrowerOrLender || '');
+
+        if (tx.date) {
+          const parsed = new Date(tx.date);
+          setTxDate(isNaN(parsed.getTime()) ? new Date() : parsed);
+        } else {
+          setTxDate(new Date());
+        }
+
+        if (tx.split) {
+          setIsSplitEnabled(true);
+          setYourShare(tx.split.yourShare.toString());
+          if (tx.split.friends && tx.split.friends.length > 0) {
+            setSplitFriends(tx.split.friends.map(f => ({ id: f.id, name: f.name, amount: f.amount.toString() })));
+          } else {
+            setSplitFriends([{ id: `f_${Date.now()}`, name: tx.split.friendNames || '', amount: tx.split.friendsShare.toString() }]);
+          }
+        } else {
+          setIsSplitEnabled(false);
+          setYourShare('');
+          setSplitFriends([{ id: `f_${Date.now()}`, name: '', amount: '' }]);
+        }
+
+        if (tx.subscriptionId || tx.categoryId === 'cat_subs') {
+          setIsSubscription(true);
+        } else {
+          setIsSubscription(false);
+        }
+      } else {
+        setTabMode('expense');
+        setDebtType('lend');
+        setAmount('');
+        setMerchant('');
+        setSelectedAccountId('');
+        setSelectedGoalId('');
+        setGoalAllocationAmount('');
+        setSelectedFolderId('');
+        setSelectedCategoryId('');
+        setTxDate(new Date());
+        setToAccountId(accounts[1]?.id || accounts[0]?.id || 'acc_slice');
+        setBillingCycle('monthly');
+        const nextBill = new Date();
+        nextBill.setMonth(nextBill.getMonth() + 1);
+        setNextBillDate(nextBill);
+        setNote('');
+        setSelectedTag('');
+        setCustomTagInput('');
+        setIsSplitEnabled(false);
+        setYourShare('');
+        setSplitFriends([{ id: `f_${Date.now()}`, name: '', amount: '' }]);
+        setDebtPerson('');
+        setIsSubscription(false);
+      }
     }
-  }, [visible]);
+  }, [visible, initialTransaction]);
 
   const scrollViewRef = useRef<ScrollView>(null);
   const [keyboardHeight, setKeyboardHeight] = useState<number>(0);
@@ -389,6 +460,9 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
         if (lower.includes(key)) {
           if (categories.some((c) => c.id === catId)) {
             setSelectedCategoryId(catId);
+            if (catId === 'cat_subs') {
+              setIsSubscription(true);
+            }
             break;
           }
         }
@@ -400,6 +474,9 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     setAmount(preset.amount.toString());
     setSelectedCategoryId(preset.categoryId);
+    if (preset.categoryId === 'cat_subs') {
+      setIsSubscription(true);
+    }
     if (preset.accountId && accounts.some((a) => a.id === preset.accountId)) {
       setSelectedAccountId(preset.accountId);
     }
@@ -440,7 +517,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
     setNewPresetAmount('');
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (isNaN(numAmount) || numAmount <= 0) {
       Alert.alert('Invalid Amount', 'Please enter a valid amount.');
       return;
@@ -480,28 +557,110 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
     const finalNote = merchant.trim() ? `${merchant.trim()}${note.trim() ? ` - ${note.trim()}` : ''}` : note.trim();
 
     if (tabMode === 'transfer') {
-      addTransaction({
-        amount: numAmount,
-        type: 'transfer',
-        categoryId: 'cat_fin',
-        accountId: selectedAccountId,
-        toAccountId: toAccountId,
-        date: format(txDate, 'yyyy-MM-dd'),
-        note: finalNote || 'Account Transfer',
-        tag: finalTag || undefined,
-      });
+      if (initialTransaction) {
+        updateTransaction(initialTransaction.id, {
+          amount: numAmount,
+          type: 'transfer',
+          categoryId: 'cat_fin',
+          accountId: selectedAccountId,
+          toAccountId: toAccountId,
+          date: format(txDate, 'yyyy-MM-dd'),
+          note: finalNote || 'Account Transfer',
+          tag: finalTag || undefined,
+        });
+      } else {
+        addTransaction({
+          amount: numAmount,
+          type: 'transfer',
+          categoryId: 'cat_fin',
+          accountId: selectedAccountId,
+          toAccountId: toAccountId,
+          date: format(txDate, 'yyyy-MM-dd'),
+          note: finalNote || 'Account Transfer',
+          tag: finalTag || undefined,
+        });
+      }
     } else if (tabMode === 'debt') {
-      addTransaction({
-        amount: numAmount,
-        type: debtType === 'lend' ? 'debt_lend' : 'debt_borrow',
-        categoryId: 'cat_fin',
-        accountId: selectedAccountId,
-        date: format(txDate, 'yyyy-MM-dd'),
-        borrowerOrLender: debtPerson.trim() || undefined,
-        note: finalNote || (debtType === 'lend' ? `Lent to ${debtPerson || 'Friend'}` : `Borrowed from ${debtPerson || 'Friend'}`),
-        tag: finalTag || undefined,
-      });
+      if (initialTransaction) {
+        updateTransaction(initialTransaction.id, {
+          amount: numAmount,
+          type: debtType === 'lend' ? 'debt_lend' : 'debt_borrow',
+          categoryId: 'cat_fin',
+          accountId: selectedAccountId,
+          date: format(txDate, 'yyyy-MM-dd'),
+          borrowerOrLender: debtPerson.trim() || undefined,
+          note: finalNote || (debtType === 'lend' ? `Lent to ${debtPerson || 'Friend'}` : `Borrowed from ${debtPerson || 'Friend'}`),
+          tag: finalTag || undefined,
+        });
+      } else {
+        addTransaction({
+          amount: numAmount,
+          type: debtType === 'lend' ? 'debt_lend' : 'debt_borrow',
+          categoryId: 'cat_fin',
+          accountId: selectedAccountId,
+          date: format(txDate, 'yyyy-MM-dd'),
+          borrowerOrLender: debtPerson.trim() || undefined,
+          note: finalNote || (debtType === 'lend' ? `Lent to ${debtPerson || 'Friend'}` : `Borrowed from ${debtPerson || 'Friend'}`),
+          tag: finalTag || undefined,
+        });
+      }
     } else if (tabMode === 'expense') {
+      const isSubscriptionExpense =
+        selectedCategoryId === 'cat_subs' ||
+        selectedCatObj?.name?.toLowerCase().includes('subscript') ||
+        isSubscription;
+
+      let linkedSubscriptionId: string | undefined = initialTransaction?.subscriptionId;
+
+      if (isSubscriptionExpense) {
+        const trimmedName = merchant.trim() || selectedCatObj?.name || 'Subscription';
+        const matchedSub = subscriptions.find(
+          (s) => s.name.trim().toLowerCase() === trimmedName.toLowerCase()
+        );
+
+        if (matchedSub) {
+          linkedSubscriptionId = matchedSub.id;
+          await updateSubscription(matchedSub.id, {
+            price: numAmount,
+            paymentMethod: fromAccObj?.name || matchedSub.paymentMethod,
+            billingCycle: matchedSub.billingCycle || billingCycle,
+            nextBillingDate: format(nextBillDate, 'yyyy-MM-dd'),
+          }).catch(() => {});
+
+          await db.createTransaction({
+            id: `${matchedSub.id}-tx-${Date.now()}`,
+            subscriptionId: matchedSub.id,
+            amount: numAmount,
+            currency: matchedSub.currency || 'INR',
+            date: format(txDate, 'yyyy-MM-dd'),
+          }).catch(() => {});
+        } else if (!initialTransaction) {
+          const cat = categories.find((c) => c.id === selectedCategoryId);
+          const newSub = await addSubscription({
+            name: trimmedName,
+            price: numAmount,
+            currency: 'INR' as any,
+            billingCycle: billingCycle,
+            category: (cat?.name as any) || 'Other',
+            paymentMethod: fromAccObj?.name || 'Default',
+            color: cat?.color || '#FF9D66',
+            nextBillingDate: format(nextBillDate, 'yyyy-MM-dd'),
+            reminderEnabled: false,
+            reminderDays: 1,
+            isTrial: false,
+          });
+          linkedSubscriptionId = newSub.id;
+
+          await db.createTransaction({
+            id: `${newSub.id}-tx-${Date.now()}`,
+            subscriptionId: newSub.id,
+            amount: numAmount,
+            currency: 'INR',
+            date: format(txDate, 'yyyy-MM-dd'),
+          }).catch(() => {});
+        }
+      }
+
       if (isSplitEnabled) {
         const mappedFriends = splitFriends
           .filter((f) => f.name.trim() && (parseFloat(f.amount) || 0) > 0)
@@ -515,69 +674,100 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
         const friendNamesStr = mappedFriends.map((f) => f.name).join(', ') || 'Friends';
         const totalFriendsSum = mappedFriends.reduce((sum, f) => sum + f.amount, 0);
 
-        addTransaction({
+        const splitData = {
+          totalPaid: numAmount,
+          yourShare: numYourShare,
+          friendsShare: totalFriendsSum > 0 ? totalFriendsSum : friendsShare,
+          friendNames: friendNamesStr,
+          friends: mappedFriends.length > 0 ? mappedFriends : undefined,
+          settled: false,
+        };
+
+        if (initialTransaction) {
+          updateTransaction(initialTransaction.id, {
+            amount: numAmount,
+            type: 'expense',
+            categoryId: selectedCategoryId,
+            accountId: selectedAccountId,
+            folderId: selectedFolderId || undefined,
+            folderName: selectedFolderObj?.name || undefined,
+            date: format(txDate, 'yyyy-MM-dd'),
+            note: finalNote || `Split with ${friendNamesStr}`,
+            tag: finalTag || undefined,
+            split: splitData,
+            subscriptionId: linkedSubscriptionId,
+          });
+        } else {
+          addTransaction({
+            amount: numAmount,
+            type: 'expense',
+            categoryId: selectedCategoryId,
+            accountId: selectedAccountId,
+            folderId: selectedFolderId || undefined,
+            folderName: selectedFolderObj?.name || undefined,
+            date: format(txDate, 'yyyy-MM-dd'),
+            note: finalNote || `Split with ${friendNamesStr}`,
+            tag: finalTag || undefined,
+            split: splitData,
+            subscriptionId: linkedSubscriptionId,
+          });
+        }
+      } else {
+        if (initialTransaction) {
+          updateTransaction(initialTransaction.id, {
+            amount: numAmount,
+            type: 'expense',
+            categoryId: selectedCategoryId,
+            accountId: selectedAccountId,
+            folderId: selectedFolderId || undefined,
+            folderName: selectedFolderObj?.name || undefined,
+            date: format(txDate, 'yyyy-MM-dd'),
+            note: finalNote || undefined,
+            tag: finalTag || undefined,
+            split: undefined,
+            subscriptionId: linkedSubscriptionId,
+          });
+        } else {
+          addTransaction({
+            amount: numAmount,
+            type: 'expense',
+            categoryId: selectedCategoryId,
+            accountId: selectedAccountId,
+            folderId: selectedFolderId || undefined,
+            folderName: selectedFolderObj?.name || undefined,
+            date: format(txDate, 'yyyy-MM-dd'),
+            note: finalNote || undefined,
+            tag: finalTag || undefined,
+            subscriptionId: linkedSubscriptionId,
+          });
+        }
+      }
+    } else if (tabMode === 'income') {
+      if (initialTransaction) {
+        updateTransaction(initialTransaction.id, {
           amount: numAmount,
-          type: 'expense',
-          categoryId: selectedCategoryId,
-          accountId: selectedAccountId,
-          folderId: selectedFolderId || undefined,
-          folderName: selectedFolderObj?.name || undefined,
+          type: 'income',
+          categoryId: selectedCategoryId || 'cat_income',
+          accountId: selectedAccountId || accounts[0]?.id || 'acc_primary',
           date: format(txDate, 'yyyy-MM-dd'),
-          note: finalNote || `Split with ${friendNamesStr}`,
+          note: finalNote || 'Income',
           tag: finalTag || undefined,
-          split: {
-            totalPaid: numAmount,
-            yourShare: numYourShare,
-            friendsShare: totalFriendsSum > 0 ? totalFriendsSum : friendsShare,
-            friendNames: friendNamesStr,
-            friends: mappedFriends.length > 0 ? mappedFriends : undefined,
-            settled: false,
-          },
         });
       } else {
         addTransaction({
           amount: numAmount,
-          type: 'expense',
-          categoryId: selectedCategoryId,
-          accountId: selectedAccountId,
-          folderId: selectedFolderId || undefined,
-          folderName: selectedFolderObj?.name || undefined,
+          type: 'income',
+          categoryId: selectedCategoryId || 'cat_income',
+          accountId: selectedAccountId || accounts[0]?.id || 'acc_primary',
           date: format(txDate, 'yyyy-MM-dd'),
-          note: finalNote || undefined,
+          note: finalNote || 'Income',
           tag: finalTag || undefined,
         });
-      }
 
-      if (isSubscription) {
-        const cat = categories.find((c) => c.id === selectedCategoryId);
-        addSubscription({
-          name: merchant.trim() || cat?.name || 'Subscription',
-          price: numAmount,
-          currency: 'INR' as any,
-          billingCycle: billingCycle,
-          category: (cat?.name as any) || 'Other',
-          paymentMethod: accounts.find((a) => a.id === selectedAccountId)?.name || 'Default',
-          color: cat?.color || '#FF6B6B',
-          nextBillingDate: format(nextBillDate, 'yyyy-MM-dd'),
-          reminderEnabled: false,
-          reminderDays: 1,
-          isTrial: false,
-        });
-      }
-    } else if (tabMode === 'income') {
-      addTransaction({
-        amount: numAmount,
-        type: 'income',
-        categoryId: selectedCategoryId || 'cat_income',
-        accountId: selectedAccountId || accounts[0]?.id || 'acc_primary',
-        date: format(txDate, 'yyyy-MM-dd'),
-        note: finalNote || 'Income',
-        tag: finalTag || undefined,
-      });
-
-      if (selectedGoalId) {
-        const alloc = parseFloat(goalAllocationAmount) || numAmount;
-        depositToVault(selectedGoalId, Math.min(alloc, numAmount), selectedAccountId || accounts[0]?.id);
+        if (selectedGoalId) {
+          const alloc = parseFloat(goalAllocationAmount) || numAmount;
+          depositToVault(selectedGoalId, Math.min(alloc, numAmount), selectedAccountId || accounts[0]?.id);
+        }
       }
     }
 
@@ -592,7 +782,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   const isCreditCardPayment = toAccObj?.statusType === 'due' || toAccObj?.type === 'credit';
 
   // Keep primary root menu compact (<= 6 items) so iOS UIKit always presents the popover DOWNWARDS
-  const topCategoryIds = ['cat_food', 'cat_shop', 'cat_trans', 'cat_cig', 'cat_util'];
+  const topCategoryIds = ['cat_food', 'cat_shop', 'cat_trans', 'cat_cig', 'cat_subs', 'cat_util'];
   const primaryCategories = categories.filter((c) =>
     topCategoryIds.includes(c.id) || c.id === selectedCategoryId
   );
@@ -603,7 +793,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   const categoryActions = tabMode === 'income'
     ? INCOME_CATEGORIES.map((cat) => ({
         id: cat.id,
-        title: `${cat.name}${cat.emoji ? ` ${cat.emoji}` : ''}`,
+        title: cat.name,
         image: (cat.id === 'cat_salary'
           ? 'briefcase.fill'
           : cat.id === 'cat_freelance'
@@ -620,7 +810,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
     : [
         ...primaryCategories.map((cat) => ({
           id: cat.id,
-          title: `${cat.name}${cat.emoji ? ` ${cat.emoji}` : ''}`,
+          title: cat.name,
           image: getCategorySfSymbol(cat.id, cat.name) as any,
           state: (selectedCategoryId === cat.id ? 'on' : 'off') as 'on' | 'off',
         })),
@@ -632,7 +822,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                 image: 'ellipsis.circle' as any,
                 subactions: otherCategories.map((cat) => ({
                   id: cat.id,
-                  title: `${cat.name}${cat.emoji ? ` ${cat.emoji}` : ''}`,
+                  title: cat.name,
                   image: getCategorySfSymbol(cat.id, cat.name) as any,
                   state: (selectedCategoryId === cat.id ? 'on' : 'off') as 'on' | 'off',
                 })),
@@ -707,9 +897,9 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
           <TouchableOpacity onPress={onClose} style={styles.closeBtn} activeOpacity={0.7}>
             <X size={18} color="#A0A5B5" />
           </TouchableOpacity>
-          <AppText style={styles.headerTitle}>New Transaction</AppText>
+          <AppText style={styles.headerTitle}>{initialTransaction ? 'Edit Transaction' : 'New Transaction'}</AppText>
           <TouchableOpacity onPress={handleSave} style={styles.headerDoneBtn} activeOpacity={0.7}>
-            <AppText style={styles.headerDoneText}>Save</AppText>
+            <AppText style={styles.headerDoneText}>{initialTransaction ? 'Update' : 'Save'}</AppText>
           </TouchableOpacity>
         </View>
 
@@ -718,7 +908,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
           style={styles.scroll}
           contentContainerStyle={[
             styles.scrollContent,
-            { paddingBottom: Platform.OS === 'ios' ? 32 : 24 },
+            { paddingBottom: Math.max(keyboardHeight + 60, Platform.OS === 'ios' ? 40 : 24) },
           ]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
@@ -865,7 +1055,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
 
                 {/* ARROW */}
                 <View style={styles.transferArrowWrap}>
-                  <ArrowRight size={20} color="#3B82F6" />
+                  <ArrowRight size={20} color="#9DC6EB" />
                 </View>
 
                 {/* TO ACCOUNT */}
@@ -983,6 +1173,10 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                   onSelect={(catId) => {
                     Haptics.selectionAsync().catch(() => {});
                     setSelectedCategoryId(catId);
+                    if (tabMode === 'expense') {
+                      const isSubCat = catId === 'cat_subs' || (categories.find(c => c.id === catId)?.name?.toLowerCase().includes('subscript') ?? false);
+                      setIsSubscription(isSubCat);
+                    }
                   }}
                   style={{ width: '100%' }}
                 >
@@ -1005,7 +1199,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                         </View>
                       )}
                       <AppText style={styles.dropdownTriggerValue} numberOfLines={1}>
-                        {selectedCatObj ? `${selectedCatObj.name.toUpperCase()}${selectedCatObj.emoji ? ` ${selectedCatObj.emoji}` : ''}` : 'Select'}
+                        {selectedCatObj ? selectedCatObj.name.toUpperCase() : 'Select'}
                       </AppText>
                     </View>
                     <ChevronDown size={15} color="#7E8394" />
@@ -1163,7 +1357,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                       keyboardType="numeric"
                       value={yourShare}
                       onChangeText={setYourShare}
-                      onFocus={() => handleInputFocus(220)}
+                      onFocus={() => handleInputFocus(480)}
                     />
                   </View>
 
@@ -1186,7 +1380,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                         onChangeText={(t) => {
                           setSplitFriends(splitFriends.map((f) => f.id === friend.id ? { ...f, name: t } : f));
                         }}
-                        onFocus={() => handleInputFocus(260 + idx * 40)}
+                        onFocus={() => handleInputFocus(550 + idx * 65)}
                       />
                       <View style={styles.splitFriendAmtWrap}>
                         <AppText style={styles.splitFriendAmtSym}>{sym}</AppText>
@@ -1199,7 +1393,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                           onChangeText={(t) => {
                             setSplitFriends(splitFriends.map((f) => f.id === friend.id ? { ...f, amount: t } : f));
                           }}
-                          onFocus={() => handleInputFocus(260 + idx * 40)}
+                          onFocus={() => handleInputFocus(550 + idx * 65)}
                         />
                       </View>
                       {splitFriends.length > 1 && (
@@ -1463,7 +1657,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                     ]}
                   >
                     <AppText style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '700' }}>
-                      {c.name} {c.emoji || ''}
+                      {c.name}
                     </AppText>
                   </TouchableOpacity>
                 ))}
@@ -1531,7 +1725,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                         }}
                       >
                         <View style={styles.pickerAccountLeft}>
-                          <View style={[styles.pickerIconCircle, isCurrent && { backgroundColor: '#3B82F6' }]}>
+                          <View style={[styles.pickerIconCircle, isCurrent && { backgroundColor: expenseColors.accentPeach }]}>
                             {getAccountIcon(acc.name)}
                           </View>
                           <View>
@@ -1544,7 +1738,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                           </View>
                         </View>
 
-                        {isCurrent && <Check size={18} color="#3B82F6" />}
+                        {isCurrent && <Check size={18} color={expenseColors.accentPeach} />}
                         {isOpposite && (
                           <AppText style={styles.pickerOppositeNotice}>
                             Already {accountPickerSide === 'from' ? 'To' : 'From'}
@@ -2515,7 +2709,7 @@ const styles = StyleSheet.create({
     width: 100,
   },
   splitFriendAmtSym: {
-    color: '#2ECC71',
+    color: expenseColors.accentGreen,
     fontSize: 12,
     fontWeight: '800',
     marginRight: 4,
@@ -2795,7 +2989,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.06)',
   },
   pickerAccountItemCurrent: {
-    borderColor: '#3B82F6',
+    borderColor: expenseColors.accentPeach,
   },
   pickerAccountItemDisabled: {
     opacity: 0.4,

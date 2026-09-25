@@ -33,7 +33,7 @@ import { ExpenseAccount, SavingsVault } from '@/types/expense';
 import { EditAccountModal } from './EditAccountModal';
 
 const EMOJI_OPTIONS = ['🛡️', '🌴', '💻', '🚗', '🏠', '💍', '📚', '📈', '🎁', '⚡'];
-const COLOR_OPTIONS = ['#34D399', '#60A5FA', '#F472B6', '#FBBF24', '#A78BFA', '#FB7185'];
+const COLOR_OPTIONS = ['#8CD9C8', '#9DC6EB', '#F2AEC4', '#F4CD89', '#C4A7E7', '#F8A888'];
 
 interface AccountsListModalProps {
   visible: boolean;
@@ -51,6 +51,7 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
     currencySymbol,
     deleteAccount,
     archiveAccount,
+    unarchiveAccount,
     addSavingsVault,
     deleteSavingsVault,
     depositToVault,
@@ -72,7 +73,7 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
   const [goalName, setGoalName] = useState<string>('');
   const [goalTarget, setGoalTarget] = useState<string>('');
   const [goalEmoji, setGoalEmoji] = useState<string>('🛡️');
-  const [goalColor, setGoalColor] = useState<string>('#34D399');
+  const [goalColor, setGoalColor] = useState<string>('#8CD9C8');
 
   // Quick Action Sheet (Deposit / Withdraw from Goal)
   const [selectedVault, setSelectedVault] = useState<SavingsVault | null>(null);
@@ -83,6 +84,7 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
 
   // Active (non-archived) accounts
   const activeAccounts = accounts.filter((a) => !a.isArchived);
+  const archivedAccounts = accounts.filter((a) => a.isArchived);
 
   const getAccountTxCount = (accountId: string) => {
     return transactions.filter((t) => t.accountId === accountId).length;
@@ -320,13 +322,56 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
                   );
                 })}
               </View>
+
+              {archivedAccounts.length > 0 && (
+                <>
+                  <AppText style={[styles.sectionTitle, { marginTop: 18 }]}>ARCHIVED ACCOUNTS</AppText>
+                  <View style={styles.listStack}>
+                    {archivedAccounts.map((account) => {
+                      const txCount = getAccountTxCount(account.id) || account.txnCountThisMonth || 0;
+                      return (
+                        <TouchableOpacity
+                          key={account.id}
+                          style={[styles.accountRow, { opacity: 0.85 }]}
+                          activeOpacity={0.75}
+                          onPress={() => handleOpenEdit(account)}
+                        >
+                          <View style={styles.iconCircle}>
+                            {getAccountIcon(account)}
+                          </View>
+                          <View style={styles.infoCol}>
+                            <AppText style={styles.accountName}>
+                              {account.name}
+                            </AppText>
+                            <AppText style={styles.balanceText}>
+                              Archived • {sym}{account.balance.toLocaleString('en-IN')}
+                            </AppText>
+                          </View>
+                          <TouchableOpacity
+                            style={styles.unarchiveBtn}
+                            activeOpacity={0.7}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            onPress={(e) => {
+                              e.stopPropagation();
+                              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+                              unarchiveAccount(account.id);
+                            }}
+                          >
+                            <AppText style={styles.unarchiveBtnText}>Restore</AppText>
+                          </TouchableOpacity>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </>
+              )}
             </>
           ) : (
             <>
               {/* Summary Stats Pill for Goals */}
               <View style={styles.summaryBar}>
                 <AppText style={styles.summaryBarLabel}>TOTAL RESERVED IN GOALS</AppText>
-                <AppText style={[styles.summaryBarVal, { color: '#34D399' }]}>
+                <AppText style={[styles.summaryBarVal, { color: expenseColors.accentGreen }]}>
                   {sym}{totalSavedInVaults.toLocaleString('en-IN')}
                 </AppText>
               </View>
@@ -846,6 +891,19 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
   },
+  unarchiveBtn: {
+    backgroundColor: '#272224',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 157, 102, 0.35)',
+  },
+  unarchiveBtnText: {
+    color: '#FF9D66',
+    fontSize: 12,
+    fontWeight: '700',
+  },
 
   // Goals List Styles
   goalsListStack: {
@@ -1163,8 +1221,8 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   emojiPickItemActive: {
-    borderColor: '#34D399',
-    backgroundColor: 'rgba(52, 211, 153, 0.15)',
+    borderColor: expenseColors.accentGreen,
+    backgroundColor: expenseColors.accentGreenBg,
   },
   emojiPickText: {
     fontSize: 20,

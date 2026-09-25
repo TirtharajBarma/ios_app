@@ -1,5 +1,4 @@
 import { Platform } from 'react-native';
-import * as Device from 'expo-device';
 import { ExpenseTransaction, ExpenseCategory, ExpenseAccount } from '@/types/expense';
 
 export type AiIntentType =
@@ -34,6 +33,8 @@ export interface SmartFilterCriteria {
   isWeekdayOnly?: boolean;
   isSplitOnly?: boolean;
   isPendingDebtOnly?: boolean;
+  isFolderOnly?: boolean;
+  folderName?: string;
   originalQuery: string;
 }
 
@@ -62,27 +63,28 @@ export interface SmartQueryResult {
 // ON-DEVICE HARDWARE AI METADATA
 // ─────────────────────────────────────────────────────────────
 export function getDeviceAiEngineInfo(): { name: string; chip: string; isHardwareAccelerated: boolean } {
-  if (Platform.OS === 'ios') {
-    const model = Device.modelName || 'iPhone';
-    return {
-      name: 'Apple Neural Engine (On-Device NLU)',
-      chip: `${model} • Neural Engine`,
-      isHardwareAccelerated: true,
-    };
-  } else if (Platform.OS === 'android') {
-    const brand = Device.brand ? Device.brand.toUpperCase() : 'Android';
-    const model = Device.modelName || 'Device';
-    return {
-      name: 'Android NNAPI (On-Device ML)',
-      chip: `${brand} ${model} • On-Device NLU`,
-      isHardwareAccelerated: true,
-    };
-  }
   return {
-    name: 'Local Embedded NLU Engine',
-    chip: 'Local Hardware NLU',
+    name: 'Local Rules & NLP Engine (On-Device)',
+    chip: `${Platform.OS === 'ios' ? 'iOS' : 'Android'} • Local NLU`,
     isHardwareAccelerated: false,
   };
+}
+
+// Memoized result cache so the same query over the same dataset isn't re-parsed
+// and re-scanned on every render (getFilteredTransactions + getSmartSearchResult
+// both evaluate executeSmartQuery during a single Ledger render).
+const SMART_QUERY_CACHE = new Map<string, SmartQueryResult>();
+const SMART_QUERY_CACHE_LIMIT = 30;
+
+function smartQueryCacheKey(
+  rawQuery: string,
+  transactions: ExpenseTransaction[],
+  categories: ExpenseCategory[],
+  accounts: ExpenseAccount[],
+  currencySymbol: string
+): string {
+  const fingerprint = transactions.map((t) => t.id).join('|');
+  return `${rawQuery}\u0000${categories.length}\u0000${accounts.length}\u0000${currencySymbol}\u0000${fingerprint}`;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -259,8 +261,8 @@ export function parseSmartQuery(
   rawQuery: string,
   categories: ExpenseCategory[],
   accounts: ExpenseAccount[],
-  referenceYear = 2026,
-  referenceMonth = 8 // Sep (0-indexed)
+  referenceYear = new Date().getFullYear(),
+  referenceMonth = new Date().getMonth()
 ): SmartFilterCriteria {
   const q = rawQuery.toLowerCase().trim();
   const tokens = q
@@ -284,6 +286,8 @@ export function parseSmartQuery(
   let isWeekdayOnly = false;
   let isSplitOnly = false;
   let isPendingDebtOnly = false;
+  let isFolderOnly = false;
+  let folderName: string | undefined = undefined;
   const keywords: string[] = [];
 
   // 1. Detect Intent with broad fuzzy semantics
@@ -449,17 +453,29 @@ export function parseSmartQuery(
     }
   }
 
-  // 3. Detect Timeframe
-  const refDateStr = '2026-09-22';
+  // 3. Detect Timeframe (anchored to the current date)
+  const today = new Date();
+  const isoDate = (d: Date): string => {
+    const y = d.getFullYear();
+    const m = `${d.getMonth() + 1}`.padStart(2, '0');
+    const day = `${d.getDate()}`.padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+  const daysAgoDate = (days: number): string => {
+    const d = new Date();
+    d.setDate(d.getDate() - days);
+    return isoDate(d);
+  };
+  const refDateStr = isoDate(today);
   if (q.includes('today')) {
     startDate = refDateStr;
     endDate = refDateStr;
   } else if (q.includes('yesterday')) {
-    startDate = '2026-09-21';
-    endDate = '2026-09-21';
+    startDate = daysAgoDate(1);
+    endDate = daysAgoDate(1);
   } else if (q.includes('this week') || q.includes('past week') || q.includes('last 7 days') || q.includes('past 7 days')) {
-    startDate = '2026-09-15';
-    endDate = '2026-09-22';
+    startDate = daysAgoDate(7);
+    endDate = refDateStr;
   } else if (q.includes('this month')) {
     monthIndex = referenceMonth;
     year = referenceYear;
@@ -521,17 +537,44 @@ export function parseSmartQuery(
     }
   });
 
-  // 6. Detect Split / Friend Names / Trip Tags
+  // 6. Detect Split / Friend Names
   if (q.includes('split') || q.includes('shared') || q.includes('alex') || q.includes('rahul') || q.includes('sam')) {
     isSplitOnly = true;
     const friendMatch = q.match(/(?:with|from|to)\s+([a-zA-Z]+)/);
-    if (friendMatch && !['the', 'my', 'me', 'this', 'last'].includes(friendMatch[1].toLowerCase())) {
+    if (friendMatch && !['the', 'my', 'me', 'this', 'last', 'goa'].includes(friendMatch[1].toLowerCase())) {
       friendName = friendMatch[1];
     }
   }
 
   if (q.includes('pending') || q.includes('unsettled') || q.includes('unpaid') || q.includes('collect')) {
     isPendingDebtOnly = true;
+  }
+
+  // Detect Folder / Trip / Event queries (e.g. "Goa trip", "Night out", "all folders", "trips")
+  if (
+    q.includes('folder') ||
+    q.includes('folders') ||
+    q.includes('trip') ||
+    q.includes('trips') ||
+    q.includes('event') ||
+    q.includes('events') ||
+    q.includes('vacation') ||
+    q.includes('goa') ||
+    q.includes('party') ||
+    q.includes('night out')
+  ) {
+    if (q === 'folder' || q === 'folders' || q === 'all folders' || q === 'trip' || q === 'trips' || q === 'all trips' || q === 'events') {
+      isFolderOnly = true;
+    } else {
+      // Extract possible folder name keyword (e.g. "goa", "party", "night out")
+      const folderTerms = ['goa', 'party', 'night out', 'vacation', 'manali', 'mumbai', 'delhi', 'bangalore', 'birthday', 'wedding'];
+      for (const ft of folderTerms) {
+        if (q.includes(ft)) {
+          folderName = ft;
+          break;
+        }
+      }
+    }
   }
 
   // 7. Collect Search Keywords (filtering common stop words)
@@ -572,6 +615,8 @@ export function parseSmartQuery(
     isWeekdayOnly,
     isSplitOnly,
     isPendingDebtOnly,
+    isFolderOnly,
+    folderName,
     keywords: keywords.length > 0 ? keywords : undefined,
     originalQuery: rawQuery,
   };
@@ -587,6 +632,10 @@ export function executeSmartQuery(
   accounts: ExpenseAccount[],
   currencySymbol = '₹'
 ): SmartQueryResult {
+  const cacheKey = smartQueryCacheKey(rawQuery, transactions, categories, accounts, currencySymbol);
+  const cachedResult = SMART_QUERY_CACHE.get(cacheKey);
+  if (cachedResult) return cachedResult;
+
   const engineInfo = getDeviceAiEngineInfo();
   const criteria = parseSmartQuery(rawQuery, categories, accounts);
 
@@ -651,10 +700,30 @@ export function executeSmartQuery(
       }
     }
 
-    // Fuzzy Keyword Match against Note, Tag, Friend Names, Category, Account
+    // Folder / Event only filter
+    if (criteria.isFolderOnly && !t.folderId && !t.folderName && !t.tag) {
+      return false;
+    }
+
+    // Specific Folder Name filter
+    if (criteria.folderName) {
+      const fNameLower = (t.folderName || '').toLowerCase();
+      const fTagLower = (t.tag || '').toLowerCase();
+      const fNoteLower = (t.note || '').toLowerCase();
+      if (
+        !fuzzyMatch(criteria.folderName, fNameLower, 0.7) &&
+        !fuzzyMatch(criteria.folderName, fTagLower, 0.7) &&
+        !fuzzyMatch(criteria.folderName, fNoteLower, 0.7)
+      ) {
+        return false;
+      }
+    }
+
+    // Fuzzy Keyword Match against Note, Tag, Folder, Friend Names, Category, Account
     if (criteria.keywords && criteria.keywords.length > 0) {
       const noteLower = (t.note || '').toLowerCase();
       const tagLower = (t.tag || '').toLowerCase();
+      const folderLower = (t.folderName || '').toLowerCase();
       const friendLower = (t.borrowerOrLender || t.split?.friendNames || '').toLowerCase();
       const catObj = categories.find((c) => c.id === t.categoryId);
       const catName = (catObj?.name || '').toLowerCase();
@@ -665,13 +734,14 @@ export function executeSmartQuery(
         return (
           fuzzyMatch(kw, noteLower, 0.7) ||
           fuzzyMatch(kw, tagLower, 0.7) ||
+          fuzzyMatch(kw, folderLower, 0.7) ||
           fuzzyMatch(kw, friendLower, 0.7) ||
           fuzzyMatch(kw, catName, 0.75) ||
           fuzzyMatch(kw, accName, 0.75)
         );
       });
 
-      // If category or account was already explicitly matched, keyword failure is tolerated if keyword matches note/tag
+      // If category or account was already explicitly matched, keyword failure is tolerated if keyword matches note/tag/folder
       if (!matchesAnyKeyword && !criteria.categoryIds && !criteria.accountIds) {
         return false;
       }
@@ -826,7 +896,7 @@ export function executeSmartQuery(
     }
   }
 
-  return {
+  const result: SmartQueryResult = {
     matchedTransactions: matched,
     intent: criteria.intent,
     naturalLanguageAnswer: answer,
@@ -840,6 +910,14 @@ export function executeSmartQuery(
       amountRangeText: amountRangeDisplay,
     },
   };
+
+  SMART_QUERY_CACHE.set(cacheKey, result);
+  if (SMART_QUERY_CACHE.size > SMART_QUERY_CACHE_LIMIT) {
+    const oldestKey = SMART_QUERY_CACHE.keys().next().value;
+    if (oldestKey) SMART_QUERY_CACHE.delete(oldestKey);
+  }
+
+  return result;
 }
 
 // ─────────────────────────────────────────────────────────────

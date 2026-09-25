@@ -295,14 +295,14 @@ function CycleStat({ label, count, color }: { label: string; count: number; colo
 
 function getCategoryColor(index: number): string {
   const palette = [
-    colors.accent,
-    colors.success,
-    colors.warning,
-    colors.danger,
-    "#AF52DE",
-    "#FF9F0A",
-    "#64D2FF",
-    "#30D158",
+    '#F8A888', // Warm Peach
+    '#8CD9C8', // Warm Mint
+    '#F4CD89', // Warm Buttercream
+    '#EFA2A2', // Dusty Rose
+    '#C4A7E7', // Soft Lilac
+    '#9DC6EB', // Powder Sky
+    '#82D0D8', // Seafoam
+    '#D6AEE0', // Warm Lavender
   ];
   return palette[index % palette.length];
 }

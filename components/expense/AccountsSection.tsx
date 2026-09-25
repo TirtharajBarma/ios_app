@@ -11,18 +11,21 @@ interface AccountsSectionProps {
 }
 
 export const AccountsSection: React.FC<AccountsSectionProps> = ({ onAccountPress }) => {
-  const { accounts } = useExpenseStore();
+  const { accounts, currencySymbol } = useExpenseStore();
+  const sym = currencySymbol || '₹';
 
   const renderAccountIcon = (name: string) => {
     const upper = name.toUpperCase();
     if (upper.includes('WALLET')) {
-      return <Wallet size={18} color={expenseColors.textSubtle} strokeWidth={2} />;
+      return <Wallet size={16} color={expenseColors.textSubtle} strokeWidth={2} />;
     }
     if (upper.includes('AXIS') || upper.includes('SLICE')) {
-      return <CreditCard size={18} color={expenseColors.textSubtle} strokeWidth={2} />;
+      return <CreditCard size={16} color={expenseColors.textSubtle} strokeWidth={2} />;
     }
-    return <Banknote size={18} color={expenseColors.textSubtle} strokeWidth={2} />;
+    return <Banknote size={16} color={expenseColors.textSubtle} strokeWidth={2} />;
   };
+
+  const activeAccounts = accounts.filter((acc) => !acc.isArchived);
 
   return (
     <View style={styles.container}>
@@ -31,7 +34,7 @@ export const AccountsSection: React.FC<AccountsSectionProps> = ({ onAccountPress
 
       {/* Account Cards */}
       <View style={styles.cardsStack}>
-        {accounts.map((acc) => {
+        {activeAccounts.map((acc) => {
           const isPositive = acc.statusType === 'positive';
           const isDue = acc.statusType === 'due';
           const isNoChange = acc.statusType === 'no_change';
@@ -67,29 +70,29 @@ export const AccountsSection: React.FC<AccountsSectionProps> = ({ onAccountPress
                 {isDue ? (
                   <>
                     <AppText style={styles.dueBalanceText}>
-                      Due: {`\u20B9${formattedDue}`}
+                      Due: {`${sym}${formattedDue}`}
                     </AppText>
                     <View style={styles.duePill}>
                       <AppText style={styles.duePillText}>
-                        ↘ -{`\u20B9${formattedChange}`}
+                        ↘ -{`${sym}${formattedChange}`}
                       </AppText>
                     </View>
                   </>
                 ) : isPositive ? (
                   <>
                     <AppText style={styles.positiveBalanceText}>
-                      {`\u20B9${formattedBalance}`}
+                      {`${sym}${formattedBalance}`}
                     </AppText>
                     <View style={styles.positivePill}>
                       <AppText style={styles.positivePillText}>
-                        ↗ +{`\u20B9${formattedChange}`}
+                        ↗ +{`${sym}${formattedChange}`}
                       </AppText>
                     </View>
                   </>
                 ) : (
                   <>
                     <AppText style={styles.neutralBalanceText}>
-                      {`\u20B9${formattedBalance}`}
+                      {`${sym}${formattedBalance}`}
                     </AppText>
                     <AppText style={styles.noChangeText}>No change</AppText>
                   </>
@@ -117,29 +120,29 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   cardsStack: {
-    gap: 12,
+    gap: 8,
   },
   accountCard: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     backgroundColor: expenseColors.bgCard,
-    borderRadius: 18,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     borderWidth: 1,
     borderColor: expenseColors.borderCard,
   },
   leftContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
     flex: 1,
   },
   iconBox: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: expenseColors.circleBtnBg,
     alignItems: 'center',
     justifyContent: 'center',
@@ -150,16 +153,16 @@ const styles = StyleSheet.create({
   },
   accountName: {
     color: expenseColors.textPrimary,
-    fontSize: 14,
-    lineHeight: 18,
+    fontSize: 12,
+    lineHeight: 16,
     fontWeight: '700',
-    letterSpacing: 0.8,
-    marginBottom: 4,
+    letterSpacing: 0.5,
+    marginBottom: 2,
   },
   txnSubtitle: {
     color: expenseColors.textMuted,
-    fontSize: 13,
-    lineHeight: 17,
+    fontSize: 11,
+    lineHeight: 14,
     fontWeight: '500',
   },
   rightContent: {
@@ -168,53 +171,53 @@ const styles = StyleSheet.create({
   },
   positiveBalanceText: {
     color: expenseColors.textPrimary,
-    fontSize: 19,
-    lineHeight: 23,
+    fontSize: 15,
+    lineHeight: 19,
     fontWeight: '700',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   dueBalanceText: {
     color: expenseColors.accentRed,
-    fontSize: 17,
-    lineHeight: 21,
+    fontSize: 14,
+    lineHeight: 18,
     fontWeight: '700',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   neutralBalanceText: {
     color: expenseColors.textPrimary,
-    fontSize: 19,
-    lineHeight: 23,
+    fontSize: 15,
+    lineHeight: 19,
     fontWeight: '700',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   positivePill: {
     backgroundColor: expenseColors.accentGreenBg,
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: 8,
+    paddingHorizontal: 7,
+    paddingVertical: 2.5,
+    borderRadius: 6,
   },
   positivePillText: {
     color: expenseColors.accentGreen,
-    fontSize: 12,
-    lineHeight: 15,
+    fontSize: 10,
+    lineHeight: 13,
     fontWeight: '700',
   },
   duePill: {
     backgroundColor: expenseColors.accentRedBg,
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: 8,
+    paddingHorizontal: 7,
+    paddingVertical: 2.5,
+    borderRadius: 6,
   },
   duePillText: {
     color: expenseColors.accentRed,
-    fontSize: 12,
-    lineHeight: 15,
+    fontSize: 10,
+    lineHeight: 13,
     fontWeight: '700',
   },
   noChangeText: {
     color: expenseColors.textMuted,
-    fontSize: 12,
-    lineHeight: 15,
+    fontSize: 11,
+    lineHeight: 14,
     fontWeight: '500',
   },
 });

@@ -39,7 +39,7 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
   account,
   onClose,
 }) => {
-  const { addAccount, updateAccount, deleteAccount, archiveAccount, transactions, currencySymbol } = useExpenseStore();
+  const { addAccount, updateAccount, deleteAccount, archiveAccount, unarchiveAccount, transactions, currencySymbol } = useExpenseStore();
   const sym = currencySymbol || '₹';
 
   const [name, setName] = useState<string>('');
@@ -102,21 +102,26 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
 
   const handleArchive = () => {
     if (!account) return;
-    Alert.alert(
-      'Archive Account',
-      `Are you sure you want to archive "${account.name}"?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Archive',
-          style: 'default',
-          onPress: () => {
-            archiveAccount(account.id);
-            onClose();
+    if (account.isArchived) {
+      unarchiveAccount(account.id);
+      onClose();
+    } else {
+      Alert.alert(
+        'Archive Account',
+        `Are you sure you want to archive "${account.name}"?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Archive',
+            style: 'default',
+            onPress: () => {
+              archiveAccount(account.id);
+              onClose();
+            },
           },
-        },
-      ]
-    );
+        ]
+      );
+    }
   };
 
   const handleDelete = () => {
@@ -319,7 +324,9 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
                 activeOpacity={0.75}
               >
                 <Archive size={16} color="#A0A5B5" />
-                <AppText style={styles.archiveBtnText}>Archive Account</AppText>
+                <AppText style={styles.archiveBtnText}>
+                  {account?.isArchived ? 'Restore Account' : 'Archive Account'}
+                </AppText>
               </TouchableOpacity>
 
               <TouchableOpacity

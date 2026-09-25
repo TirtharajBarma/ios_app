@@ -33,6 +33,7 @@ import {
   ChevronRight,
   ChevronDown,
   Building2,
+  Folder,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
@@ -42,6 +43,8 @@ import { useExpenseStore } from '@/store/useExpenseStore';
 import { expenseColors } from '@/constants/expenseColors';
 import { ExpenseTransaction, ExpenseCategory } from '@/types/expense';
 import { CategoryIcon } from './CategoryIcon';
+import { AddTransactionModal } from './AddTransactionModal';
+import { SplitDetailsModal } from './SplitDetailsModal';
 import { getDeviceAiEngineInfo } from '@/services/onDeviceAi';
 
 export interface LedgerGroupItem {
@@ -87,6 +90,8 @@ export const ExpenseLedger: React.FC = () => {
   } = useExpenseStore();
 
   const [isSelectMode, setIsSelectMode] = useState(false);
+  const [editingTx, setEditingTx] = useState<ExpenseTransaction | null>(null);
+  const [selectedSplitTx, setSelectedSplitTx] = useState<ExpenseTransaction | null>(null);
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const searchInputRef = useRef<TextInput>(null);
@@ -123,7 +128,7 @@ export const ExpenseLedger: React.FC = () => {
       .filter((c) => c.id !== 'cat_income')
       .map((c) => ({
         id: c.id,
-        title: `${c.name}${c.emoji ? ` ${c.emoji}` : ''}`,
+        title: c.name,
         image: 'tag.fill' as any,
       }));
   }, [categories]);
@@ -206,9 +211,11 @@ export const ExpenseLedger: React.FC = () => {
     return categories.find((c) => c.id === catId) || categories[0];
   };
 
-  const getAccountName = (accId?: string) => {
-    if (!accId) return '';
-    return accounts.find((a) => a.id === accId)?.name || accId;
+  const getAccountName = (accId?: string, fallbackName?: string) => {
+    if (!accId) return fallbackName || '';
+    const acc = accounts.find((a) => a.id === accId);
+    if (acc) return acc.name;
+    return fallbackName || accId.replace(/^acc_/, '').toUpperCase();
   };
 
   const renderCategoryIcon = (cat: ExpenseCategory) => {
@@ -283,11 +290,10 @@ export const ExpenseLedger: React.FC = () => {
     });
 
     const isTransfer = tx.type === 'transfer';
-    const isSplit = !!tx.split;
     const isDebtLend = tx.type === 'debt_lend';
     const isDebtBorrow = tx.type === 'debt_borrow';
     const isDebt = isDebtLend || isDebtBorrow;
-    const isExpense = tx.type === 'expense' || isSplit || isDebtLend;
+    const isExpense = tx.type === 'expense' || !!tx.split || isDebtLend;
     const isIncome = tx.type === 'income' || isDebtBorrow;
 
     const isSettled = isDebtLend ? tx.isSettled : isDebtBorrow ? tx.isSettled : tx.split?.settled;
@@ -318,6 +324,11 @@ export const ExpenseLedger: React.FC = () => {
 
     const txActions: MenuAction[] = [
       {
+        id: 'edit',
+        title: 'Edit Transaction',
+        image: 'pencil' as any,
+      },
+      {
         id: 'copy',
         title: 'Copy Details',
         image: 'doc.on.doc' as any,
@@ -335,6 +346,24 @@ export const ExpenseLedger: React.FC = () => {
       },
     ];
 
+    const isSplit = Boolean(tx.split);
+    const splitFriendsCount = tx.split
+      ? tx.split.friends && tx.split.friends.length > 0
+        ? tx.split.friends.length
+        : ((tx.split.friendNames || '').split(',').map((n) => n.trim()).filter(Boolean).length || 1)
+      : 0;
+    const splitCollected = tx.split
+      ? tx.split.friends && tx.split.friends.length > 0
+        ? tx.split.friends.filter((f) => f.settled).reduce((s, f) => s + f.amount, 0)
+        : tx.split.settled
+        ? tx.split.friendsShare || 0
+        : 0
+      : 0;
+    const splitTotalLent = tx.split ? tx.split.friendsShare || 0 : 0;
+    const splitIsAllSettled = Boolean(
+      tx.split?.settled || (splitTotalLent > 0 && splitCollected >= splitTotalLent)
+    );
+
     const rowContent = (
       <TouchableOpacity
         style={[styles.transactionRow, !isLast && styles.rowDivider]}
@@ -343,6 +372,15 @@ export const ExpenseLedger: React.FC = () => {
           if (isSelectMode) {
             Haptics.selectionAsync().catch(() => {});
             toggleSelectTransaction(tx.id);
+          } else if (isSplit) {
+            Haptics.selectionAsync().catch(() => {});
+            setSelectedSplitTx(tx);
+          }
+        }}
+        onLongPress={() => {
+          if (!isSelectMode) {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+            setEditingTx(tx);
           }
         }}
       >
@@ -374,9 +412,9 @@ export const ExpenseLedger: React.FC = () => {
               backgroundColor: isTransfer
                 ? 'rgba(96, 165, 250, 0.15)'
                 : isSplit
-                ? isSettled
+                ? splitIsAllSettled
                   ? 'rgba(124, 217, 168, 0.12)'
-                  : 'rgba(242, 139, 130, 0.12)'
+                  : 'rgba(255, 157, 102, 0.15)'
                 : isDebtLend
                 ? isSettled
                   ? 'rgba(124, 217, 168, 0.12)'
@@ -390,13 +428,13 @@ export const ExpenseLedger: React.FC = () => {
           ]}
         >
           {isTransfer ? (
-            <ArrowRightLeft size={16} color="#60A5FA" />
+            <ArrowRightLeft size={16} color="#9DC6EB" />
           ) : isSplit ? (
-            <Users size={16} color={isSettled ? '#7CD9A8' : '#F28B82'} />
+            <Users size={16} color={splitIsAllSettled ? '#70D6BC' : '#FF9D66'} />
           ) : isDebtLend ? (
-            <HandCoins size={16} color={isSettled ? '#7CD9A8' : '#F28B82'} />
+            <HandCoins size={16} color={isSettled ? '#70D6BC' : '#F48B8B'} />
           ) : isDebtBorrow ? (
-            <HandCoins size={16} color={isSettled ? '#7CD9A8' : '#FBBF24'} />
+            <HandCoins size={16} color={isSettled ? '#70D6BC' : '#F4CD89'} />
           ) : (
             renderCategoryIcon(cat)
           )}
@@ -405,7 +443,7 @@ export const ExpenseLedger: React.FC = () => {
         {/* Center: Title & Subtitle Badge */}
         <View style={styles.transactionCenter}>
           <AppText style={styles.transactionTitle} numberOfLines={1}>
-            {tx.note || (isTransfer ? 'Account Transfer' : cat.name.toUpperCase())}
+            {(tx.note || (isTransfer ? 'ACCOUNT TRANSFER' : cat.name)).toUpperCase()}
           </AppText>
 
           {/* Badges / Flow details */}
@@ -413,7 +451,7 @@ export const ExpenseLedger: React.FC = () => {
             {isTransfer ? (
               <View style={styles.transferFlowPill}>
                 <AppText style={styles.transferFlowText}>
-                  {getAccountName(tx.accountId)} ➔ {getAccountName(tx.toAccountId)}
+                  {getAccountName(tx.accountId, tx.accountName).toUpperCase()} ➔ {getAccountName(tx.toAccountId, tx.toAccountName).toUpperCase()}
                 </AppText>
               </View>
             ) : isDebtLend ? (
@@ -429,8 +467,8 @@ export const ExpenseLedger: React.FC = () => {
                     isSettled && styles.settledPillText,
                   ]}
                 >
-                  {isSettled ? 'Recovered from ' : 'Lent to '}
-                  {tx.borrowerOrLender || 'Friend'}
+                  {isSettled ? 'RECOVERED FROM ' : 'LENT TO '}
+                  {(tx.borrowerOrLender || 'Friend').toUpperCase()}
                 </AppText>
               </View>
             ) : isDebtBorrow ? (
@@ -446,14 +484,14 @@ export const ExpenseLedger: React.FC = () => {
                     isSettled && styles.settledPillText,
                   ]}
                 >
-                  {isSettled ? 'Repaid to ' : 'Borrowed from '}
-                  {tx.borrowerOrLender || 'Friend'}
+                  {isSettled ? 'REPAID TO ' : 'BORROWED FROM '}
+                  {(tx.borrowerOrLender || 'Friend').toUpperCase()}
                 </AppText>
               </View>
             ) : (
               <View style={styles.categoryPill}>
                 <AppText style={[styles.categoryPillText, { color: cat.color || expenseColors.accentPeach }]}>
-                  {cat.name} {cat.emoji || ''}
+                  {cat.name.toUpperCase()}
                 </AppText>
               </View>
             )}
@@ -461,32 +499,28 @@ export const ExpenseLedger: React.FC = () => {
             {/* Event / Trip Tag Badge */}
             {tx.tag && (
               <View style={styles.tripTagBadge}>
-                <Tag size={10} color={expenseColors.accentPeach} />
-                <AppText style={styles.tripTagBadgeText}>{tx.tag}</AppText>
+                <AppText style={styles.tripTagBadgeText}>{tx.tag.toUpperCase()}</AppText>
+              </View>
+            )}
+
+            {/* Split Bill Badge */}
+            {isSplit && (
+              <View style={[styles.splitPill, splitIsAllSettled && styles.splitSettledPill]}>
+                <AppText style={[styles.splitPillText, splitIsAllSettled && styles.splitSettledPillText]}>
+                  {splitIsAllSettled ? 'SPLIT · SETTLED' : `SPLIT (${splitFriendsCount})`}
+                </AppText>
               </View>
             )}
 
             {/* Statistical Anomaly / Outlier Badge */}
             {isOutlier && (
               <View style={styles.outlierBadge}>
-                <AppText style={styles.outlierBadgeText}>⚠️ High</AppText>
+                <AppText style={styles.outlierBadgeText}>⚠️ HIGH</AppText>
               </View>
             )}
 
-            <AppText style={styles.transactionDateText}>{formattedDate}</AppText>
+            <AppText style={styles.transactionDateText}>{formattedDate.toUpperCase()}</AppText>
           </View>
-
-          {/* Split breakdown info if split transaction */}
-          {isSplit && tx.split && (
-            <View style={styles.splitLedgerDetail}>
-              <AppText style={styles.splitLedgerDetailText}>
-                My share: <AppText style={{ color: '#FFFFFF', fontWeight: '700' }}>{sym}{tx.split.yourShare.toLocaleString('en-IN')}</AppText>
-                {'  '}•{'  '}
-                Lent: <AppText style={{ color: tx.split.settled ? '#7CD9A8' : '#F28B82', fontWeight: '700' }}>{sym}{tx.split.friendsShare.toLocaleString('en-IN')}</AppText>
-                {tx.split.friendNames ? ` (${tx.split.friendNames})` : ''}
-              </AppText>
-            </View>
-          )}
         </View>
 
         {/* Right: Amount (Clean, right-aligned, dynamic colors) */}
@@ -503,6 +537,14 @@ export const ExpenseLedger: React.FC = () => {
           >
             {amountDisplay}
           </AppText>
+          {isSplit && (
+            <View style={styles.splitSubAmtRow}>
+              <AppText style={styles.splitSubAmountText}>
+                {splitIsAllSettled ? 'All settled' : `My share: ${sym}${tx.split?.yourShare || 0}`}
+              </AppText>
+              <ChevronRight size={11} color="#7E8394" />
+            </View>
+          )}
         </View>
       </TouchableOpacity>
     );
@@ -514,12 +556,15 @@ export const ExpenseLedger: React.FC = () => {
     return (
       <NativeLiquidMenu
         key={tx.id}
-        title={tx.note || cat.name}
+        title={(tx.note || (isTransfer ? 'Account Transfer' : cat.name)).toUpperCase()}
         actions={txActions}
         shouldOpenOnLongPress={true}
         onSelect={(actionId) => {
-          if (actionId === 'copy') {
-            const copyText = `${tx.note || cat.name}: ${amountDisplay} (${formattedDate})`;
+          if (actionId === 'edit') {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+            setEditingTx(tx);
+          } else if (actionId === 'copy') {
+            const copyText = `${(tx.note || cat.name).toUpperCase()}: ${amountDisplay} (${formattedDate.toUpperCase()})`;
             Clipboard.setStringAsync(copyText).catch(() => {});
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
           } else if (actionId === 'select') {
@@ -564,7 +609,7 @@ export const ExpenseLedger: React.FC = () => {
       >
         {/* Folder Icon Circle */}
         <View style={styles.folderIconCircle}>
-          <AppText style={{ fontSize: 16 }}>{folderEmoji}</AppText>
+          <AppText style={{ fontSize: 16 }}>{folderEmoji || '📁'}</AppText>
         </View>
 
         {/* Center Info */}
@@ -573,12 +618,12 @@ export const ExpenseLedger: React.FC = () => {
             <AppText style={styles.folderTitleText} numberOfLines={1}>
               {folderName.toUpperCase()}
             </AppText>
-            <View style={styles.folderCountBadge}>
-              <AppText style={styles.folderCountBadgeText}>{folderTxs.length}</AppText>
+            <View style={styles.tripFolderPill}>
+              <AppText style={styles.tripFolderPillText}>TRIP FOLDER</AppText>
             </View>
           </View>
           <AppText style={styles.folderSubText}>
-            Trip Folder • {folderTxs.length} item{folderTxs.length > 1 ? 's' : ''}
+            {folderTxs.length} ITEM{folderTxs.length > 1 ? 'S' : ''} • TAP TO VIEW FOLDER
           </AppText>
         </View>
 
@@ -812,7 +857,7 @@ export const ExpenseLedger: React.FC = () => {
           >
             <View style={styles.compactLentLeft}>
               <View style={styles.compactLentIconCircle}>
-                <HandCoins size={16} color="#A0A5B5" />
+                <HandCoins size={17} color={expenseColors.accentPeach} />
               </View>
               <View style={styles.compactLentTextCol}>
                 <AppText style={styles.compactLentTitle}>
@@ -992,6 +1037,26 @@ export const ExpenseLedger: React.FC = () => {
             </TouchableOpacity>
           </View>
         </View>
+      )}
+
+      {editingTx && (
+        <AddTransactionModal
+          visible={!!editingTx}
+          initialTransaction={editingTx}
+          onClose={() => setEditingTx(null)}
+        />
+      )}
+
+      {selectedSplitTx && (
+        <SplitDetailsModal
+          visible={selectedSplitTx !== null}
+          transaction={selectedSplitTx}
+          onClose={() => setSelectedSplitTx(null)}
+          onEdit={(tx) => {
+            setSelectedSplitTx(null);
+            setEditingTx(tx);
+          }}
+        />
       )}
 
     </View>
@@ -1181,7 +1246,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   metricValue: {
-    color: '#5CE49A',
+    color: expenseColors.accentGreen,
     fontSize: 12,
     fontWeight: '800',
   },
@@ -1365,37 +1430,37 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   transferFlowText: {
-    color: '#60A5FA',
+    color: '#9DC6EB',
     fontSize: 11,
     fontWeight: '700',
   },
   debtLentPill: {
-    backgroundColor: 'rgba(242, 139, 130, 0.12)',
+    backgroundColor: expenseColors.accentRedBg,
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 6,
   },
   debtLentText: {
-    color: '#F28B82',
+    color: expenseColors.accentRed,
     fontSize: 11,
     fontWeight: '700',
   },
   debtBorrowPill: {
-    backgroundColor: 'rgba(251, 191, 36, 0.12)',
+    backgroundColor: 'rgba(244, 205, 137, 0.12)',
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 6,
   },
   debtBorrowText: {
-    color: '#FBBF24',
+    color: '#F4CD89',
     fontSize: 11,
     fontWeight: '700',
   },
   settledPill: {
-    backgroundColor: 'rgba(124, 217, 168, 0.12)',
+    backgroundColor: expenseColors.accentGreenBg,
   },
   settledPillText: {
-    color: '#7CD9A8',
+    color: expenseColors.accentGreen,
   },
   tripTagBadge: {
     flexDirection: 'row',
@@ -1411,12 +1476,84 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
   },
-  splitLedgerDetail: {
-    marginTop: 6,
+  splitPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: 'rgba(255, 157, 102, 0.12)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
   },
-  splitLedgerDetailText: {
+  splitPillText: {
+    color: '#FF9D66',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  tripFolderPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: 'rgba(167, 139, 250, 0.15)',
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 6,
+  },
+  tripFolderPillText: {
+    color: '#A78BFA',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  splitSettledPill: {
+    backgroundColor: 'rgba(112, 214, 188, 0.15)',
+  },
+  splitSettledPillText: {
+    color: '#70D6BC',
+  },
+  splitPeoplePill: {
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  splitPeoplePillText: {
+    color: '#D1D5DB',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  splitStatusPill: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  splitStatusPillText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  splitCleanSubRow: {
+    marginTop: 4,
+  },
+  splitCleanSubText: {
     color: '#8E919D',
-    fontSize: 12,
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  splitCleanBold: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  splitSubAmtRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    marginTop: 2,
+  },
+  splitSubAmountText: {
+    color: '#7E8394',
+    fontSize: 10,
+    fontWeight: '500',
   },
   categoryPill: {
     backgroundColor: '#232633',
@@ -1445,28 +1582,28 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   expenseAmount: {
-    color: '#FF6B6B',
+    color: expenseColors.accentRed,
   },
   incomeAmount: {
-    color: '#34D399',
+    color: expenseColors.accentGreen,
   },
   transferAmount: {
-    color: '#60A5FA',
+    color: '#9DC6EB',
   },
   debtLendPendingAmount: {
-    color: '#F28B82', // Pastel Coral / Red when pending
+    color: expenseColors.accentRed, // Pastel Coral / Red when pending
   },
   debtBorrowPendingAmount: {
-    color: '#FBBF24', // Warm Yellow when pending
+    color: '#F4CD89', // Warm Yellow when pending
   },
   settledAmount: {
-    color: '#7CD9A8', // Pastel Green when settled
+    color: expenseColors.accentGreen, // Pastel Green when settled
   },
   debtLendAmount: {
-    color: '#F28B82',
+    color: expenseColors.accentRed,
   },
   debtBorrowAmount: {
-    color: '#FBBF24',
+    color: '#F4CD89',
   },
   outlierBadge: {
     backgroundColor: 'rgba(255, 157, 102, 0.15)',
@@ -1541,14 +1678,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    flex: 1,
   },
   compactLentIconCircle: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 157, 102, 0.12)',
     alignItems: 'center',
     justifyContent: 'center',
+    padding: 6,
   },
   compactLentTextCol: {
     justifyContent: 'center',
@@ -1606,7 +1745,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#FF725E',
+    backgroundColor: expenseColors.accentRed,
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 18,

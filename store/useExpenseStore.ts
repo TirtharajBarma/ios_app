@@ -1,11 +1,64 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@/utils/storage';
+import { logAction, logException } from '@/utils/auditLog';
 import { ExpenseAccount, ExpenseCategory, ExpenseTransaction, QuickExpensePreset, SavingsVault, EventFolder } from '@/types/expense';
 import { expenseColors } from '@/constants/expenseColors';
 import { executeSmartQuery, SmartQueryResult } from '@/services/onDeviceAi';
 
 export type AppThemeMode = 'editorial' | 'cream' | 'midnight' | 'system';
+
+const MONTHS_FULL = [
+  'JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE',
+  'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER',
+];
+
+function localISODate(d: Date): string {
+  const y = d.getFullYear();
+  const m = `${d.getMonth() + 1}`.padStart(2, '0');
+  const day = `${d.getDate()}`.padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function daysAgoISO(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return localISODate(d);
+}
+
+function monthKeyOf(d: Date): string {
+  return `${MONTHS_FULL[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+function parseISODate(dateStr: string): { year: number; month: number; day: number } {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr || '');
+  if (!m) {
+    const d = new Date(dateStr);
+    return { year: d.getFullYear(), month: d.getMonth(), day: d.getDate() };
+  }
+  return { year: Number(m[1]), month: Number(m[2]) - 1, day: Number(m[3]) };
+}
+
+function isInMonth(dateStr: string, year: number, month: number): boolean {
+  const d = parseISODate(dateStr);
+  return d.year === year && d.month === month;
+}
+
+function monthKeyToYearMonth(monthKey?: string): { year: number; month: number } {
+  const now = new Date();
+  const str = (monthKey || '').toLowerCase();
+  let year = now.getFullYear();
+  let month = now.getMonth();
+  const yr = /\b(\d{4})\b/.exec(str);
+  if (yr) year = parseInt(yr[1], 10);
+  const idx = MONTHS_FULL.findIndex((m) => str.includes(m.toLowerCase()));
+  if (idx >= 0) month = idx;
+  return { year, month };
+}
+
+function genId(prefix: string): string {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
 
 interface ExpenseState {
   // Primary State
@@ -37,12 +90,14 @@ interface ExpenseState {
   setSmartSearchQuery: (query: string) => void;
 
   addTransaction: (tx: Omit<ExpenseTransaction, 'id'>) => void;
+  updateTransaction: (id: string, updates: Partial<ExpenseTransaction>) => void;
   removeTransactions: (ids: string[]) => void;
   updateTransactionsCategory: (ids: string[], categoryId: string) => void;
   toggleSelectTransaction: (id: string) => void;
   clearSelectedTransactions: () => void;
   selectAllTransactions: () => void;
   settleTransaction: (txId: string, receivingAccountId?: string) => void;
+  settleFriendShare: (txId: string, friendId: string, receivingAccountId?: string) => void;
 
   addQuickPreset: (preset: Omit<QuickExpensePreset, 'id'>) => void;
   deleteQuickPreset: (id: string) => void;
@@ -64,6 +119,7 @@ interface ExpenseState {
   updateAccount: (id: string, updates: Partial<ExpenseAccount>) => void;
   deleteAccount: (id: string) => void;
   archiveAccount: (id: string) => void;
+  unarchiveAccount: (id: string) => void;
 
   addCategory: (cat: Omit<ExpenseCategory, 'id'>) => void;
   updateCategory: (id: string, updates: Partial<ExpenseCategory>) => void;
@@ -76,20 +132,20 @@ interface ExpenseState {
 
   // Derived Calculations
   getTotalBalance: () => number;
-  getTotalIncome: () => number;
-  getTotalSpent: () => number;
-  getNetBalance: () => number;
-  getRemainingBudget: () => number;
-  getOverspentPercentage: () => number;
+  getTotalIncome: (monthKey?: string) => number;
+  getTotalSpent: (monthKey?: string) => number;
+  getNetBalance: (monthKey?: string) => number;
+  getRemainingBudget: (monthKey?: string) => number;
+  getOverspentPercentage: (monthKey?: string) => number;
   getTotalSavedInVaults: () => number;
   getFreeLiquidBalance: () => number;
-  getSafeToSpend: () => number;
-  getCategoryBreakdown: () => Array<{
+  getSafeToSpend: (monthKey?: string) => number;
+  getCategoryBreakdown: (monthKey?: string) => Array<{
     category: ExpenseCategory;
     amount: number;
     percentage: number;
   }>;
-  getTopCategory: () => {
+  getTopCategory: (monthKey?: string) => {
     category: ExpenseCategory;
     amount: number;
     percentage: number;
@@ -101,15 +157,16 @@ interface ExpenseState {
 }
 
 const INITIAL_CATEGORIES: ExpenseCategory[] = [
-  { id: 'cat_cig', name: 'Cigarettes', emoji: '🚬', color: expenseColors.categories.cig, iconName: 'Star' },
+  { id: 'cat_cig', name: 'Cigarettes', color: expenseColors.categories.cig, iconName: 'Cigarette' },
   { id: 'cat_shop', name: 'Shopping', color: expenseColors.categories.shop, iconName: 'ShoppingBag' },
   { id: 'cat_ent', name: 'Entertainment', color: expenseColors.categories.ent, iconName: 'Tv' },
+  { id: 'cat_subs', name: 'Subscription', color: '#FF9D66', iconName: 'Repeat' },
   { id: 'cat_health', name: 'Health', color: expenseColors.categories.health, iconName: 'Heart' },
   { id: 'cat_fin', name: 'Finance', color: expenseColors.categories.fin, iconName: 'Banknote' },
   { id: 'cat_trans', name: 'Transport', color: expenseColors.categories.trans, iconName: 'Car' },
   { id: 'cat_util', name: 'Utilities', color: expenseColors.categories.util, iconName: 'Zap' },
-  { id: 'cat_misc', name: 'Misc', color: expenseColors.categories.misc, iconName: 'MoreHorizontal' },
   { id: 'cat_food', name: 'Food', color: expenseColors.categories.food, iconName: 'UtensilsCrossed' },
+  { id: 'cat_misc', name: 'Misc', color: expenseColors.categories.misc, iconName: 'MoreHorizontal' },
   { id: 'cat_income', name: 'Income', color: expenseColors.accentGreen, iconName: 'Coins' },
 ];
 
@@ -167,16 +224,16 @@ const INITIAL_ACCOUNTS: ExpenseAccount[] = [
 ];
 
 const INITIAL_TRANSACTIONS: ExpenseTransaction[] = [
-  { id: 'tx_1', amount: 14, type: 'expense', categoryId: 'cat_cig', accountId: 'acc_slice', date: '2026-09-22', note: 'CIGARETTES' },
-  { id: 'tx_2', amount: 131, type: 'expense', categoryId: 'cat_trans', accountId: 'acc_hdfc', date: '2026-09-22', note: 'SUDHA OFFICE UBER' },
-  { id: 'tx_3', amount: 119, type: 'expense', categoryId: 'cat_ent', accountId: 'acc_myzone', date: '2026-09-21', note: 'MOVIE' },
-  { id: 'tx_4', amount: 27, type: 'expense', categoryId: 'cat_trans', accountId: 'acc_hdfc', date: '2026-09-21', note: 'AUTO' },
-  { id: 'tx_5', amount: 86, type: 'expense', categoryId: 'cat_food', accountId: 'acc_neo', date: '2026-09-21', note: 'LUNCH' },
-  { id: 'tx_6', amount: 202, type: 'expense', categoryId: 'cat_shop', accountId: 'acc_amazon', date: '2026-09-15', note: 'AMAZON PURCHASES' },
-  { id: 'tx_7', amount: 1092, type: 'expense', categoryId: 'cat_cig', accountId: 'acc_slice', date: '2026-09-14', note: 'CIGARETTES PACK' },
-  { id: 'tx_8', amount: 100, type: 'expense', categoryId: 'cat_trans', accountId: 'acc_slice', date: '2026-09-14', note: 'METRO PASS' },
-  { id: 'tx_9', amount: 86, type: 'expense', categoryId: 'cat_food', accountId: 'acc_neo', date: '2026-09-12', note: 'GROCERIES' },
-  { id: 'tx_10', amount: 25, type: 'expense', categoryId: 'cat_misc', accountId: 'acc_sbi', date: '2026-09-10', note: 'MISC CHAI' },
+  { id: 'tx_1', amount: 14, type: 'expense', categoryId: 'cat_cig', accountId: 'acc_slice', date: daysAgoISO(0), note: 'CIGARETTES' },
+  { id: 'tx_2', amount: 131, type: 'expense', categoryId: 'cat_trans', accountId: 'acc_hdfc', date: daysAgoISO(0), note: 'SUDHA OFFICE UBER' },
+  { id: 'tx_3', amount: 119, type: 'expense', categoryId: 'cat_ent', accountId: 'acc_myzone', date: daysAgoISO(1), note: 'MOVIE' },
+  { id: 'tx_4', amount: 27, type: 'expense', categoryId: 'cat_trans', accountId: 'acc_hdfc', date: daysAgoISO(1), note: 'AUTO' },
+  { id: 'tx_5', amount: 86, type: 'expense', categoryId: 'cat_food', accountId: 'acc_neo', date: daysAgoISO(1), note: 'LUNCH' },
+  { id: 'tx_6', amount: 202, type: 'expense', categoryId: 'cat_shop', accountId: 'acc_amazon', date: daysAgoISO(7), note: 'AMAZON PURCHASES' },
+  { id: 'tx_7', amount: 1092, type: 'expense', categoryId: 'cat_cig', accountId: 'acc_slice', date: daysAgoISO(8), note: 'CIGARETTES PACK' },
+  { id: 'tx_8', amount: 100, type: 'expense', categoryId: 'cat_trans', accountId: 'acc_slice', date: daysAgoISO(8), note: 'METRO PASS' },
+  { id: 'tx_9', amount: 86, type: 'expense', categoryId: 'cat_food', accountId: 'acc_neo', date: daysAgoISO(10), note: 'GROCERIES' },
+  { id: 'tx_10', amount: 25, type: 'expense', categoryId: 'cat_misc', accountId: 'acc_sbi', date: daysAgoISO(12), note: 'MISC CHAI' },
 ];
 
 const INITIAL_QUICK_PRESETS: QuickExpensePreset[] = [];
@@ -186,7 +243,7 @@ const INITIAL_SAVINGS_VAULTS: SavingsVault[] = [];
 export const useExpenseStore = create<ExpenseState>()(
   persist(
     (set, get) => ({
-  selectedMonth: 'SEPTEMBER 2026',
+  selectedMonth: monthKeyOf(new Date()),
   monthlyBudget: 18400,
   currencyCode: 'INR',
   currencySymbol: '₹',
@@ -211,8 +268,8 @@ export const useExpenseStore = create<ExpenseState>()(
   quickPresets: [],
   savingsVaults: INITIAL_SAVINGS_VAULTS,
   eventFolders: [
-    { id: 'ef_goa', name: 'Goa Trip', emoji: '🌴', createdAt: '2026-09-01' },
-    { id: 'ef_party', name: 'Night Out', emoji: '🎉', createdAt: '2026-09-10' },
+    { id: 'ef_goa', name: 'Goa Trip', emoji: '🌴', createdAt: daysAgoISO(24) },
+    { id: 'ef_party', name: 'Night Out', emoji: '🎉', createdAt: daysAgoISO(15) },
   ],
   selectedTransactionIds: [],
   activeAccountFilter: 'All',
@@ -221,16 +278,29 @@ export const useExpenseStore = create<ExpenseState>()(
 
   setHasInitialAppLoaded: (hasInitialAppLoaded) => set({ hasInitialAppLoaded }),
   setSelectedMonth: (month) => set({ selectedMonth: month }),
-  setMonthlyBudget: (budget) => set({ monthlyBudget: budget }),
-  setThemeMode: (mode) => set({ themeMode: mode }),
-  setCurrency: (code, symbol) => set({ currencyCode: code, currencySymbol: symbol }),
+  setMonthlyBudget: (budget) => {
+    set({ monthlyBudget: budget });
+    logAction('budget', `Set monthly budget: ${budget}`, { budget });
+  },
+  setThemeMode: (mode) => {
+    set({ themeMode: mode });
+    logAction('settings', `Changed theme: ${mode}`, { mode });
+  },
+  setCurrency: (code, symbol) => {
+    set({ currencyCode: code, currencySymbol: symbol });
+    logAction('settings', `Changed currency to ${code}`, { code });
+  },
   setActiveAccountFilter: (filter) => set({ activeAccountFilter: filter }),
   setSmartSearchQuery: (query) => set({ smartSearchQuery: query }),
 
   addTransaction: (txData) => {
+    const fromAcc = get().accounts.find((a) => a.id === txData.accountId);
+    const toAcc = txData.toAccountId ? get().accounts.find((a) => a.id === txData.toAccountId) : undefined;
     const newTx: ExpenseTransaction = {
       ...txData,
-      id: `tx_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+      id: genId('tx'),
+      accountName: fromAcc?.name || txData.accountName,
+      toAccountName: toAcc?.name || txData.toAccountName,
     };
 
     set((state) => {
@@ -239,11 +309,12 @@ export const useExpenseStore = create<ExpenseState>()(
         let dueAmount = acc.dueAmount || 0;
         let monthlyChange = acc.monthlyChange;
         let txnCountThisMonth = acc.txnCountThisMonth;
+        const isDue = acc.statusType === 'due' || acc.type === 'credit';
 
         // 1. Expense
         if (newTx.type === 'expense' && acc.id === newTx.accountId) {
           txnCountThisMonth += 1;
-          if (acc.statusType === 'due' || acc.type === 'credit') {
+          if (isDue) {
             dueAmount += newTx.amount;
             monthlyChange -= newTx.amount;
           } else {
@@ -262,7 +333,7 @@ export const useExpenseStore = create<ExpenseState>()(
         // 3. Transfer Out (From Account)
         if (newTx.type === 'transfer' && acc.id === newTx.accountId) {
           txnCountThisMonth += 1;
-          if (acc.statusType === 'due' || acc.type === 'credit') {
+          if (isDue) {
             dueAmount += newTx.amount;
           } else {
             balance = Math.max(0, balance - newTx.amount);
@@ -272,7 +343,7 @@ export const useExpenseStore = create<ExpenseState>()(
         // 4. Transfer In / Bill Payment (To Account)
         if (newTx.type === 'transfer' && acc.id === newTx.toAccountId) {
           txnCountThisMonth += 1;
-          if (acc.statusType === 'due' || acc.type === 'credit') {
+          if (isDue) {
             // Bill payment reduces credit card due amount!
             dueAmount = Math.max(0, dueAmount - newTx.amount);
           } else {
@@ -283,7 +354,13 @@ export const useExpenseStore = create<ExpenseState>()(
         // 5. Debt Lent
         if (newTx.type === 'debt_lend' && acc.id === newTx.accountId) {
           txnCountThisMonth += 1;
-          balance = Math.max(0, balance - newTx.amount);
+          if (isDue) {
+            dueAmount += newTx.amount;
+            monthlyChange -= newTx.amount;
+          } else {
+            balance = Math.max(0, balance - newTx.amount);
+            monthlyChange -= newTx.amount;
+          }
         }
 
         // 6. Debt Borrowed
@@ -292,7 +369,26 @@ export const useExpenseStore = create<ExpenseState>()(
           balance += newTx.amount;
         }
 
-        const isDue = acc.statusType === 'due' || acc.type === 'credit';
+        // 7. Vault Deposit / Withdraw
+        if ((newTx.type === 'vault_deposit' || newTx.type === 'vault_withdraw') && acc.id === newTx.accountId) {
+          txnCountThisMonth += 1;
+          if (newTx.type === 'vault_deposit') {
+            if (isDue) {
+              dueAmount += newTx.amount;
+            } else {
+              balance = Math.max(0, balance - newTx.amount);
+            }
+            monthlyChange -= newTx.amount;
+          } else {
+            if (isDue) {
+              dueAmount = Math.max(0, dueAmount - newTx.amount);
+            } else {
+              balance += newTx.amount;
+            }
+            monthlyChange += newTx.amount;
+          }
+        }
+
         return {
           ...acc,
           balance,
@@ -308,11 +404,177 @@ export const useExpenseStore = create<ExpenseState>()(
         accounts: updatedAccounts,
       };
     });
+    logAction('transaction', 'Added transaction', { id: newTx.id, amount: newTx.amount, type: newTx.type });
+  },
+
+  updateTransaction: (id, updates) => {
+    set((state) => {
+      const oldTx = state.transactions.find((t) => t.id === id);
+      if (!oldTx) return state;
+
+      const fromAcc = updates.accountId
+        ? state.accounts.find((a) => a.id === updates.accountId)
+        : state.accounts.find((a) => a.id === oldTx.accountId);
+      const toAccountId = updates.toAccountId !== undefined ? updates.toAccountId : oldTx.toAccountId;
+      const toAcc = toAccountId ? state.accounts.find((a) => a.id === toAccountId) : undefined;
+
+      const updatedTx: ExpenseTransaction = {
+        ...oldTx,
+        ...updates,
+        accountName: fromAcc?.name || updates.accountName || oldTx.accountName,
+        toAccountName: toAcc?.name || updates.toAccountName || oldTx.toAccountName,
+      };
+
+      // 1. Revert old transaction on accounts
+      let updatedAccounts = state.accounts.map((acc) => {
+        let balance = acc.balance;
+        let dueAmount = acc.dueAmount || 0;
+        let monthlyChange = acc.monthlyChange;
+        let txnCountThisMonth = acc.txnCountThisMonth;
+        const isDue = acc.statusType === 'due' || acc.type === 'credit';
+
+        if (oldTx.type === 'expense' && acc.id === oldTx.accountId) {
+          txnCountThisMonth = Math.max(0, txnCountThisMonth - 1);
+          if (isDue) {
+            dueAmount = Math.max(0, dueAmount - oldTx.amount);
+            monthlyChange += oldTx.amount;
+          } else {
+            balance += oldTx.amount;
+            monthlyChange += oldTx.amount;
+          }
+        } else if (oldTx.type === 'income' && acc.id === oldTx.accountId) {
+          txnCountThisMonth = Math.max(0, txnCountThisMonth - 1);
+          balance = Math.max(0, balance - oldTx.amount);
+          monthlyChange -= oldTx.amount;
+        } else if (oldTx.type === 'transfer') {
+          if (acc.id === oldTx.accountId) {
+            txnCountThisMonth = Math.max(0, txnCountThisMonth - 1);
+            if (isDue) {
+              dueAmount = Math.max(0, dueAmount - oldTx.amount);
+            } else {
+              balance += oldTx.amount;
+            }
+          }
+          if (acc.id === oldTx.toAccountId) {
+            txnCountThisMonth = Math.max(0, txnCountThisMonth - 1);
+            if (isDue) {
+              dueAmount += oldTx.amount;
+            } else {
+              balance = Math.max(0, balance - oldTx.amount);
+            }
+          }
+        } else if (oldTx.type === 'debt_lend' && acc.id === oldTx.accountId) {
+          txnCountThisMonth = Math.max(0, txnCountThisMonth - 1);
+          if (isDue) {
+            dueAmount = Math.max(0, dueAmount - oldTx.amount);
+            monthlyChange += oldTx.amount;
+          } else {
+            balance += oldTx.amount;
+            monthlyChange += oldTx.amount;
+          }
+        } else if (oldTx.type === 'debt_borrow' && acc.id === oldTx.accountId) {
+          txnCountThisMonth = Math.max(0, txnCountThisMonth - 1);
+          balance = Math.max(0, balance - oldTx.amount);
+        }
+
+        return {
+          ...acc,
+          balance,
+          dueAmount: isDue ? dueAmount : undefined,
+          monthlyChange,
+          txnCountThisMonth,
+          statusType: isDue ? ('due' as const) : ('positive' as const),
+        };
+      });
+
+      // 2. Apply updated transaction to accounts
+      updatedAccounts = updatedAccounts.map((acc) => {
+        let balance = acc.balance;
+        let dueAmount = acc.dueAmount || 0;
+        let monthlyChange = acc.monthlyChange;
+        let txnCountThisMonth = acc.txnCountThisMonth;
+        const isDue = acc.statusType === 'due' || acc.type === 'credit';
+
+        if (updatedTx.type === 'expense' && acc.id === updatedTx.accountId) {
+          txnCountThisMonth += 1;
+          if (isDue) {
+            dueAmount += updatedTx.amount;
+            monthlyChange -= updatedTx.amount;
+          } else {
+            balance = Math.max(0, balance - updatedTx.amount);
+            monthlyChange -= updatedTx.amount;
+          }
+        } else if (updatedTx.type === 'income' && acc.id === updatedTx.accountId) {
+          txnCountThisMonth += 1;
+          balance += updatedTx.amount;
+          monthlyChange += updatedTx.amount;
+        } else if (updatedTx.type === 'transfer') {
+          if (acc.id === updatedTx.accountId) {
+            txnCountThisMonth += 1;
+            if (isDue) {
+              dueAmount += updatedTx.amount;
+            } else {
+              balance = Math.max(0, balance - updatedTx.amount);
+            }
+          }
+          if (acc.id === updatedTx.toAccountId) {
+            txnCountThisMonth += 1;
+            if (isDue) {
+              dueAmount = Math.max(0, dueAmount - updatedTx.amount);
+            } else {
+              balance += updatedTx.amount;
+            }
+          }
+        } else if (updatedTx.type === 'debt_lend' && acc.id === updatedTx.accountId) {
+          txnCountThisMonth += 1;
+          if (isDue) {
+            dueAmount += updatedTx.amount;
+            monthlyChange -= updatedTx.amount;
+          } else {
+            balance = Math.max(0, balance - updatedTx.amount);
+            monthlyChange -= updatedTx.amount;
+          }
+        } else if (updatedTx.type === 'debt_borrow' && acc.id === updatedTx.accountId) {
+          txnCountThisMonth += 1;
+          balance += updatedTx.amount;
+        }
+
+        return {
+          ...acc,
+          balance,
+          dueAmount: isDue ? dueAmount : undefined,
+          monthlyChange,
+          txnCountThisMonth,
+          statusType: isDue ? ('due' as const) : ('positive' as const),
+        };
+      });
+
+      return {
+        transactions: state.transactions.map((t) => (t.id === id ? updatedTx : t)),
+        accounts: updatedAccounts,
+      };
+    });
+    logAction('transaction', 'Updated transaction', { id, updates: Object.keys(updates) });
   },
 
   removeTransactions: (ids) => {
     set((state) => {
-      const txsToRemove = state.transactions.filter((t) => ids.includes(t.id));
+      const removeSet = new Set<string>(ids);
+      const sourcesToUnsettle = new Set<string>();
+
+      // Expand removals: deleting a settled debt/split also removes its settlement
+      // transaction, and deleting a settlement transaction un-settles its source.
+      for (const t of state.transactions) {
+        if (removeSet.has(t.id)) {
+          if (t.settlementTxId) removeSet.add(t.settlementTxId);
+          if (t.isSettled) sourcesToUnsettle.add(t.id);
+          if (t.split?.settled) sourcesToUnsettle.add(t.id);
+        } else if (t.settledTxId && removeSet.has(t.settledTxId)) {
+          sourcesToUnsettle.add(t.id);
+        }
+      }
+
+      const txsToRemove = state.transactions.filter((t) => removeSet.has(t.id));
       if (txsToRemove.length === 0) return state;
 
       let updatedAccounts = [...state.accounts];
@@ -327,6 +589,7 @@ export const useExpenseStore = create<ExpenseState>()(
                 return {
                   ...acc,
                   dueAmount: Math.max(0, (acc.dueAmount || 0) - tx.amount),
+                  monthlyChange: acc.monthlyChange + tx.amount,
                   txnCountThisMonth: Math.max(0, acc.txnCountThisMonth - 1),
                 };
               } else {
@@ -378,13 +641,22 @@ export const useExpenseStore = create<ExpenseState>()(
           });
         }
 
-        // 4. Revert Debt Lent (Restores the balance that left on create)
+        // 4. Revert Debt Lent (Restores the balance that left on create; credit-aware + monthlyChange)
         else if (tx.type === 'debt_lend') {
           updatedAccounts = updatedAccounts.map((acc) => {
             if (acc.id === tx.accountId) {
+              if (acc.statusType === 'due' || acc.type === 'credit') {
+                return {
+                  ...acc,
+                  dueAmount: Math.max(0, (acc.dueAmount || 0) - tx.amount),
+                  monthlyChange: acc.monthlyChange + tx.amount,
+                  txnCountThisMonth: Math.max(0, acc.txnCountThisMonth - 1),
+                };
+              }
               return {
                 ...acc,
                 balance: acc.balance + tx.amount,
+                monthlyChange: acc.monthlyChange + tx.amount,
                 txnCountThisMonth: Math.max(0, acc.txnCountThisMonth - 1),
               };
             }
@@ -415,6 +687,15 @@ export const useExpenseStore = create<ExpenseState>()(
           }
           updatedAccounts = updatedAccounts.map((acc) => {
             if (acc.id === tx.accountId) {
+              // Create added to dueAmount for credit cards; mirror that on revert
+              if (acc.statusType === 'due' || acc.type === 'credit') {
+                return {
+                  ...acc,
+                  dueAmount: Math.max(0, (acc.dueAmount || 0) - tx.amount),
+                  monthlyChange: acc.monthlyChange + tx.amount,
+                  txnCountThisMonth: Math.max(0, acc.txnCountThisMonth - 1),
+                };
+              }
               return {
                 ...acc,
                 balance: acc.balance + tx.amount,
@@ -435,6 +716,15 @@ export const useExpenseStore = create<ExpenseState>()(
           }
           updatedAccounts = updatedAccounts.map((acc) => {
             if (acc.id === tx.accountId) {
+              // Create reduced dueAmount for credit cards; mirror that on revert
+              if (acc.statusType === 'due' || acc.type === 'credit') {
+                return {
+                  ...acc,
+                  dueAmount: (acc.dueAmount || 0) + tx.amount,
+                  monthlyChange: acc.monthlyChange - tx.amount,
+                  txnCountThisMonth: Math.max(0, acc.txnCountThisMonth - 1),
+                };
+              }
               return {
                 ...acc,
                 balance: Math.max(0, acc.balance - tx.amount),
@@ -448,8 +738,14 @@ export const useExpenseStore = create<ExpenseState>()(
       }
 
       return {
-        transactions: state.transactions.filter((t) => !ids.includes(t.id)),
-        selectedTransactionIds: state.selectedTransactionIds.filter((id) => !ids.includes(id)),
+        transactions: state.transactions
+          .filter((t) => !removeSet.has(t.id))
+          .map((t) => {
+            if (!sourcesToUnsettle.has(t.id)) return t;
+            if (t.split) return { ...t, split: { ...t.split, settled: false }, settlementTxId: undefined };
+            return { ...t, isSettled: false, settlementTxId: undefined };
+          }),
+        selectedTransactionIds: state.selectedTransactionIds.filter((id) => !removeSet.has(id)),
         accounts: updatedAccounts,
         savingsVaults: updatedVaults,
       };
@@ -467,7 +763,7 @@ export const useExpenseStore = create<ExpenseState>()(
   addEventFolder: (folderData) => {
     const newFolder: EventFolder = {
       ...folderData,
-      id: `ef_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+      id: genId('ef'),
       createdAt: new Date().toISOString().split('T')[0],
     };
     set((state) => ({
@@ -523,7 +819,7 @@ export const useExpenseStore = create<ExpenseState>()(
         });
 
         const settlementTx: ExpenseTransaction = {
-          id: `tx_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+          id: genId('tx'),
           amount,
           type: 'income',
           categoryId: 'cat_income',
@@ -531,6 +827,7 @@ export const useExpenseStore = create<ExpenseState>()(
           date: todayISO,
           note: `Received from ${tx.borrowerOrLender || 'Friend'} (Settled)`,
           isSettled: true,
+          settledTxId: txId,
         };
 
         return {
@@ -538,14 +835,17 @@ export const useExpenseStore = create<ExpenseState>()(
           accounts: updatedAccounts,
           transactions: [
             settlementTx,
-            ...state.transactions.map((t) => (t.id === txId ? { ...t, isSettled: true } : t)),
+            ...state.transactions.map((t) => (t.id === txId ? { ...t, isSettled: true, settlementTxId: settlementTx.id } : t)),
           ],
         };
       }
 
       // 2. Split Bill Settlement: friend pays their share -> account balance increases + record new settlement income transaction
       if (tx.split && !tx.split.settled) {
-        const amount = tx.split.friendsShare;
+        const remainingUnsettledAmount = tx.split.friends && tx.split.friends.length > 0
+          ? tx.split.friends.filter((f) => !f.settled).reduce((sum, f) => sum + f.amount, 0)
+          : tx.split.friendsShare;
+        const amount = remainingUnsettledAmount > 0 ? remainingUnsettledAmount : tx.split.friendsShare;
         const targetAccId = targetOrSourceAccountId || tx.accountId || state.accounts[0]?.id;
         const updatedAccounts = state.accounts.map((acc) => {
           if (acc.id === targetAccId) {
@@ -560,15 +860,18 @@ export const useExpenseStore = create<ExpenseState>()(
         });
 
         const settlementTx: ExpenseTransaction = {
-          id: `tx_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+          id: genId('tx'),
           amount,
           type: 'income',
           categoryId: 'cat_income',
           accountId: targetAccId,
           date: todayISO,
-          note: `Received from ${tx.split.friendNames || 'Friend'} (Split Share)`,
+          note: `Received from ${tx.split.friendNames || 'Friends'} (Split Share)`,
           isSettled: true,
+          settledTxId: txId,
         };
+
+        const updatedFriends = tx.split.friends ? tx.split.friends.map((f) => ({ ...f, settled: true })) : undefined;
 
         return {
           ...state,
@@ -576,7 +879,17 @@ export const useExpenseStore = create<ExpenseState>()(
           transactions: [
             settlementTx,
             ...state.transactions.map((t) =>
-              t.id === txId && t.split ? { ...t, split: { ...t.split, settled: true } } : t
+              t.id === txId && t.split
+                ? {
+                    ...t,
+                    split: {
+                      ...t.split,
+                      friends: updatedFriends,
+                      settled: true,
+                    },
+                    settlementTxId: settlementTx.id,
+                  }
+                : t
             ),
           ],
         };
@@ -599,7 +912,7 @@ export const useExpenseStore = create<ExpenseState>()(
         });
 
         const settlementTx: ExpenseTransaction = {
-          id: `tx_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+          id: genId('tx'),
           amount,
           type: 'expense',
           categoryId: tx.categoryId || 'cat_other',
@@ -607,6 +920,7 @@ export const useExpenseStore = create<ExpenseState>()(
           date: todayISO,
           note: `Repaid to ${tx.borrowerOrLender || 'Friend'} (Debt Cleared)`,
           isSettled: true,
+          settledTxId: txId,
         };
 
         return {
@@ -614,7 +928,7 @@ export const useExpenseStore = create<ExpenseState>()(
           accounts: updatedAccounts,
           transactions: [
             settlementTx,
-            ...state.transactions.map((t) => (t.id === txId ? { ...t, isSettled: true } : t)),
+            ...state.transactions.map((t) => (t.id === txId ? { ...t, isSettled: true, settlementTxId: settlementTx.id } : t)),
           ],
         };
       }
@@ -623,10 +937,79 @@ export const useExpenseStore = create<ExpenseState>()(
     });
   },
 
+  settleFriendShare: (txId, friendId, receivingAccountId) => {
+    set((state) => {
+      const tx = state.transactions.find((t) => t.id === txId);
+      if (!tx || !tx.split) return state;
+
+      let friends = tx.split.friends;
+      if (!friends || friends.length === 0) {
+        const names = (tx.split.friendNames || 'Friend').split(',').map((n) => n.trim()).filter(Boolean);
+        const perAmt = Math.round((tx.split.friendsShare || 0) / Math.max(names.length, 1));
+        friends = names.map((n, i) => ({ id: `f_${i}`, name: n, amount: perAmt, settled: false }));
+      }
+
+      const friend = friends.find((f) => f.id === friendId) || (friends.length === 1 ? friends[0] : null);
+      if (!friend || friend.settled) return state;
+
+      const amount = friend.amount;
+      const targetAccId = receivingAccountId || tx.accountId || state.accounts[0]?.id;
+      const todayISO = new Date().toISOString().split('T')[0];
+
+      const updatedFriends = friends.map((f) =>
+        f.id === friend.id ? { ...f, settled: true } : f
+      );
+      const allFriendsSettled = updatedFriends.every((f) => f.settled);
+
+      const updatedAccounts = state.accounts.map((acc) => {
+        if (acc.id === targetAccId) {
+          return {
+            ...acc,
+            balance: acc.balance + amount,
+            monthlyChange: acc.monthlyChange + amount,
+            txnCountThisMonth: acc.txnCountThisMonth + 1,
+          };
+        }
+        return acc;
+      });
+
+      const settlementTx: ExpenseTransaction = {
+        id: genId('tx'),
+        amount,
+        type: 'income',
+        categoryId: 'cat_income',
+        accountId: targetAccId,
+        date: todayISO,
+        note: `Received from ${friend.name || 'Friend'} (Split Share - ${tx.note || 'Expense'})`,
+        isSettled: true,
+        settledTxId: `${txId}_${friend.id}`,
+      };
+
+      return {
+        ...state,
+        accounts: updatedAccounts,
+        transactions: [
+          settlementTx,
+          ...state.transactions.map((t) => {
+            if (t.id !== txId || !t.split) return t;
+            return {
+              ...t,
+              split: {
+                ...t.split,
+                friends: updatedFriends,
+                settled: allFriendsSettled,
+              },
+            };
+          }),
+        ],
+      };
+    });
+  },
+
   addQuickPreset: (preset) => {
     const newPreset: QuickExpensePreset = {
       ...preset,
-      id: `qp_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+      id: genId('qp'),
     };
     set((state) => ({
       quickPresets: [newPreset, ...(state.quickPresets || [])],
@@ -642,7 +1025,7 @@ export const useExpenseStore = create<ExpenseState>()(
   addSavingsVault: (vaultData) => {
     const newVault: SavingsVault = {
       ...vaultData,
-      id: `vault_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+      id: genId('vault'),
       currentAmount: 0,
       createdAt: new Date().toISOString().split('T')[0],
     };
@@ -669,6 +1052,10 @@ export const useExpenseStore = create<ExpenseState>()(
     if (!targetVault) return;
 
     set((state) => {
+      // The vault always draws from a concrete physical account; default to the
+      // first account so the recorded ledger entry and the revert stay balanced.
+      const effectiveSource = sourceAccountId || state.accounts[0]?.id || 'acc_primary';
+
       // 1. Update Vault Balance
       const updatedVaults = state.savingsVaults.map((v) =>
         v.id === vaultId
@@ -680,31 +1067,28 @@ export const useExpenseStore = create<ExpenseState>()(
           : v
       );
 
-      // 2. If source account provided, deduct from physical account
-      let updatedAccounts = state.accounts;
-      if (sourceAccountId) {
-        updatedAccounts = state.accounts.map((acc) => {
-          if (acc.id === sourceAccountId) {
-            return {
-              ...acc,
-              balance: Math.max(0, acc.balance - amount),
-              monthlyChange: acc.monthlyChange - amount,
-              txnCountThisMonth: acc.txnCountThisMonth + 1,
-            };
-          }
-          return acc;
-        });
-      }
+      // 2. Deduct from the physical account
+      const updatedAccounts = state.accounts.map((acc) => {
+        if (acc.id === effectiveSource) {
+          return {
+            ...acc,
+            balance: Math.max(0, acc.balance - amount),
+            monthlyChange: acc.monthlyChange - amount,
+            txnCountThisMonth: acc.txnCountThisMonth + 1,
+          };
+        }
+        return acc;
+      });
 
       // 3. Record transaction for ledger clarity
       const depositTx: ExpenseTransaction = {
-        id: `tx_vault_${Date.now()}`,
+        id: genId('tx'),
         amount,
         type: 'vault_deposit',
         categoryId: 'cat_fin',
-        accountId: sourceAccountId || state.accounts[0]?.id || 'acc_primary',
+        accountId: effectiveSource,
         vaultId,
-        date: new Date().toISOString().split('T')[0],
+        date: localISODate(new Date()),
         note: `Saved to ${targetVault.emoji} ${targetVault.name}`,
       };
 
@@ -714,6 +1098,8 @@ export const useExpenseStore = create<ExpenseState>()(
         transactions: [depositTx, ...state.transactions],
       };
     });
+
+    logAction('vault', `Deposited ${amount} into vault`, { vaultId, amount, sourceAccountId });
   },
 
   withdrawFromVault: (vaultId, amount, targetAccountId) => {
@@ -721,8 +1107,8 @@ export const useExpenseStore = create<ExpenseState>()(
     const targetVault = get().savingsVaults.find((v) => v.id === vaultId);
     if (!targetVault) return;
 
+    const actualWithdraw = Math.min(amount, targetVault.currentAmount);
     set((state) => {
-      const actualWithdraw = Math.min(amount, targetVault.currentAmount);
       const updatedVaults = state.savingsVaults.map((v) =>
         v.id === vaultId
           ? {
@@ -733,29 +1119,29 @@ export const useExpenseStore = create<ExpenseState>()(
           : v
       );
 
-      let updatedAccounts = state.accounts;
-      if (targetAccountId) {
-        updatedAccounts = state.accounts.map((acc) => {
-          if (acc.id === targetAccountId) {
-            return {
-              ...acc,
-              balance: acc.balance + actualWithdraw,
-              monthlyChange: acc.monthlyChange + actualWithdraw,
-              txnCountThisMonth: acc.txnCountThisMonth + 1,
-            };
-          }
-          return acc;
-        });
-      }
+      // The vault always releases back to a concrete physical account so the
+      // recorded ledger entry and the revert stay balanced.
+      const effectiveTarget = targetAccountId || state.accounts[0]?.id || 'acc_primary';
+      const updatedAccounts = state.accounts.map((acc) => {
+        if (acc.id === effectiveTarget) {
+          return {
+            ...acc,
+            balance: acc.balance + actualWithdraw,
+            monthlyChange: acc.monthlyChange + actualWithdraw,
+            txnCountThisMonth: acc.txnCountThisMonth + 1,
+          };
+        }
+        return acc;
+      });
 
       const withdrawTx: ExpenseTransaction = {
-        id: `tx_vault_wd_${Date.now()}`,
+        id: genId('tx'),
         amount: actualWithdraw,
         type: 'vault_withdraw',
         categoryId: 'cat_fin',
-        accountId: targetAccountId || state.accounts[0]?.id || 'acc_primary',
+        accountId: effectiveTarget,
         vaultId,
-        date: new Date().toISOString().split('T')[0],
+        date: localISODate(new Date()),
         note: `Withdrawn from ${targetVault.emoji} ${targetVault.name}`,
       };
 
@@ -765,12 +1151,14 @@ export const useExpenseStore = create<ExpenseState>()(
         transactions: [withdrawTx, ...state.transactions],
       };
     });
+
+    logAction('vault', `Withdrew ${amount} from vault`, { vaultId, amount: actualWithdraw, targetAccountId });
   },
 
   addAccount: (accData) => {
     const newAcc: ExpenseAccount = {
       ...accData,
-      id: `acc_${Date.now()}`,
+      id: genId('acc'),
       txnCountThisMonth: 0,
       monthlyChange: accData.balance || 0,
       statusType: (accData.dueAmount && accData.dueAmount > 0) ? 'due' : 'positive',
@@ -778,46 +1166,82 @@ export const useExpenseStore = create<ExpenseState>()(
     set((state) => ({
       accounts: [...state.accounts, newAcc],
     }));
+    logAction('account', `Added account: ${newAcc.name}`, { id: newAcc.id, balance: newAcc.balance, type: newAcc.type });
   },
 
   updateAccount: (id, updates) => {
     set((state) => ({
       accounts: state.accounts.map((a) => (a.id === id ? { ...a, ...updates } : a)),
     }));
+    logAction('account', 'Updated account', { id, updates: Object.keys(updates) });
   },
 
   deleteAccount: (id) => {
-    set((state) => ({
-      accounts: state.accounts.filter((a) => a.id !== id),
-    }));
+    set((state) => {
+      const targetAccount = state.accounts.find((a) => a.id === id);
+      const accName = targetAccount?.name || 'Deleted Account';
+      return {
+        accounts: state.accounts.filter((a) => a.id !== id),
+        transactions: state.transactions.map((t) => {
+          let updated = t;
+          if (t.accountId === id && !t.accountName) {
+            updated = { ...updated, accountName: accName };
+          }
+          if (t.toAccountId === id && !t.toAccountName) {
+            updated = { ...updated, toAccountName: accName };
+          }
+          return updated;
+        }),
+      };
+    });
+    logAction('account', 'Deleted account', { id });
   },
 
   archiveAccount: (id) => {
     set((state) => ({
       accounts: state.accounts.map((a) => (a.id === id ? { ...a, isArchived: true } : a)),
     }));
+    logAction('account', 'Archived account', { id });
+  },
+
+  unarchiveAccount: (id) => {
+    set((state) => ({
+      accounts: state.accounts.map((a) => (a.id === id ? { ...a, isArchived: false } : a)),
+    }));
+    logAction('account', 'Unarchived account', { id });
   },
 
   addCategory: (catData) => {
     const newCat: ExpenseCategory = {
       ...catData,
-      id: `cat_${Date.now()}`,
+      id: genId('cat'),
     };
     set((state) => ({
       categories: [...state.categories, newCat],
     }));
+    logAction('category', `Added category: ${newCat.name}`, { id: newCat.id, iconName: newCat.iconName });
   },
 
   updateCategory: (id, updates) => {
     set((state) => ({
       categories: state.categories.map((c) => (c.id === id ? { ...c, ...updates } : c)),
     }));
+    logAction('category', 'Updated category', { id, updates: Object.keys(updates) });
   },
 
   deleteCategory: (id) => {
-    set((state) => ({
-      categories: state.categories.filter((c) => c.id !== id),
-    }));
+    const { categories, transactions, categoryBudgets } = get();
+    const remaining = categories.filter((c) => c.id !== id);
+    const fallback = remaining.find((c) => c.id !== 'cat_income')?.id || 'cat_income';
+    const reassignedCount = transactions.filter((t) => t.categoryId === id).length;
+    set({
+      categories: remaining,
+      categoryBudgets: Object.fromEntries(
+        Object.entries(categoryBudgets || {}).filter(([key]) => key !== id)
+      ),
+      transactions: transactions.map((t) => (t.categoryId === id ? { ...t, categoryId: fallback } : t)),
+    });
+    logAction('category', `Deleted category, reassigned ${reassignedCount} transaction(s)`, { id, fallback });
   },
 
   setCategories: (categories) => {
@@ -831,6 +1255,7 @@ export const useExpenseStore = create<ExpenseState>()(
       updated.splice(toIndex, 0, moved);
       return { categories: updated };
     });
+    logAction('category', 'Reordered categories', { fromIndex, toIndex });
   },
 
   setCategoryBudget: (catId, amount) => {
@@ -840,10 +1265,12 @@ export const useExpenseStore = create<ExpenseState>()(
         [catId]: amount,
       },
     }));
+    logAction('budget', `Set category budget: ${amount}`, { catId, amount });
   },
 
   setAllCategoryBudgets: (budgets) => {
     set({ categoryBudgets: budgets });
+    logAction('budget', `Set budgets for ${Object.keys(budgets).length} category(ies)`);
   },
 
   getTotalBalance: () => {
@@ -865,64 +1292,68 @@ export const useExpenseStore = create<ExpenseState>()(
     return Math.max(0, get().getTotalBalance() - get().getTotalSavedInVaults());
   },
 
-  getTotalIncome: () => {
-    const { transactions } = get();
+  getTotalIncome: (monthKey) => {
+    const { transactions, selectedMonth } = get();
+    const { year, month } = monthKeyToYearMonth(monthKey || selectedMonth);
     return transactions
-      .filter((t) => t.type === 'income')
+      .filter((t) => t.type === 'income' && isInMonth(t.date, year, month))
       .reduce((sum, t) => sum + t.amount, 0);
   },
 
-  getTotalSpent: () => {
-    const { transactions } = get();
+  getTotalSpent: (monthKey) => {
+    const { transactions, selectedMonth } = get();
+    const { year, month } = monthKeyToYearMonth(monthKey || selectedMonth);
     return transactions
-      .filter((t) => t.type === 'expense')
+      .filter((t) => t.type === 'expense' && isInMonth(t.date, year, month))
       .reduce((sum, t) => {
         const personalShare = t.split ? t.split.yourShare : t.amount;
         return sum + personalShare;
       }, 0);
   },
 
-  getNetBalance: () => {
-    return get().getTotalIncome() - get().getTotalSpent();
+  getNetBalance: (monthKey) => {
+    return get().getTotalIncome(monthKey) - get().getTotalSpent(monthKey);
   },
 
-  getRemainingBudget: () => {
-    return get().monthlyBudget - get().getTotalSpent();
+  getRemainingBudget: (monthKey) => {
+    return get().monthlyBudget - get().getTotalSpent(monthKey);
   },
 
-  getSafeToSpend: () => {
-    const { monthlyBudget, transactions } = get();
-    const totalSpent = get().getTotalSpent();
-    
-    // Vault deposits this month reduce spendable cash flow
+  getSafeToSpend: (monthKey) => {
+    const { monthlyBudget, transactions, selectedMonth } = get();
+    const totalSpent = get().getTotalSpent(monthKey);
+    const { year, month } = monthKeyToYearMonth(monthKey || selectedMonth);
+
+    // Vault deposits in the month reduce spendable cash flow
     const vaultDepositsThisMonth = transactions
-      .filter((t) => t.type === 'vault_deposit')
+      .filter((t) => t.type === 'vault_deposit' && isInMonth(t.date, year, month))
       .reduce((sum, t) => sum + t.amount, 0);
 
     if (monthlyBudget > 0) {
       return Math.max(0, monthlyBudget - totalSpent - vaultDepositsThisMonth);
     }
 
-    const income = get().getTotalIncome();
+    const income = get().getTotalIncome(monthKey);
     return Math.max(0, income - totalSpent - vaultDepositsThisMonth);
   },
 
-  getOverspentPercentage: () => {
-    const totalSpent = get().getTotalSpent();
+  getOverspentPercentage: (monthKey) => {
+    const totalSpent = get().getTotalSpent(monthKey);
     const budget = get().monthlyBudget;
-    if (totalSpent <= budget) return 0;
+    if (budget <= 0 || totalSpent <= budget) return 0;
     return Number((((totalSpent - budget) / budget) * 100).toFixed(1));
   },
 
-  getCategoryBreakdown: () => {
-    const { categories, transactions } = get();
-    const totalSpent = get().getTotalSpent();
+  getCategoryBreakdown: (monthKey) => {
+    const { categories, transactions, selectedMonth } = get();
+    const totalSpent = get().getTotalSpent(monthKey);
+    const { year, month } = monthKeyToYearMonth(monthKey || selectedMonth);
 
     return categories
       .filter((c) => c.id !== 'cat_income')
       .map((cat) => {
         const catSpent = transactions
-          .filter((t) => t.type === 'expense' && t.categoryId === cat.id)
+          .filter((t) => t.type === 'expense' && t.categoryId === cat.id && isInMonth(t.date, year, month))
           .reduce((sum, t) => {
             const personalShare = t.split ? t.split.yourShare : t.amount;
             return sum + personalShare;
@@ -937,8 +1368,8 @@ export const useExpenseStore = create<ExpenseState>()(
       });
   },
 
-  getTopCategory: () => {
-    const breakdown = get().getCategoryBreakdown();
+  getTopCategory: (monthKey) => {
+    const breakdown = get().getCategoryBreakdown(monthKey);
     if (breakdown.length === 0) return null;
     const sorted = [...breakdown].sort((a, b) => b.amount - a.amount);
     return sorted[0].amount > 0 ? sorted[0] : null;
@@ -988,6 +1419,7 @@ export const useExpenseStore = create<ExpenseState>()(
         const cat = categories.find((c) => c.id === t.categoryId);
         const fromAcc = accounts.find((a) => a.id === t.accountId);
         const toAcc = t.toAccountId ? accounts.find((a) => a.id === t.toAccountId) : null;
+        const matchFolderName = t.folderName ? t.folderName.toLowerCase().includes(q) : false;
         const matchNote = t.note ? t.note.toLowerCase().includes(q) : false;
         const matchTag = t.tag ? t.tag.toLowerCase().includes(q) : false;
         const matchFriend = t.borrowerOrLender
@@ -999,7 +1431,7 @@ export const useExpenseStore = create<ExpenseState>()(
         const matchAcc = fromAcc ? fromAcc.name.toLowerCase().includes(q) : false;
         const matchToAcc = toAcc ? toAcc.name.toLowerCase().includes(q) : false;
         const matchAmount = t.amount.toString().includes(q);
-        return matchNote || matchTag || matchFriend || matchCat || matchAcc || matchToAcc || matchAmount;
+        return matchFolderName || matchNote || matchTag || matchFriend || matchCat || matchAcc || matchToAcc || matchAmount;
       });
     }
 
@@ -1030,11 +1462,39 @@ export const useExpenseStore = create<ExpenseState>()(
       smartSearchQuery: '',
       activeAccountFilter: 'All',
     });
+
+    // Intentionally NOT cleared: the audit log is a permanent, tamper-evident
+    // trail that survives a full data erase by design.
+    logAction('security', 'All stored expense data was erased', { scope: 'resetAllData' });
   },
 }),
 {
   name: '@subo_expense_v1',
   storage: createJSONStorage(() => AsyncStorage),
+  merge: (persistedState: unknown, currentState: ExpenseState): ExpenseState => {
+    const ps = (persistedState || {}) as Partial<ExpenseState>;
+    const merged: ExpenseState = { ...currentState, ...ps };
+    if (Array.isArray(merged.categories)) {
+      merged.categories = merged.categories.map((c: ExpenseCategory) => {
+        const init = INITIAL_CATEGORIES.find((ic) => ic.id === c.id);
+        if (init) {
+          return {
+            ...init,
+            ...c,
+            iconName: (c.iconName === 'Star' && c.id === 'cat_cig') ? init.iconName : (c.iconName || init.iconName),
+            emoji: undefined,
+          };
+        }
+        return c;
+      });
+      INITIAL_CATEGORIES.forEach((ic) => {
+        if (!merged.categories.some((c: ExpenseCategory) => c.id === ic.id)) {
+          merged.categories.push(ic);
+        }
+      });
+    }
+    return merged;
+  },
   partialize: (state) => ({
     categories: state.categories,
     categoryBudgets: state.categoryBudgets,
@@ -1045,6 +1505,14 @@ export const useExpenseStore = create<ExpenseState>()(
     transactions: state.transactions,
     accounts: state.accounts,
     savingsVaults: state.savingsVaults,
+    selectedMonth: state.selectedMonth,
+    eventFolders: state.eventFolders,
+    quickPresets: state.quickPresets,
+    selectedTransactionIds: state.selectedTransactionIds,
+    activeAccountFilter: state.activeAccountFilter,
+    smartSearchQuery: state.smartSearchQuery,
+    ruleCount: state.ruleCount,
+    hasInitialAppLoaded: state.hasInitialAppLoaded,
   }),
 }
 )

@@ -11,6 +11,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ChevronLeft,
+  ChevronRight,
   ChevronDown,
   HandCoins,
   Check,
@@ -20,6 +21,7 @@ import {
   CreditCard,
   ArrowDownLeft,
   ArrowUpRight,
+  Users,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { MenuAction } from '@expo/ui/community/menu';
@@ -27,23 +29,32 @@ import { AppText, NativeLiquidMenu } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
 import { expenseColors } from '@/constants/expenseColors';
 import { ExpenseTransaction } from '@/types/expense';
+import { SplitDetailsModal } from '@/components/expense/SplitDetailsModal';
 
 export default function ReceivablesScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { accounts, transactions, currencySymbol, settleTransaction } = useExpenseStore();
+  const { accounts, transactions, currencySymbol, settleTransaction, settleFriendShare } = useExpenseStore();
 
   const sym = currencySymbol || '₹';
   const [activeTab, setActiveTab] = useState<'all' | 'lent' | 'borrow'>('all');
-  const [settlingTx, setSettlingTx] = useState<ExpenseTransaction | null>(null);
+  const [selectedSplitTx, setSelectedSplitTx] = useState<ExpenseTransaction | null>(null);
+  const [settlingItem, setSettlingItem] = useState<{
+    tx: ExpenseTransaction;
+    friendId?: string;
+    borrower: string;
+    amount: number;
+  } | null>(null);
   const [settleAccountId, setSettleAccountId] = useState<string>(accounts[0]?.id || 'acc_hdfc');
 
   // 1. Pending Lent List (Money to Collect)
+  // Direct Lent is kept individual. Split Expenses are kept as grouped folder items.
   const pendingLentList = useMemo(() => {
     const list: Array<{
       id: string;
       title: string;
       borrower: string;
+      subtitle: string;
       amount: number;
       date: string;
       kind: 'lent' | 'split';
@@ -54,27 +65,53 @@ export default function ReceivablesScreen() {
       if (tx.type === 'debt_lend' && !tx.isSettled) {
         list.push({
           id: tx.id,
-          title: tx.note || 'Lent to Friend',
+          title: tx.borrowerOrLender || 'Friend',
           borrower: tx.borrowerOrLender || 'Friend',
+          subtitle: tx.note || 'Lent to Friend',
           amount: tx.amount,
           date: tx.date,
           kind: 'lent',
           tx,
         });
-      } else if (tx.split && !tx.split.settled && (tx.split.friendsShare || 0) > 0) {
-        list.push({
-          id: tx.id,
-          title: tx.note || 'Split Bill',
-          borrower: tx.split.friendNames || 'Friends',
-          amount: tx.split.friendsShare,
-          date: tx.date,
-          kind: 'split',
-          tx,
-        });
+      } else if (tx.split && !tx.split.settled) {
+        let pendingAmt = 0;
+        let totalLent = tx.split.friendsShare || 0;
+        let friendsCount = 0;
+        let settledCount = 0;
+
+        if (tx.split.friends && tx.split.friends.length > 0) {
+          friendsCount = tx.split.friends.length;
+          settledCount = tx.split.friends.filter((f) => f.settled).length;
+          pendingAmt = tx.split.friends.filter((f) => !f.settled).reduce((s, f) => s + f.amount, 0);
+          totalLent = tx.split.friends.reduce((s, f) => s + f.amount, 0);
+        } else {
+          const names = (tx.split.friendNames || '').split(',').map((n) => n.trim()).filter(Boolean);
+          friendsCount = names.length || 1;
+          pendingAmt = tx.split.friendsShare || 0;
+          totalLent = tx.split.friendsShare || 0;
+          settledCount = 0;
+        }
+
+        if (pendingAmt > 0) {
+          list.push({
+            id: tx.id,
+            title: tx.note || 'Split Bill',
+            borrower: `${friendsCount} ${friendsCount === 1 ? 'person' : 'people'}${
+              settledCount > 0 ? ` (${settledCount} settled)` : ''
+            }`,
+            subtitle: `${friendsCount} ${friendsCount === 1 ? 'person' : 'people'}${
+              settledCount > 0 ? ` (${settledCount} settled)` : ''
+            } • Lent: ${sym}${totalLent.toLocaleString('en-IN')}`,
+            amount: pendingAmt,
+            date: tx.date,
+            kind: 'split',
+            tx,
+          });
+        }
       }
     });
     return list;
-  }, [transactions]);
+  }, [transactions, sym]);
 
   // 2. Pending Borrow List (Money to Pay)
   const pendingBorrowList = useMemo(() => {
@@ -82,6 +119,7 @@ export default function ReceivablesScreen() {
       id: string;
       title: string;
       borrower: string;
+      subtitle: string;
       amount: number;
       date: string;
       kind: 'borrow';
@@ -92,8 +130,9 @@ export default function ReceivablesScreen() {
       if (tx.type === 'debt_borrow' && !tx.isSettled) {
         list.push({
           id: tx.id,
-          title: tx.note || 'Borrowed from Friend',
+          title: tx.borrowerOrLender || 'Friend',
           borrower: tx.borrowerOrLender || 'Friend',
+          subtitle: tx.note || 'Borrowed from Friend',
           amount: tx.amount,
           date: tx.date,
           kind: 'borrow',
@@ -112,9 +151,29 @@ export default function ReceivablesScreen() {
     return pendingBorrowList.reduce((sum, item) => sum + item.amount, 0);
   }, [pendingBorrowList]);
 
+  // Unique person counts: distinct individual direct debtors + distinct split pending participants
   const uniqueLentCount = useMemo(() => {
-    return new Set(pendingLentList.map((item) => item.borrower.toLowerCase())).size;
-  }, [pendingLentList]);
+    const directNames = new Set<string>();
+    let count = 0;
+    transactions.forEach((tx) => {
+      if (tx.type === 'debt_lend' && !tx.isSettled) {
+        directNames.add((tx.borrowerOrLender || 'Friend').toLowerCase());
+      }
+    });
+    count += directNames.size;
+    transactions.forEach((tx) => {
+      if (tx.split && !tx.split.settled) {
+        if (tx.split.friends && tx.split.friends.length > 0) {
+          const pending = tx.split.friends.filter((f) => !f.settled);
+          count += pending.length;
+        } else if ((tx.split.friendsShare || 0) > 0) {
+          const names = (tx.split.friendNames || '').split(',').map((n) => n.trim()).filter(Boolean);
+          count += names.length || 1;
+        }
+      }
+    });
+    return count;
+  }, [transactions]);
 
   const uniqueBorrowCount = useMemo(() => {
     return new Set(pendingBorrowList.map((item) => item.borrower.toLowerCase())).size;
@@ -194,7 +253,7 @@ export default function ReceivablesScreen() {
           <View style={styles.heroTopBlock}>
             <View style={styles.heroHeaderRow}>
               <View style={styles.heroIconCircle}>
-                <HandCoins size={16} color="#7CD9A8" />
+                <HandCoins size={16} color={expenseColors.accentGreen} />
               </View>
               <AppText style={styles.heroCardLabel}>
                 {hasBoth ? 'TOTAL DUES BREAKDOWN' : totalPendingBorrow > 0 ? 'TOTAL TO PAY' : 'TOTAL TO COLLECT'}
@@ -226,7 +285,7 @@ export default function ReceivablesScreen() {
             </View>
             <View style={styles.heroStatColumn}>
               <AppText style={styles.heroStatLabel}>TO PAY</AppText>
-              <AppText style={[styles.heroStatValue, { color: '#FBBF24' }]}>
+              <AppText style={[styles.heroStatValue, { color: '#F4CD89' }]}>
                 {sym}{totalPendingBorrow.toLocaleString('en-IN')} ({uniqueBorrowCount} {uniqueBorrowCount === 1 ? 'person' : 'people'})
               </AppText>
             </View>
@@ -282,7 +341,7 @@ export default function ReceivablesScreen() {
         {displayedList.length === 0 ? (
           <View style={styles.emptyContainer}>
             <View style={styles.emptyIconCircle}>
-              <Check size={22} color="#7CD9A8" strokeWidth={2.5} />
+              <Check size={22} color={expenseColors.accentGreen} strokeWidth={2.5} />
             </View>
             <AppText style={styles.emptyTitle}>All Settled Up!</AppText>
             <AppText style={styles.emptySub}>
@@ -294,6 +353,7 @@ export default function ReceivablesScreen() {
             {displayedList.map((item, idx) => {
               const isLast = idx === displayedList.length - 1;
               const isBorrow = item.kind === 'borrow';
+              const isSplit = item.kind === 'split';
               const formattedDate = new Date(item.date).toLocaleDateString('en-US', {
                 month: 'short',
                 day: 'numeric',
@@ -301,37 +361,54 @@ export default function ReceivablesScreen() {
               });
 
               return (
-                <View
+                <TouchableOpacity
                   key={item.id}
                   style={[styles.debtorRow, !isLast && styles.rowDivider]}
+                  activeOpacity={0.75}
+                  onPress={() => {
+                    if (isSplit) {
+                      Haptics.selectionAsync().catch(() => {});
+                      setSelectedSplitTx(item.tx);
+                    } else {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                      setSettlingItem({
+                        tx: item.tx,
+                        borrower: item.borrower,
+                        amount: item.amount,
+                      });
+                      setSettleAccountId(item.tx.accountId || accounts[0]?.id || 'acc_hdfc');
+                    }
+                  }}
                 >
                   <View style={styles.debtorInfoCol}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                       <AppText style={styles.debtorName} numberOfLines={1}>
-                        {item.borrower}
+                        {item.title.toUpperCase()}
                       </AppText>
                       <View
                         style={[
                           styles.kindBadge,
                           {
                             backgroundColor: isBorrow
-                              ? 'rgba(251, 191, 36, 0.12)'
-                              : 'rgba(242, 139, 130, 0.12)',
+                              ? 'rgba(244, 205, 137, 0.12)'
+                              : isSplit
+                              ? 'rgba(255, 157, 102, 0.12)'
+                              : 'rgba(244, 139, 139, 0.12)',
                           },
                         ]}
                       >
                         <AppText
                           style={[
                             styles.kindBadgeText,
-                            { color: isBorrow ? '#FBBF24' : '#F28B82' },
+                            { color: isBorrow ? '#F4CD89' : isSplit ? '#FF9D66' : expenseColors.accentRed },
                           ]}
                         >
-                          {isBorrow ? 'You owe' : 'Owes you'}
+                          {isBorrow ? 'You owe' : isSplit ? 'SPLIT DUE' : 'Owes you'}
                         </AppText>
                       </View>
                     </View>
                     <AppText style={styles.debtorNote} numberOfLines={1}>
-                      {item.title} • {formattedDate}
+                      {isSplit ? item.subtitle : `${item.subtitle} • ${formattedDate}`}
                     </AppText>
                   </View>
 
@@ -339,22 +416,40 @@ export default function ReceivablesScreen() {
                     <AppText style={isBorrow ? styles.debtorAmountYellow : styles.debtorAmountRed}>
                       {isBorrow ? `+${sym}` : `-${sym}`}{item.amount.toLocaleString('en-IN')}
                     </AppText>
-                    <TouchableOpacity
-                      style={[styles.settleBtn, isBorrow && styles.payBtn]}
-                      activeOpacity={0.8}
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-                        setSettlingTx(item.tx);
-                        setSettleAccountId(item.tx.accountId || accounts[0]?.id || 'acc_hdfc');
-                      }}
-                    >
-                      <Check size={11} color={isBorrow ? '#FBBF24' : '#7CD9A8'} strokeWidth={3} />
-                      <AppText style={[styles.settleBtnText, isBorrow && styles.payBtnText]}>
-                        {isBorrow ? 'Pay Up' : 'Settle'}
-                      </AppText>
-                    </TouchableOpacity>
+                    {isSplit ? (
+                      <TouchableOpacity
+                        style={styles.splitDetailsBtn}
+                        activeOpacity={0.8}
+                        onPress={() => {
+                          Haptics.selectionAsync().catch(() => {});
+                          setSelectedSplitTx(item.tx);
+                        }}
+                      >
+                        <AppText style={styles.splitDetailsBtnText}>Details</AppText>
+                        <ChevronRight size={12} color="#FF9D66" />
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity
+                        style={[styles.settleBtn, isBorrow && styles.payBtn]}
+                        activeOpacity={0.8}
+                        onPress={() => {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                          setSettlingItem({
+                            tx: item.tx,
+                            borrower: item.borrower,
+                            amount: item.amount,
+                          });
+                          setSettleAccountId(item.tx.accountId || accounts[0]?.id || 'acc_hdfc');
+                        }}
+                      >
+                        <Check size={11} color={isBorrow ? '#F4CD89' : expenseColors.accentGreen} strokeWidth={3} />
+                        <AppText style={[styles.settleBtnText, isBorrow && styles.payBtnText]}>
+                          {isBorrow ? 'Pay Up' : 'Settle'}
+                        </AppText>
+                      </TouchableOpacity>
+                    )}
                   </View>
-                </View>
+                </TouchableOpacity>
               );
             })}
           </View>
@@ -363,15 +458,15 @@ export default function ReceivablesScreen() {
 
       {/* ── NATIVE iOS STYLE BOTTOM SHEET FOR SETTLING / PAYING DUES ── */}
       <Modal
-        visible={settlingTx !== null}
+        visible={settlingItem !== null}
         transparent
         animationType="slide"
-        onRequestClose={() => setSettlingTx(null)}
+        onRequestClose={() => setSettlingItem(null)}
       >
         <TouchableOpacity
           style={styles.modalBackdrop}
           activeOpacity={1}
-          onPress={() => setSettlingTx(null)}
+          onPress={() => setSettlingItem(null)}
         >
           <View style={styles.settleSheetCard} onStartShouldSetResponder={() => true}>
             {/* iOS Sheet Grabber Handle */}
@@ -381,14 +476,14 @@ export default function ReceivablesScreen() {
             <View style={styles.sheetHeader}>
               <View style={styles.sheetHeaderTitleRow}>
                 <View style={styles.sheetHeaderIconCircle}>
-                  <Check size={13} color="#7CD9A8" strokeWidth={3} />
+                  <Check size={13} color={expenseColors.accentGreen} strokeWidth={3} />
                 </View>
                 <AppText style={styles.sheetTitle}>
-                  {settlingTx?.type === 'debt_borrow' ? 'SETTLE DEBT / PAY' : 'SETTLE RECEIVABLE'}
+                  {settlingItem?.tx?.type === 'debt_borrow' ? 'SETTLE DEBT / PAY' : 'SETTLE RECEIVABLE'}
                 </AppText>
               </View>
               <TouchableOpacity
-                onPress={() => setSettlingTx(null)}
+                onPress={() => setSettlingItem(null)}
                 style={styles.sheetCloseBtn}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               >
@@ -396,37 +491,32 @@ export default function ReceivablesScreen() {
               </TouchableOpacity>
             </View>
 
-            {settlingTx && (
+            {settlingItem && (
               <>
                 {/* 1. Who Owes / Who to Pay */}
                 <View style={styles.whoOwesSection}>
                   <AppText style={styles.whoOwesLabel}>
-                    {settlingTx.type === 'debt_borrow' ? 'Pay back to' : 'Receive payment from'}
+                    {settlingItem.tx.type === 'debt_borrow' ? 'Pay back to' : 'Receive payment from'}
                   </AppText>
                   <AppText style={styles.whoOwesName}>
-                    {settlingTx.borrowerOrLender || settlingTx.split?.friendNames || 'Friend'}
+                    {settlingItem.borrower}
                   </AppText>
                 </View>
 
                 {/* 2. How Much (Never Clipped, Generous Area) */}
                 <View style={styles.amountHeroContainer}>
                   <AppText style={styles.amountHeroText}>
-                    {sym}
-                    {(
-                      settlingTx.type === 'debt_lend' || settlingTx.type === 'debt_borrow'
-                        ? settlingTx.amount
-                        : settlingTx.split?.friendsShare || 0
-                    ).toLocaleString('en-IN')}
+                    {sym}{settlingItem.amount.toLocaleString('en-IN')}
                   </AppText>
                 </View>
 
                 {/* 3. Account Selection */}
                 <View style={styles.accountSection}>
                   <AppText style={styles.accountSectionLabel}>
-                    {settlingTx.type === 'debt_borrow' ? 'PAY FROM ACCOUNT' : 'RECEIVE INTO ACCOUNT'}
+                    {settlingItem.tx.type === 'debt_borrow' ? 'PAY FROM ACCOUNT' : 'RECEIVE INTO ACCOUNT'}
                   </AppText>
                   <NativeLiquidMenu
-                    title={settlingTx.type === 'debt_borrow' ? 'Select Payment Account' : 'Select Deposit Account'}
+                    title={settlingItem.tx.type === 'debt_borrow' ? 'Select Payment Account' : 'Select Deposit Account'}
                     actions={accountMenuActions}
                     onSelect={(accId) => {
                       Haptics.selectionAsync().catch(() => {});
@@ -458,15 +548,19 @@ export default function ReceivablesScreen() {
                   style={styles.confirmDepositBtn}
                   activeOpacity={0.85}
                   onPress={() => {
-                    if (settlingTx) {
-                      settleTransaction(settlingTx.id, settleAccountId);
+                    if (settlingItem) {
+                      if (settlingItem.friendId) {
+                        settleFriendShare(settlingItem.tx.id, settlingItem.friendId, settleAccountId);
+                      } else {
+                        settleTransaction(settlingItem.tx.id, settleAccountId);
+                      }
                       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-                      setSettlingTx(null);
+                      setSettlingItem(null);
                     }
                   }}
                 >
                   <AppText style={styles.confirmDepositBtnText}>
-                    {settlingTx.type === 'debt_borrow' ? 'Confirm & Repay' : 'Confirm & Deposit'}
+                    {settlingItem.tx.type === 'debt_borrow' ? 'Confirm & Repay' : 'Confirm & Deposit'}
                   </AppText>
                 </TouchableOpacity>
               </>
@@ -474,6 +568,14 @@ export default function ReceivablesScreen() {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      {selectedSplitTx && (
+        <SplitDetailsModal
+          visible={selectedSplitTx !== null}
+          transaction={selectedSplitTx}
+          onClose={() => setSelectedSplitTx(null)}
+        />
+      )}
     </View>
   );
 }
@@ -539,7 +641,7 @@ const styles = StyleSheet.create({
     width: 30,
     height: 30,
     borderRadius: 8,
-    backgroundColor: 'rgba(124, 217, 168, 0.12)',
+    backgroundColor: 'rgba(112, 214, 188, 0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -555,7 +657,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   heroCardAmountRed: {
-    color: '#F28B82', // Pastel Coral / Red
+    color: expenseColors.accentRed, // Soft Coral Red
     fontSize: 30,
     lineHeight: 38,
     fontWeight: '800',
@@ -563,7 +665,7 @@ const styles = StyleSheet.create({
     includeFontPadding: false,
   },
   heroCardAmountYellow: {
-    color: '#FBBF24', // Warm Yellow
+    color: '#F4CD89', // Warm Buttercream
     fontSize: 30,
     lineHeight: 38,
     fontWeight: '800',
@@ -571,7 +673,7 @@ const styles = StyleSheet.create({
     includeFontPadding: false,
   },
   heroCardSubAmount: {
-    color: '#FBBF24',
+    color: '#F4CD89',
     fontSize: 15,
     fontWeight: '700',
     marginLeft: 6,
@@ -685,12 +787,12 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   debtorAmountRed: {
-    color: '#F28B82', // Pastel Coral / Red
+    color: expenseColors.accentRed,
     fontSize: 14,
     fontWeight: '800',
   },
   debtorAmountYellow: {
-    color: '#FBBF24', // Warm Yellow
+    color: '#F4CD89',
     fontSize: 14,
     fontWeight: '800',
   },
@@ -698,24 +800,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: 'rgba(124, 217, 168, 0.12)',
-    borderColor: 'rgba(124, 217, 168, 0.3)',
+    backgroundColor: 'rgba(112, 214, 188, 0.12)',
+    borderColor: 'rgba(112, 214, 188, 0.3)',
     borderWidth: 1,
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 8,
   },
   settleBtnText: {
-    color: '#7CD9A8',
+    color: expenseColors.accentGreen,
     fontSize: 11,
     fontWeight: '800',
   },
   payBtn: {
-    backgroundColor: 'rgba(251, 191, 36, 0.12)',
-    borderColor: 'rgba(251, 191, 36, 0.3)',
+    backgroundColor: 'rgba(244, 205, 137, 0.12)',
+    borderColor: 'rgba(244, 205, 137, 0.3)',
   },
   payBtnText: {
-    color: '#FBBF24',
+    color: '#F4CD89',
   },
   emptyContainer: {
     alignItems: 'center',
@@ -726,7 +828,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: 'rgba(124, 217, 168, 0.12)',
+    backgroundColor: 'rgba(112, 214, 188, 0.12)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 14,
@@ -784,7 +886,7 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: 'rgba(124, 217, 168, 0.12)',
+    backgroundColor: 'rgba(112, 214, 188, 0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -894,5 +996,21 @@ const styles = StyleSheet.create({
     color: '#0F1015',
     fontSize: 14,
     fontWeight: '800',
+  },
+  splitDetailsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(255, 157, 102, 0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 8,
+    marginTop: 4,
+    alignSelf: 'flex-end',
+  },
+  splitDetailsBtnText: {
+    color: '#FF9D66',
+    fontSize: 11,
+    fontWeight: '700',
   },
 });

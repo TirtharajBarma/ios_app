@@ -55,7 +55,16 @@ function toPlain(g: GroupInfo) {
 }
 
 function avatarColor(seed: string) {
-  const palette = ["#007AFF", "#FF3B30", "#34C759", "#FF9500", "#5856D6", "#FF2D55", "#00C7BE", "#AF52DE"];
+  const palette = [
+    "#F8A888", // Warm Apricot
+    "#F39C94", // Warm Coral
+    "#F4CD89", // Warm Buttercream
+    "#8CD9C8", // Soft Seafoam
+    "#9DC6EB", // Soft Powder Sky
+    "#C4A7E7", // Soft Lilac
+    "#F2AEC4", // Soft Blush Pink
+    "#82D0D8", // Muted Teal
+  ];
   let h = 0;
   for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
   return palette[h % palette.length];

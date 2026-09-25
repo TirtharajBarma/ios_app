@@ -15,13 +15,7 @@ import { expenseColors } from '@/constants/expenseColors';
 import { formatCompactCurrency } from './MoneyFlowCard';
 
 export const formatBudgetLegendAmount = (amount: number, symbol: string = '₹'): string => {
-  if (amount === 0) return `${symbol}0`;
-  if (Math.abs(amount) >= 1000) {
-    const kValue = (amount / 1000).toFixed(1);
-    const formatted = kValue.endsWith('.0') ? kValue.slice(0, -2) : kValue;
-    return `${symbol}${formatted}K`;
-  }
-  return `${symbol}${amount.toLocaleString('en-IN')}`;
+  return formatCompactCurrency(amount, symbol);
 };
 
 export const BudgetCard: React.FC = () => {
@@ -210,7 +204,7 @@ export const BudgetCard: React.FC = () => {
   const catSpent = selectedCategoryItem ? selectedCategoryItem.amount : 0;
 
   if (selectedCategoryItem) {
-    const catName = `${selectedCategoryItem.category.name} ${selectedCategoryItem.category.emoji || ''}`.trim();
+    const catName = selectedCategoryItem.category.name;
     centerTitle = catName;
 
     if (hasFixedBudget && catBudget > 0) {
@@ -365,8 +359,7 @@ export const BudgetCard: React.FC = () => {
               />
               <View style={styles.selectedTextGroup}>
                 <AppText style={styles.selectedName}>
-                  {selectedCategoryItem.category.name}{' '}
-                  {selectedCategoryItem.category.emoji || ''}
+                  {selectedCategoryItem.category.name}
                 </AppText>
                 {hasFixedBudget && catBudget > 0 ? (
                   <AppText style={styles.selectedSpentLine}>
@@ -435,7 +428,7 @@ export const BudgetCard: React.FC = () => {
                     ]}
                   />
                   <AppText style={styles.legendCategoryName} numberOfLines={1}>
-                    {item.category.name} {item.category.emoji || ''}
+                    {item.category.name}
                   </AppText>
                 </View>
                 <AppText style={styles.legendAmount}>
@@ -462,7 +455,7 @@ export const BudgetCard: React.FC = () => {
                     ]}
                   />
                   <AppText style={styles.legendCategoryName} numberOfLines={1}>
-                    {item.category.name} {item.category.emoji || ''}
+                    {item.category.name}
                   </AppText>
                 </View>
                 <AppText style={styles.legendAmount}>
@@ -549,41 +542,41 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     width: '100%',
     justifyContent: 'space-between',
-    gap: 20,
+    gap: 16,
     paddingHorizontal: 4,
   },
   legendColumn: {
     flex: 1,
-    gap: 10,
+    gap: 3,
   },
   legendRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 4,
+    paddingVertical: 2,
   },
   legendLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 7,
     flex: 1,
   },
   legendDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
   },
   legendCategoryName: {
     color: '#8E919D',
-    fontSize: 13,
-    lineHeight: 17,
+    fontSize: 12,
+    lineHeight: 16,
     fontWeight: '500',
     flex: 1,
   },
   legendAmount: {
     color: '#A0A5B5',
-    fontSize: 13,
-    lineHeight: 17,
+    fontSize: 12,
+    lineHeight: 16,
     fontWeight: '700',
   },
   selectedDetailWrapper: {

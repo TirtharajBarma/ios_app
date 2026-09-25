@@ -13,6 +13,7 @@ import { getExchangeRates } from "@/utils/currency";
 import { triggerAutoBackup } from "@/utils/backup";
 import { computeSavings, type SavingsResult } from "@/utils/savings";
 import { pushSharedSubscription, syncSharedSubscriptions } from "@/utils/sync";
+import { logAction, logWarn, logException, logInfo } from "@/utils/auditLog";
 
 export interface VaultState {
   totalSavings: number;
@@ -326,6 +327,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     triggerAutoBackup(currentSubscriptions).catch(() => {});
     refreshVault(currentSubscriptions).then((vault) => set({ vault }));
     pushSharedSubscription(sub).catch(() => {});
+    logAction('subscription', `Added subscription: ${sub.name}`, { id: sub.id, price: sub.price, currency: sub.currency, billingCycle: sub.rawBillingCycle });
     return sub;
   },
 
@@ -419,6 +421,9 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     // `prevGroupId` ensures unsharing/re-targeting a sub deletes the remote
     // copy in the group it was actually shared to, never just the first group.
     if (updatedSub) pushSharedSubscription(updatedSub, prevGroupId).catch(() => {});
+
+    const changes = Object.keys(input ?? {});
+    logAction('subscription', `Updated subscription: ${updatedSub?.name || id}`, { id, changes, price: updatedSub?.price });
   },
 
   removeSubscription: async (id) => {
@@ -435,6 +440,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     triggerAutoBackup(currentSubscriptions).catch(() => {});
     refreshVault(currentSubscriptions).then((vault) => set({ vault }));
     if (removed?.isShared) pushSharedSubscription({ ...removed, isShared: false }).catch(() => {});
+    logAction('subscription', `Removed subscription: ${removed?.name || id}`, { id, price: removed?.price });
   },
 
   convertAllCurrencies: async (oldCurrency, newCurrency) => {
@@ -501,12 +507,15 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     } catch (e) {
       await SQLiteDb.execAsync("ROLLBACK;");
       console.error("Batch currency conversion failed:", e);
+      logException('subscription', 'Batch currency conversion failed', e);
       throw e;
     }
     
     set({ subscriptions: updatedSubs, stats: computeStats(updatedSubs) });
     triggerAutoBackup(updatedSubs).catch(() => {});
     refreshVault(updatedSubs).then((vault) => set({ vault }));
+
+    logAction('subscription', `Converted all subscription prices ${oldCurrency} → ${newCurrency}`, { oldCurrency, newCurrency, count: updatedSubs.length });
   },
 
   updateReminderDaysForDefaultTiming: async (prevDays: number, newDays: number) => {
@@ -525,6 +534,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     } catch (e) {
       await SQLiteDb.execAsync("ROLLBACK;");
       console.error("Batch update of reminder timing failed:", e);
+      logException('subscription', 'Batch update of reminder timing failed', e);
       throw e;
     }
 
@@ -534,6 +544,8 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
       );
       return { subscriptions: updated, stats: computeStats(updated) };
     });
+
+    logAction('subscription', `Migrated reminder timing ${prevDays}d → ${newDays}d`, { prevDays, newDays });
   },
 
   importSubscriptions: async (importedSubs) => {
@@ -560,6 +572,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     } catch (e) {
       await SQLiteDb.execAsync("ROLLBACK;");
       console.error("Batch import failed:", e);
+      logException('import', 'Subscription batch import failed', e);
       throw e;
     }
     
@@ -580,6 +593,8 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     
     await scheduleAllReminders(createdSubs).catch(() => {});
     triggerAutoBackup(createdSubs).catch(() => {});
+
+    logAction('import', `Imported ${createdSubs.length} subscription(s)`, { count: createdSubs.length });
   },
 
   refresh: async () => {
@@ -587,9 +602,15 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
   },
 
   syncGroup: async () => {
-    const changed = await syncSharedSubscriptions();
-    if (changed > 0) {
-      await get().refresh();
+    try {
+      const changed = await syncSharedSubscriptions();
+      if (changed > 0) {
+        await get().refresh();
+      }
+      logInfo('sync', `Shared group sync completed`, { changed });
+    } catch (err) {
+      logException('sync', 'Shared group sync failed', err);
+      throw err;
     }
   },
 
@@ -604,6 +625,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
       vault,
     });
     triggerAutoBackup([]).catch(() => {});
+    logWarn('subscription', 'All subscriptions were cleared', {});
   },
 
   // ─── Compatibility Aliases ─────────────────────────────────────────

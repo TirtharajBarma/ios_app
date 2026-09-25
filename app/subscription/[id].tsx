@@ -33,18 +33,25 @@ export default function SubscriptionDetailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
+  const subId = Array.isArray(id) ? id[0] : id;
 
   // Fetch subscription from Zustand store
-  const { subscriptions, isLoaded, removeSubscription, updateSubscription } = useSubscriptionStore();
-  const subscription = subscriptions.find((s) => s.id === id);
+  const { subscriptions, isLoaded, loadSubscriptions, removeSubscription, updateSubscription } = useSubscriptionStore();
+  const subscription = subscriptions.find((s) => s.id === subId);
+
+  React.useEffect(() => {
+    if (!isLoaded) {
+      loadSubscriptions();
+    }
+  }, [isLoaded, loadSubscriptions]);
 
   const [pastPayments, setPastPayments] = React.useState<{ date: Date; amount: number }[]>([]);
   const [totalSpent, setTotalSpent] = React.useState<number>(0);
 
   React.useEffect(() => {
-    if (!subscription || !id) return;
+    if (!subscription || !subId) return;
     let isMounted = true;
-    db.getTransactionsBySubscriptionId(id).then((rows) => {
+    db.getTransactionsBySubscriptionId(subId).then((rows) => {
       if (!isMounted) return;
       const parsed = rows.map((r) => ({
         date: new Date(r.date),
@@ -58,7 +65,7 @@ export default function SubscriptionDetailScreen() {
     return () => {
       isMounted = false;
     };
-  }, [subscription, id]);
+  }, [subscription, subId]);
 
   if (!isLoaded || !subscription) {
     return (
@@ -110,8 +117,8 @@ export default function SubscriptionDetailScreen() {
     router.push({
       pathname: "/add/paid",
       params: {
-        editId: id,
-        id,
+        editId: subId,
+        id: subId,
         name,
         category,
         brandColor: brandColor || "",
@@ -278,7 +285,7 @@ export default function SubscriptionDetailScreen() {
           <View style={styles.statColumn}>
             <AppText
               weight="700"
-              color={subscription.isPaused ? "#FF9500" : colors.white}
+              color={subscription.isPaused ? "#F4CD89" : colors.white}
               style={styles.statValue}
             >
               {subscription.isPaused
@@ -294,8 +301,8 @@ export default function SubscriptionDetailScreen() {
         {/* Paused Banner */}
         {subscription.isPaused && (
           <View style={styles.pausedBanner}>
-            <Pause size={16} color="#FF9500" />
-            <AppText weight="600" color="#FF9500" style={styles.pausedBannerText}>
+            <Pause size={16} color="#F4CD89" />
+            <AppText weight="600" color="#F4CD89" style={styles.pausedBannerText}>
               Subscription is currently paused. Reminders and budget calculations are suspended.
             </AppText>
           </View>
@@ -504,7 +511,7 @@ export default function SubscriptionDetailScreen() {
           scale={0.96}
           style={styles.cancelBtn}
         >
-          <AppText weight="700" color="#FF3B30" style={styles.cancelBtnText}>
+          <AppText weight="700" color="#F48B8B" style={styles.cancelBtnText}>
             {isTrial ? "Cancel scheduled start" : "Delete Subscription"}
           </AppText>
         </PressableScale>
@@ -741,7 +748,7 @@ const styles = StyleSheet.create({
   },
   cancelBtn: {
     borderWidth: 1.5,
-    borderColor: "#FF3B30",
+    borderColor: "#F48B8B",
     borderRadius: 24,
     height: 48,
     alignItems: "center",

@@ -58,8 +58,8 @@ import {
 
 function avatarColor(seed: string) {
   const palette = [
-    "#0A84FF", "#30D158", "#FF453A", "#FF9F0A",
-    "#BF5AF2", "#64D2FF", "#FF375F", "#AC8E68",
+    "#F8A888", "#8CD9C8", "#F4CD89", "#9DC6EB",
+    "#C4A7E7", "#82D0D8", "#F2AEC4", "#E5B299",
   ];
   let h = 0;
   for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) | 0;
@@ -69,16 +69,16 @@ function avatarColor(seed: string) {
 /* ── Constants ──────────────────────────────────────────────────────── */
 
 const PRESET_COLORS = [
-  "#E50914",
-  "#1DB954",
-  "#007AFF",
-  "#4285F4",
-  "#00A8E1",
-  "#FF9900",
-  "#4A154B",
-  "#FF9500",
-  "#58CC02",
-  "#AF52DE",
+  "#F8A888", // Warm Apricot
+  "#F39C94", // Warm Coral
+  "#EFA2A2", // Soft Dusty Rose
+  "#F4CD89", // Warm Buttercream
+  "#A3D6B2", // Soft Sage
+  "#8CD9C8", // Soft Seafoam
+  "#82D0D8", // Muted Teal
+  "#9DC6EB", // Soft Powder Sky
+  "#C4A7E7", // Soft Lilac
+  "#F2AEC4", // Soft Blush Pink
 ];
 const WEEKDAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 const MONTHS_SHORT = [

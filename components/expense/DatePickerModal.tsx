@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   StyleSheet,
@@ -27,6 +27,15 @@ export const DatePickerModal: React.FC<DatePickerModalProps> = ({
 }) => {
   const [viewYear, setViewYear] = useState<number>(selectedDate.getFullYear());
   const [viewMonth, setViewMonth] = useState<number>(selectedDate.getMonth()); // 0-indexed
+
+  // Keep the visible calendar grid in sync whenever the modal opens or the
+  // selected date changes (previously it could drift to a stale month/year).
+  useEffect(() => {
+    if (visible) {
+      setViewYear(selectedDate.getFullYear());
+      setViewMonth(selectedDate.getMonth());
+    }
+  }, [visible, selectedDate]);
 
   const monthNames = [
     'January', 'February', 'March', 'April', 'May', 'June',

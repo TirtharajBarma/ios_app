@@ -16,10 +16,10 @@ export const ExpenseHeader: React.FC<ExpenseHeaderProps> = ({
 }) => {
   const { userName } = useSettingsStore();
 
-  const nameToUse = userName && userName.trim().length > 0 ? userName.trim() : 'TIRTHARAJ BARMA';
+  const nameToUse = userName && userName.trim().length > 0 ? userName.trim() : 'Expense Tracker';
   const parts = nameToUse.split(/\s+/);
-  const firstName = parts[0]?.toUpperCase() || 'TIRTHARAJ';
-  const lastName = parts.slice(1).join(' ').toUpperCase() || 'BARMA';
+  const firstName = parts[0]?.toUpperCase() || 'EXPENSE';
+  const lastName = parts.slice(1).join(' ').toUpperCase() || 'TRACKER';
 
   return (
     <View style={styles.container}>

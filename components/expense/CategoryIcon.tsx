@@ -1,5 +1,7 @@
 import React from 'react';
 import {
+  Cigarette,
+  Flame,
   Star,
   Heart,
   Home,
@@ -13,10 +15,14 @@ import {
   Wrench,
   Leaf,
   ShoppingBag,
+  ShoppingCart,
+  ShoppingBasket,
   Tv,
+  Film,
   Zap,
   Banknote,
   UtensilsCrossed,
+  Utensils,
   MoreHorizontal,
   Coins,
   Sparkles,
@@ -24,6 +30,12 @@ import {
   Coffee,
   Shield,
   Smile,
+  Repeat,
+  Wallet,
+  Landmark,
+  TrendingUp,
+  Folder,
+  Users,
 } from 'lucide-react-native';
 import { ExpenseCategory } from '@/types/expense';
 
@@ -62,12 +74,19 @@ export const CategoryIcon: React.FC<CategoryIconProps> = ({
     strokeWidth,
   };
 
-  // 1. Check iconName first (user customized icon)
-  if (resolvedName === 'Star' || (!resolvedName && resolvedId === 'cat_cig')) {
-    return <Star {...props} fill={fill ? resolvedColor : (resolvedName === 'Star' || resolvedId === 'cat_cig' ? resolvedColor : 'none')} />;
+  // 1. Check iconName first (user customized icon) & default category ID fallbacks
+  if (
+    resolvedName === 'Cigarette' ||
+    resolvedName === 'Flame' ||
+    (!resolvedName && resolvedId === 'cat_cig')
+  ) {
+    return <Cigarette {...props} />;
+  }
+  if (resolvedName === 'Star') {
+    return <Star {...props} fill={fill ? resolvedColor : 'none'} />;
   }
   if (resolvedName === 'Heart' || (!resolvedName && resolvedId === 'cat_health')) {
-    return <Heart {...props} fill={fill ? resolvedColor : (resolvedName === 'Heart' || resolvedId === 'cat_health' ? resolvedColor : 'none')} />;
+    return <Heart {...props} fill={fill ? resolvedColor : 'none'} />;
   }
   if (resolvedName === 'Coins' || (!resolvedName && resolvedId === 'cat_income')) {
     return <Coins {...props} />;
@@ -75,20 +94,45 @@ export const CategoryIcon: React.FC<CategoryIconProps> = ({
   if (resolvedName === 'Car' || (!resolvedName && resolvedId === 'cat_trans')) {
     return <Car {...props} />;
   }
-  if (resolvedName === 'ShoppingBag' || (!resolvedName && resolvedId === 'cat_shop')) {
+  if (
+    resolvedName === 'ShoppingBag' ||
+    resolvedName === 'ShoppingCart' ||
+    resolvedName === 'ShoppingBasket' ||
+    (!resolvedName && resolvedId === 'cat_shop')
+  ) {
     return <ShoppingBag {...props} />;
   }
-  if (resolvedName === 'Tv' || (!resolvedName && resolvedId === 'cat_ent')) {
+  if (
+    resolvedName === 'Tv' ||
+    resolvedName === 'Film' ||
+    (!resolvedName && resolvedId === 'cat_ent')
+  ) {
     return <Tv {...props} />;
   }
   if (resolvedName === 'Zap' || (!resolvedName && resolvedId === 'cat_util')) {
     return <Zap {...props} />;
   }
-  if (resolvedName === 'Banknote' || (!resolvedName && resolvedId === 'cat_fin')) {
+  if (
+    resolvedName === 'Banknote' ||
+    resolvedName === 'Wallet' ||
+    resolvedName === 'Landmark' ||
+    (!resolvedName && resolvedId === 'cat_fin')
+  ) {
     return <Banknote {...props} />;
   }
-  if (resolvedName === 'UtensilsCrossed' || resolvedName === 'Utensils' || (!resolvedName && resolvedId === 'cat_food')) {
+  if (
+    resolvedName === 'UtensilsCrossed' ||
+    resolvedName === 'Utensils' ||
+    (!resolvedName && resolvedId === 'cat_food')
+  ) {
     return <UtensilsCrossed {...props} />;
+  }
+  if (
+    resolvedName === 'Repeat' ||
+    resolvedName === 'Subscription' ||
+    (!resolvedName && resolvedId === 'cat_subs')
+  ) {
+    return <Repeat {...props} />;
   }
   if (resolvedName === 'Home') return <Home {...props} />;
   if (resolvedName === 'Plane') return <Plane {...props} />;
@@ -104,6 +148,11 @@ export const CategoryIcon: React.FC<CategoryIconProps> = ({
   if (resolvedName === 'Coffee') return <Coffee {...props} />;
   if (resolvedName === 'Shield') return <Shield {...props} />;
   if (resolvedName === 'Smile') return <Smile {...props} />;
+  if (resolvedName === 'Folder') return <Folder {...props} />;
+  if (resolvedName === 'Users') return <Users {...props} />;
+  if (resolvedName === 'Wallet') return <Wallet {...props} />;
+  if (resolvedName === 'Landmark') return <Landmark {...props} />;
+  if (resolvedName === 'TrendingUp') return <TrendingUp {...props} />;
 
   // Default fallback for Misc or unknown
   return <MoreHorizontal {...props} />;

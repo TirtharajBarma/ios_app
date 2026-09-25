@@ -64,7 +64,9 @@ export interface ExpenseTransaction {
   type: TransactionType;
   categoryId: string;
   accountId: string; // From Account
+  accountName?: string; // Historical account name snapshot
   toAccountId?: string; // To Account (for transfers or vaults)
+  toAccountName?: string; // Historical to-account name snapshot
   vaultId?: string; // Target savings vault if deposit/withdraw
   folderId?: string; // Linked Event Folder ID
   folderName?: string; // Linked Event Folder Name
@@ -74,6 +76,9 @@ export interface ExpenseTransaction {
   split?: SplitDetails;
   borrowerOrLender?: string;
   isSettled?: boolean;
+  settledTxId?: string; // ID of the auto-generated settlement transaction for this debt/split
+  settlementTxId?: string; // ID of the debt/split transaction this settlement resolves
+  subscriptionId?: string; // Linked subscription ID in useSubscriptionStore
 }
 
 export interface ExpenseBudget {

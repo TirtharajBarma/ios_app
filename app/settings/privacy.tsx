@@ -196,7 +196,7 @@ export default function PrivacyScreen() {
           <View style={styles.sectionCard}>
             <ToggleRow
               icon={<Fingerprint size={18} color="#fff" />}
-              iconBg="#007AFF"
+              iconBg="#9DC6EB"
               label={authType}
               description={`Require ${authType} to unlock the app when opened`}
               statusText={faceIdStatus}
@@ -219,7 +219,7 @@ export default function PrivacyScreen() {
           <View style={styles.sectionCard}>
             <ToggleRow
               icon={<BarChart2 size={18} color="#fff" />}
-              iconBg="#5856D6"
+              iconBg="#C4A7E7"
               label="Usage Analytics"
               description="Share anonymous usage data to improve the app"
               statusText={analyticsEnabled ? "Active (Sending anonymous telemetry)" : "Paused"}
@@ -230,7 +230,7 @@ export default function PrivacyScreen() {
             <View style={styles.separator} />
             <ToggleRow
               icon={<AlertTriangle size={18} color="#fff" />}
-              iconBg="#FF9500"
+              iconBg="#F8A888"
               label="Crash Reports"
               description="Automatically send crash logs to the dev team"
               statusText={crashReportsEnabled ? "Active (Reporting crashes)" : "Paused"}

@@ -7,24 +7,31 @@ import { expenseColors } from '@/constants/expenseColors';
 
 export const formatCompactCurrency = (amount: number, symbol: string = '₹'): string => {
   if (amount === 0) return `${symbol}0`;
-  if (Math.abs(amount) >= 1000) {
-    const kValue = (amount / 1000).toFixed(1);
-    const formatted = kValue.endsWith('.0') ? kValue.slice(0, -2) : kValue;
-    return `${symbol}${formatted}K`;
+  const abs = Math.abs(amount);
+  const sign = amount < 0 ? '-' : '';
+  const strip = (v: string) => (v.endsWith('.0') ? v.slice(0, -2) : v);
+  if (abs >= 10000000) {
+    return `${sign}${symbol}${strip((abs / 10000000).toFixed(1))}Cr`;
   }
-  return `${symbol}${amount.toLocaleString('en-IN')}`;
+  if (abs >= 100000) {
+    return `${sign}${symbol}${strip((abs / 100000).toFixed(1))}L`;
+  }
+  if (abs >= 1000) {
+    return `${sign}${symbol}${strip((abs / 1000).toFixed(1))}k`;
+  }
+  return `${sign}${symbol}${abs.toLocaleString('en-IN')}`;
 };
 
 // Pastel Accent Palette
 const pastelColors = {
-  mint: '#7CD9A8',
-  mintBg: 'rgba(124, 217, 168, 0.12)',
-  peach: '#FFB088',
-  peachBg: 'rgba(255, 176, 136, 0.12)',
-  coral: '#F28B82',
-  coralBg: 'rgba(242, 139, 130, 0.12)',
-  purple: '#9B8AFB',
-  purpleBg: 'rgba(155, 138, 251, 0.12)',
+  mint: expenseColors.accentGreen,
+  mintBg: 'rgba(112, 214, 188, 0.12)',
+  peach: '#F8A888',
+  peachBg: 'rgba(248, 168, 136, 0.12)',
+  coral: expenseColors.accentRed,
+  coralBg: 'rgba(244, 139, 139, 0.12)',
+  purple: '#C4A7E7',
+  purpleBg: 'rgba(196, 167, 231, 0.12)',
   muted: '#8E919D',
   subtle: '#6F7383',
 };
@@ -65,7 +72,6 @@ export const MoneyFlowCard: React.FC = () => {
   const totalBalance = getTotalBalance();
   const remainingBudget = getRemainingBudget();
   const overspentPct = getOverspentPercentage();
-  const netBalance = totalIncome - totalSpent;
 
   const spentPct = monthlyBudget > 0 ? Math.round((totalSpent / monthlyBudget) * 100) : 0;
   const spentProgressPct = Math.min(Math.max(spentPct, 0), 100);
@@ -145,16 +151,8 @@ export const MoneyFlowCard: React.FC = () => {
           <AppText style={[styles.tileAmount, totalIncome > 0 && { color: pastelColors.mint }]}>
             {sym}{totalIncome.toLocaleString('en-IN')}
           </AppText>
-          <AppText style={styles.tileSub}>
-            Net:{' '}
-            <AppText
-              style={{
-                color: netBalance >= 0 ? pastelColors.mint : pastelColors.coral,
-                fontWeight: '700',
-              }}
-            >
-              {netBalance >= 0 ? '+' : ''}{sym}{netBalance.toLocaleString('en-IN')}
-            </AppText>
+          <AppText style={styles.tileSub} numberOfLines={1}>
+            Monthly Inflow
           </AppText>
         </View>
       </View>

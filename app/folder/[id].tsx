@@ -257,25 +257,25 @@ export default function FolderDetailScreen() {
                           styles.categoryIconCircle,
                           {
                             backgroundColor: isTransfer
-                              ? 'rgba(96, 165, 250, 0.15)'
+                              ? 'rgba(157, 198, 235, 0.15)'
                               : isSplit
-                              ? 'rgba(192, 132, 252, 0.15)'
+                              ? 'rgba(196, 167, 231, 0.15)'
                               : isDebtLend
-                              ? 'rgba(52, 211, 153, 0.15)'
+                              ? 'rgba(140, 217, 200, 0.15)'
                               : isDebtBorrow
-                              ? 'rgba(251, 146, 60, 0.15)'
+                              ? 'rgba(248, 168, 136, 0.15)'
                               : '#202330',
                           },
                         ]}
                       >
                         {isTransfer ? (
-                          <ArrowRightLeft size={16} color="#60A5FA" />
+                          <ArrowRightLeft size={16} color="#9DC6EB" />
                         ) : isSplit ? (
-                          <Users size={16} color="#C084FC" />
+                          <Users size={16} color="#C4A7E7" />
                         ) : isDebtLend ? (
-                          <HandCoins size={16} color="#34D399" />
+                          <HandCoins size={16} color="#8CD9C8" />
                         ) : isDebtBorrow ? (
-                          <HandCoins size={16} color="#FB923C" />
+                          <HandCoins size={16} color="#F8A888" />
                         ) : (
                           renderCategoryIcon(cat)
                         )}
@@ -284,7 +284,7 @@ export default function FolderDetailScreen() {
                       {/* Center Info */}
                       <View style={styles.transactionCenter}>
                         <AppText style={styles.transactionTitle} numberOfLines={1}>
-                          {tx.note || cat.name.toUpperCase()}
+                          {(tx.note || (isTransfer ? 'ACCOUNT TRANSFER' : cat.name)).toUpperCase()}
                         </AppText>
                         <View style={styles.badgeRow}>
                           <View style={styles.categoryPill}>
@@ -294,7 +294,7 @@ export default function FolderDetailScreen() {
                                 { color: cat.color || expenseColors.accentPeach },
                               ]}
                             >
-                              {cat.name} {cat.emoji || ''}
+                              {cat.name.toUpperCase()}
                             </AppText>
                           </View>
                           {tx.tag && (
@@ -522,10 +522,10 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   expenseAmount: {
-    color: '#FF6B6B',
+    color: expenseColors.accentRed,
   },
   incomeAmount: {
-    color: '#34D399',
+    color: expenseColors.accentGreen,
   },
   emptyContainer: {
     alignItems: 'center',

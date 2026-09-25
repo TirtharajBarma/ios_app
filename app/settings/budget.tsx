@@ -34,6 +34,7 @@ import { AppText } from '@/components/ui';
 import { expenseColors } from '@/constants/expenseColors';
 import { useExpenseStore } from '@/store/useExpenseStore';
 import { CategoryIcon, getCategoryBgColor } from '@/components/expense/CategoryIcon';
+import { formatCompactCurrency } from '@/components/expense/MoneyFlowCard';
 
 export default function MonthlyBudgetScreen() {
   const router = useRouter();
@@ -237,7 +238,7 @@ export default function MonthlyBudgetScreen() {
               {/* Quick Preset Chips */}
               <View style={styles.presetsRow}>
                 {[10000, 25000, 50000, 100000].map((amt) => {
-                  const label = amt >= 100000 ? `${currencySymbol}1.0L` : `${currencySymbol}${amt / 1000}.0K`;
+                  const label = formatCompactCurrency(amt, currencySymbol);
                   const isSelected = numericMonthlyBudget === amt;
                   return (
                     <TouchableOpacity
@@ -348,7 +349,7 @@ export default function MonthlyBudgetScreen() {
                         </View>
                         <View>
                           <AppText style={styles.catNameText}>
-                            {cat.name.toUpperCase()} {cat.emoji || ''}
+                            {cat.name.toUpperCase()}
                           </AppText>
                           <AppText style={styles.catSubText}>
                             {currentBudget > 0

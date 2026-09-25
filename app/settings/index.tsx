@@ -122,7 +122,7 @@ export default function SettingsIndex() {
             />
             <Divider />
             <Row
-              iconBg="#007AFF"
+              iconBg="#9DC6EB"
               icon={<Sun size={18} color="#fff" />}
               label="Appearance"
               badge="Soon"
@@ -130,14 +130,14 @@ export default function SettingsIndex() {
             />
             <Divider />
             <Row
-              iconBg="#FF3B30"
+              iconBg="#F48B8B"
               icon={<Bell size={18} color="#fff" />}
               label="Notifications"
               onPress={() => router.push("/settings/notifications")}
             />
             <Divider />
             <Row
-              iconBg="#5856D6"
+              iconBg="#C4A7E7"
               icon={<Globe size={18} color="#fff" />}
               label="Currency"
               value={`${currencyCode} (${currencySymbol})`}
@@ -145,7 +145,7 @@ export default function SettingsIndex() {
             />
             <Divider />
             <Row
-              iconBg="#34C759"
+              iconBg="#8CD9C8"
               icon={<Users size={18} color="#fff" />}
               label="Shared Group"
               onPress={() => router.push("/settings/shared")}
@@ -157,7 +157,7 @@ export default function SettingsIndex() {
         <View>
           <SectionCard>
             <Row
-              iconBg="#FF9500"
+              iconBg="#F8A888"
               icon={<Grid3X3 size={18} color="#fff" />}
               label="Organize Subscriptions"
               onPress={() => router.push("/subscriptions")}

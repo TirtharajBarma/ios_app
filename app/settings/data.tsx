@@ -14,13 +14,13 @@ import {
   Database,
   Lock,
   FileText,
-  Share2,
   Trash2,
   CheckCircle2,
   Sparkles,
   Cpu,
   Layers,
   Printer,
+  ScrollText,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import * as Sharing from 'expo-sharing';
@@ -31,51 +31,16 @@ import { AppText } from '@/components/ui';
 import { expenseColors } from '@/constants/expenseColors';
 import { useExpenseStore } from '@/store/useExpenseStore';
 import { getDeviceAiEngineInfo } from '@/services/onDeviceAi';
+import { logAction, logException } from '@/utils/auditLog';
+import AsyncStorage from '@/utils/storage';
+
+const EXCHANGE_RATE_CACHE_KEY = '@subo_exchange_rates';
 
 export default function YourDataScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { transactions, accounts, categories, resetAllData } = useExpenseStore();
+  const { transactions, accounts, categories, resetAllData, currencySymbol } = useExpenseStore();
   const aiEngineInfo = useMemo(() => getDeviceAiEngineInfo(), []);
-
-  const handleExportData = async () => {
-    Haptics.selectionAsync();
-    try {
-      if (transactions.length === 0) {
-        Alert.alert('No Data', 'There are no transactions to export yet.');
-        return;
-      }
-
-      const csvHeader = 'ID,Date,Amount,Type,Category,Account,Note\n';
-      const csvRows = transactions
-        .map(
-          (t) =>
-            `"${t.id}","${t.date}",${t.amount},"${t.type}","${t.categoryId}","${t.accountId}","${t.note || ''}"`
-        )
-        .join('\n');
-
-      const fileContent = csvHeader + csvRows;
-      const docDir = (FileSystem as any).documentDirectory || (FileSystem as any).cacheDirectory || '';
-      const fileUri = `${docDir}expenses_export.csv`;
-
-      await FileSystem.writeAsStringAsync(fileUri, fileContent, {
-        encoding: FileSystem.EncodingType.UTF8,
-      });
-
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, {
-          mimeType: 'text/csv',
-          dialogTitle: 'Export Your Data (CSV)',
-          UTI: 'public.comma-separated-values-text',
-        });
-      } else {
-        Alert.alert('Export Successful', `Saved CSV file to ${fileUri}`);
-      }
-    } catch (err) {
-      console.warn('Export error:', err);
-      Alert.alert('Export Failed', 'Could not export data.');
-    }
-  };
 
   const handleExportPdf = async () => {
     Haptics.selectionAsync();
@@ -92,6 +57,7 @@ export default function YourDataScreen() {
         .filter((t) => t.type === 'income')
         .reduce((sum, t) => sum + t.amount, 0);
       const netSavings = totalIncome - totalSpent;
+      const ledgerRowCount = Math.min(transactions.length, 300);
 
       const categoryRows = categories
         .filter((c) => c.id !== 'cat_income')
@@ -103,8 +69,8 @@ export default function YourDataScreen() {
           const pct = totalSpent > 0 ? ((catSpent / totalSpent) * 100).toFixed(1) : '0';
           return `
             <tr>
-              <td><strong>${cat.name} ${cat.emoji || ''}</strong></td>
-              <td style="text-align: right; color: #E84040; font-weight: 600;">₹${catSpent.toLocaleString('en-IN')}</td>
+              <td><strong>${cat.name}</strong></td>
+              <td style="text-align: right; color: #E84040; font-weight: 600;">${currencySymbol}${catSpent.toLocaleString('en-IN')}</td>
               <td style="text-align: right; color: #555;">${pct}%</td>
             </tr>
           `;
@@ -118,15 +84,15 @@ export default function YourDataScreen() {
           const cat = categories.find((c) => c.id === t.categoryId);
           const acc = accounts.find((a) => a.id === t.accountId);
           const sign = t.type === 'income' ? '+' : t.type === 'transfer' ? '⇄' : '-';
-          const color = t.type === 'income' ? '#2ECC71' : t.type === 'transfer' ? '#3498DB' : '#E74C3C';
+          const color = t.type === 'income' ? '#70D6BC' : t.type === 'transfer' ? '#9DC6EB' : '#F48B8B';
           const displayAmt = t.split ? t.split.yourShare : t.amount;
           return `
             <tr>
               <td>${new Date(t.date).toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
-              <td>${cat?.name || 'Expense'} ${cat?.emoji || ''}</td>
+              <td>${cat?.name || 'Expense'}</td>
               <td>${acc?.name || 'Account'}</td>
               <td>${t.note || (t.split ? `Split (${t.split.friendNames})` : '-')}</td>
-              <td style="text-align: right; font-weight: bold; color: ${color};">${sign}₹${displayAmt.toLocaleString('en-IN')}</td>
+              <td style="text-align: right; font-weight: bold; color: ${color};">${sign}${currencySymbol}${displayAmt.toLocaleString('en-IN')}</td>
             </tr>
           `;
         })
@@ -164,15 +130,15 @@ export default function YourDataScreen() {
           <div class="summary-cards">
             <div class="card">
               <div class="card-title">Total Income</div>
-              <div class="card-val" style="color: #2ECC71;">+₹${totalIncome.toLocaleString('en-IN')}</div>
+              <div class="card-val" style="color: #70D6BC;">+${currencySymbol}${totalIncome.toLocaleString('en-IN')}</div>
             </div>
             <div class="card">
               <div class="card-title">Total Expenses</div>
-              <div class="card-val" style="color: #E74C3C;">-₹${totalSpent.toLocaleString('en-IN')}</div>
+              <div class="card-val" style="color: #F48B8B;">-${currencySymbol}${totalSpent.toLocaleString('en-IN')}</div>
             </div>
             <div class="card">
               <div class="card-title">Net Balance</div>
-              <div class="card-val" style="color: ${netSavings >= 0 ? '#2ECC71' : '#E74C3C'};">${netSavings >= 0 ? '+' : '-'}₹${Math.abs(netSavings).toLocaleString('en-IN')}</div>
+              <div class="card-val" style="color: ${netSavings >= 0 ? '#70D6BC' : '#F48B8B'};">${netSavings >= 0 ? '+' : '-'}${currencySymbol}${Math.abs(netSavings).toLocaleString('en-IN')}</div>
             </div>
           </div>
 
@@ -190,7 +156,7 @@ export default function YourDataScreen() {
             </tbody>
           </table>
 
-          <div class="section-title">Transaction Ledger Log (${transactions.length} total)</div>
+          <div class="section-title">Transaction Ledger Log (${ledgerRowCount}${transactions.length > 300 ? ` of ${transactions.length}` : ''} total${transactions.length > 300 ? ' — newest 300 shown' : ''})</div>
           <table>
             <thead>
               <tr>
@@ -223,8 +189,10 @@ export default function YourDataScreen() {
       } else {
         Alert.alert('PDF Export Complete', `Saved financial report to ${uri}`);
       }
+      logAction('export', 'Generated financial statement PDF report', { format: 'pdf', count: transactions.length });
     } catch (err) {
       console.warn('PDF export error:', err);
+      logException('export', 'PDF export failed', err);
       Alert.alert('Export Failed', 'Could not generate PDF report.');
     }
   };
@@ -233,13 +201,20 @@ export default function YourDataScreen() {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
     Alert.alert(
       'Clear Local Cache',
-      'This will clean temporary rendering caches. Your saved transactions and categories will not be deleted.',
+      'This removes cached exchange rates and temporary render cache. Your saved transactions and categories will not be deleted.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Clear Cache',
-          onPress: () => {
+          onPress: async () => {
+            try {
+              await AsyncStorage.removeItem(EXCHANGE_RATE_CACHE_KEY);
+            } catch (err) {
+              console.warn('Cache clear error:', err);
+              logException('app', 'Local cache clear failed', err);
+            }
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            logAction('app', 'Local cache cleared', { targets: [EXCHANGE_RATE_CACHE_KEY] });
             Alert.alert('Cache Cleared', 'Temporary cache has been cleared.');
           },
         },
@@ -251,7 +226,7 @@ export default function YourDataScreen() {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     Alert.alert(
       'Delete All Stored Data',
-      'This action is irreversible. All transactions, accounts, and custom settings will be permanently erased.',
+      'This action is irreversible. All transactions, accounts, and custom settings will be permanently erased. The hidden activity/audit log is intentionally retained as a permanent record.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -260,6 +235,7 @@ export default function YourDataScreen() {
           onPress: () => {
             resetAllData();
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            logAction('security', 'User erased all stored data from Settings');
             Alert.alert('Data Erased', 'All data on this device has been erased and restored to clean initial state.');
           },
         },
@@ -356,8 +332,8 @@ export default function YourDataScreen() {
             <View style={styles.divider} />
 
             <View style={styles.featureRow}>
-              <View style={[styles.iconBox, { backgroundColor: 'rgba(74, 144, 226, 0.15)' }]}>
-                <Layers size={18} color="#4A90E2" />
+              <View style={[styles.iconBox, { backgroundColor: 'rgba(157, 198, 235, 0.15)' }]}>
+                <Layers size={18} color="#9DC6EB" />
               </View>
               <View style={styles.featureTextCol}>
                 <AppText style={styles.featureTitle}>No Model Training on Personal Finances</AppText>
@@ -435,7 +411,7 @@ export default function YourDataScreen() {
             <View style={styles.tcItem}>
               <AppText style={styles.tcNumber}>2. User Data Ownership & Portability</AppText>
               <AppText style={styles.tcBody}>
-                You retain complete, exclusive ownership of all transactions, custom categories, account names, and financial records logged within this application. You may export your entire transaction history to CSV or PDF at any time without restriction or fees.
+                You retain complete, exclusive ownership of all transactions, custom categories, account names, and financial records logged within this application. You may export your entire transaction history to PDF at any time without restriction or fees.
               </AppText>
             </View>
 
@@ -453,7 +429,7 @@ export default function YourDataScreen() {
             <View style={styles.tcItem}>
               <AppText style={styles.tcNumber}>4. Local Storage & Backup Responsibility</AppText>
               <AppText style={styles.tcBody}>
-                Because this application uses local-first on-device storage, deleting the application or clearing device storage without generating an export backup may result in irreversible data loss. Users are encouraged to utilize the built-in CSV/PDF export function regularly.
+                Because this application uses local-first on-device storage, deleting the application or clearing device storage without generating an export backup may result in irreversible data loss. Users are encouraged to utilize the built-in PDF export function regularly.
               </AppText>
             </View>
 
@@ -481,6 +457,26 @@ export default function YourDataScreen() {
         <View style={styles.sectionContainer}>
           <AppText style={styles.sectionTitle}>DATA CONTROLS</AppText>
           <View style={styles.card}>
+            {/* Activity / Audit Log */}
+            <TouchableOpacity
+              style={styles.actionRow}
+              activeOpacity={0.7}
+              onPress={() => router.push('/settings/logs')}
+            >
+              <View style={styles.actionLeft}>
+                <View style={[styles.logsIconBox]}>
+                  <ScrollText size={18} color="#9DC6EB" />
+                </View>
+                <View>
+                  <AppText style={styles.actionTitle}>View Activity Logs</AppText>
+                  <AppText style={styles.actionSub}>Hidden on-device audit trail of every action</AppText>
+                </View>
+              </View>
+              <AppText style={[styles.actionBtnText, { color: '#9DC6EB' }]}>View</AppText>
+            </TouchableOpacity>
+
+            <View style={styles.divider} />
+
             {/* PDF Export */}
             <TouchableOpacity
               style={styles.actionRow}
@@ -495,24 +491,6 @@ export default function YourDataScreen() {
                 </View>
               </View>
               <AppText style={[styles.actionBtnText, { color: expenseColors.accentGreen }]}>Export</AppText>
-            </TouchableOpacity>
-
-            <View style={styles.divider} />
-
-            {/* CSV Export */}
-            <TouchableOpacity
-              style={styles.actionRow}
-              activeOpacity={0.7}
-              onPress={handleExportData}
-            >
-              <View style={styles.actionLeft}>
-                <Share2 size={18} color={expenseColors.accentPeach} />
-                <View>
-                  <AppText style={styles.actionTitle}>Export Data to CSV</AppText>
-                  <AppText style={styles.actionSub}>Download raw spreadsheet transactions</AppText>
-                </View>
-              </View>
-              <AppText style={styles.actionBtnText}>Export</AppText>
             </TouchableOpacity>
 
             <View style={styles.divider} />
@@ -638,6 +616,14 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  logsIconBox: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(157, 198, 235, 0.15)',
   },
   featureTextCol: {
     flex: 1,

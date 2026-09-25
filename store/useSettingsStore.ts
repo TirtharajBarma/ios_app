@@ -2,6 +2,7 @@ import { create } from "zustand";
 import AsyncStorage from "@/utils/storage";
 import type { ShareGroup } from "@/types/shared";
 import { isSupabaseConfigured, updateMyName } from "@/api/supabase";
+import { logAction, logException } from "@/utils/auditLog";
 
 export type AppearanceMode = "system" | "light" | "dark";
 export type NotificationTiming = "1day" | "3days" | "1week";
@@ -88,15 +89,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   shareGroups: [],
   shareGroup: null,
 
-  setUserName: async (userName) => { set({ userName }); await save({ userName }); await saveNameToServer(userName); },
+  setUserName: async (userName) => { set({ userName }); await save({ userName }); await saveNameToServer(userName); if (userName) logAction('settings', 'Display name updated'); },
   setUserTagline: async (userTagline) => { set({ userTagline }); await save({ userTagline }); },
-  setCurrencyCode: async (currencyCode) => { set({ currencyCode }); await save({ currencyCode }); },
-  setAppearance: async (appearance) => { set({ appearance }); await save({ appearance }); },
-  setNotificationsEnabled: async (notificationsEnabled) => { set({ notificationsEnabled }); await save({ notificationsEnabled }); },
-  setNotificationTiming: async (notificationTiming) => { set({ notificationTiming }); await save({ notificationTiming }); },
-  setFaceIdEnabled: async (faceIdEnabled) => { set({ faceIdEnabled }); await save({ faceIdEnabled }); },
-  setAnalyticsEnabled: async (analyticsEnabled) => { set({ analyticsEnabled }); await save({ analyticsEnabled }); },
-  setCrashReportsEnabled: async (crashReportsEnabled) => { set({ crashReportsEnabled }); await save({ crashReportsEnabled }); },
+  setCurrencyCode: async (currencyCode) => { set({ currencyCode }); await save({ currencyCode }); logAction('settings', `Display currency changed to ${currencyCode}`, { currencyCode }); },
+  setAppearance: async (appearance) => { set({ appearance }); await save({ appearance }); logAction('settings', `Appearance changed to ${appearance}`, { appearance }); },
+  setNotificationsEnabled: async (notificationsEnabled) => { set({ notificationsEnabled }); await save({ notificationsEnabled }); logAction('settings', `Notifications ${notificationsEnabled ? 'enabled' : 'disabled'}`); },
+  setNotificationTiming: async (notificationTiming) => { set({ notificationTiming }); await save({ notificationTiming }); logAction('settings', `Notification timing set to ${notificationTiming}`, { notificationTiming }); },
+  setFaceIdEnabled: async (faceIdEnabled) => { set({ faceIdEnabled }); await save({ faceIdEnabled }); logAction('security', `Face ID lock ${faceIdEnabled ? 'enabled' : 'disabled'}`); },
+  setAnalyticsEnabled: async (analyticsEnabled) => { set({ analyticsEnabled }); await save({ analyticsEnabled }); logAction('settings', `Analytics ${analyticsEnabled ? 'enabled' : 'disabled'}`); },
+  setCrashReportsEnabled: async (crashReportsEnabled) => { set({ crashReportsEnabled }); await save({ crashReportsEnabled }); logAction('settings', `Crash reports ${crashReportsEnabled ? 'enabled' : 'disabled'}`); },
 
   addCustomCategory: async (category) => {
     const trimmed = category.trim();
@@ -107,6 +108,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const updated = [...current, trimmed];
     set({ customCategories: updated });
     await save({ customCategories: updated });
+    logAction('category', `Added custom category: ${trimmed}`);
   },
 
   setShareGroups: async (groups) => {
@@ -119,6 +121,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const shareGroups = group ? [group] : [];
     set({ shareGroups, shareGroup: group });
     await save({ shareGroups });
+    if (group) logAction('sync', `Joined share group: ${group.name}`, { id: group.id });
   },
 
   loadSettings: async () => {

@@ -7,6 +7,7 @@ import { Lock } from "lucide-react-native";
 import * as LocalAuthentication from "expo-local-authentication";
 
 import { initDatabase } from "@/database/database";
+import { initAuditLogs, installConsoleCapture, logAction, logWarn, logInfo, logException } from "@/utils/auditLog";
 import { requestNotificationPermissions } from "@/utils/notifications";
 import AsyncStorage from "@/utils/storage";
 import { useSettingsStore } from "@/store/useSettingsStore";
@@ -38,9 +39,18 @@ export default function RootLayout() {
   useEffect(() => {
     async function initialize() {
       try {
+        logInfo("app", "App launch started");
+        installConsoleCapture();
+        // Best-effort, non-blocking: never delay the UI behind log init.
+        await initAuditLogs().catch(() => {});
         await initDatabase();
         await requestNotificationPermissions();
         await loadSettings();
+
+        logInfo("app", "App initialized successfully", {
+          hasBiometrics: useSettingsStore.getState().faceIdEnabled,
+          shareGroupCount: useSettingsStore.getState().shareGroups.length,
+        });
 
         // Re-push the persisted display name so group members see the latest
         // Personalization name even if a previous push failed while offline.
@@ -103,6 +113,7 @@ export default function RootLayout() {
           }
         }
       } catch (e) {
+        logException("app", "Startup initialization failed", e);
         console.warn("Startup initialization failed:", e);
       }
       setIsReady(true);
@@ -133,10 +144,13 @@ export default function RootLayout() {
 
       if (result.success) {
         setIsLocked(false);
+        logAction("security", "App unlocked via biometrics");
       } else {
         setIsLocked(true);
+        logWarn("security", "Biometric unlock cancelled or failed");
       }
     } catch (e) {
+      logException("security", "Biometric authentication error", e);
       console.warn("Auth failed:", e);
       setIsLocked(false); // Fallback to prevent permanent lockouts
     } finally {
@@ -162,6 +176,7 @@ export default function RootLayout() {
         const faceId = useSettingsStore.getState().faceIdEnabled;
         if (faceId) {
           setIsLocked(true);
+          logAction("security", "App locked on resume");
           authenticate();
         }
 
@@ -235,6 +250,15 @@ export default function RootLayout() {
         />
         <Stack.Screen
           name="receivables/index"
+          options={{
+            headerShown: false,
+            animation: "slide_from_right",
+            gestureEnabled: true,
+            fullScreenGestureEnabled: true,
+          }}
+        />
+        <Stack.Screen
+          name="settings/logs"
           options={{
             headerShown: false,
             animation: "slide_from_right",

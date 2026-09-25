@@ -27,7 +27,6 @@ import {
 } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
-import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
 
@@ -177,8 +176,10 @@ export const ExpenseImport: React.FC = () => {
           }
         }
 
-        // Numbers / Amounts extraction
-        const numbers = line.match(/(?:₹|\$|INR)?\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]{1,2})?|[0-9]+(?:\.[0-9]{1,2})?)/g) || [];
+        // Numbers / Amounts extraction (dates stripped first so a day/year like
+        // "22" or "2026" is never mistaken for the amount as the leading figure)
+        const lineWithoutDate = line.replace(/(\d{4}[-/]\d{2}[-/]\d{2}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\d{1,2}\s+[A-Za-z]{3}\s+\d{2,4})/g, ' ');
+        const numbers = lineWithoutDate.match(/(?:₹|\$|INR)?\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]{1,2})?|[0-9]+(?:\.[0-9]{1,2})?)/g) || [];
         const cleanNums = numbers
           .map((n) => parseFloat(n.replace(/[₹$, INR\s]/g, '')))
           .filter((n) => !isNaN(n) && n > 0 && n < 10000000);
@@ -214,39 +215,8 @@ export const ExpenseImport: React.FC = () => {
       }
     }
 
-    // If zero parsed, generate high-confidence mock transactions matching the statement
-    if (results.length === 0) {
-      return [
-        {
-          id: `staged_${Date.now()}_1`,
-          selected: true,
-          date: todayStr,
-          amount: 420,
-          type: 'expense',
-          categoryId: guessCategory('Swiggy Order', categories),
-          note: 'SWIGGY ORDER FOOD',
-        },
-        {
-          id: `staged_${Date.now()}_2`,
-          selected: true,
-          date: todayStr,
-          amount: 1250,
-          type: 'expense',
-          categoryId: guessCategory('Uber Ride', categories),
-          note: 'UBER RIDE BANGALORE',
-        },
-        {
-          id: `staged_${Date.now()}_3`,
-          selected: true,
-          date: todayStr,
-          amount: 1999,
-          type: 'expense',
-          categoryId: guessCategory('Amazon Shopping', categories),
-          note: 'AMAZON PAY RETAIL',
-        },
-      ];
-    }
-
+    // No mock data: if nothing was parsed from the real file the caller surfaces
+    // a clear "could not detect" message instead of inventing transactions.
     return results;
   };
 
@@ -267,7 +237,7 @@ export const ExpenseImport: React.FC = () => {
       Haptics.selectionAsync();
       setImportStatus('uploading');
       const result = await DocumentPicker.getDocumentAsync({
-        type: ['text/csv', 'application/pdf', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'text/plain', '*/*'],
+        type: ['text/csv', 'text/comma-separated-values', 'application/csv', 'text/plain'],
         copyToCacheDirectory: true,
       });
 
@@ -283,12 +253,26 @@ export const ExpenseImport: React.FC = () => {
               encoding: FileSystem.EncodingType.UTF8,
             });
           } catch (readErr) {
-            console.warn('Direct text read failed, using simulated file contents:', readErr);
-            rawContent = `${file.name}\n${new Date().toISOString().split('T')[0]},SWIGGY RESTAURANT,480.00\n${new Date().toISOString().split('T')[0]},UBER INDIA,310.00\n${new Date().toISOString().split('T')[0]},AMAZON PAY,1450.00`;
+            console.warn('Failed to read file as text:', readErr);
+            setImportStatus('idle');
+            Alert.alert(
+              'Unsupported File',
+              'Only CSV / text bank statements can be imported. PDFs, spreadsheets and image receipts cannot be read on-device.'
+            );
+            return;
           }
         }
 
         const parsed = parseRawContentToStaged(rawContent, file.name);
+        if (parsed.length === 0) {
+          setImportStatus('idle');
+          Alert.alert(
+            'No Transactions Found',
+            'We could not detect any transactions in this file. Make sure it is a standard CSV bank statement with columns like date, narration, amount and balance.'
+          );
+          return;
+        }
+
         setStagedTransactions(parsed);
         const targetAcc = accounts.find((a) => a.name === selectedAccount) || accounts[0];
         setStagedAccountId(targetAcc ? targetAcc.id : accounts[0]?.id || '');
@@ -299,55 +283,16 @@ export const ExpenseImport: React.FC = () => {
       }
     } catch (err) {
       console.warn('Document picker error:', err);
-      handlePickReceipt();
+      setImportStatus('idle');
     }
   };
 
   const handlePickReceipt = async () => {
-    try {
-      Haptics.selectionAsync();
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert('Permission required', 'Media library access is needed to pick receipt images.');
-        setImportStatus('idle');
-        return;
-      }
-
-      setImportStatus('uploading');
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.8,
-      });
-
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        setUploadedFileName('receipt_photo.jpg');
-        setImportStatus('processing');
-
-        setTimeout(() => {
-          const parsed: ParsedStagedTxn[] = [
-            {
-              id: `staged_receipt_${Date.now()}_1`,
-              selected: true,
-              date: new Date().toISOString().split('T')[0],
-              amount: 540,
-              type: 'expense',
-              categoryId: guessCategory('Starbucks Coffee & Food', categories),
-              note: 'STARBUCKS CAFE RECEIPT',
-            },
-          ];
-          setStagedTransactions(parsed);
-          const targetAcc = accounts.find((a) => a.name === selectedAccount) || accounts[0];
-          setStagedAccountId(targetAcc ? targetAcc.id : accounts[0]?.id || '');
-          setImportStatus('idle');
-          setIsReviewModalVisible(true);
-        }, 800);
-      } else {
-        setImportStatus('idle');
-      }
-    } catch (e) {
-      console.warn('Receipt picker error:', e);
-      setImportStatus('idle');
-    }
+    Alert.alert(
+      'Receipt Scanning Unavailable',
+      'Photo receipts cannot be parsed on-device yet. Export your statement as CSV and import that instead.'
+    );
+    setImportStatus('idle');
   };
 
   const toggleStagedSelect = (id: string) => {
@@ -439,7 +384,7 @@ export const ExpenseImport: React.FC = () => {
 
           <AppText style={styles.uploadTitle}>UPLOAD FILES</AppText>
           <AppText style={styles.uploadDescription}>
-            Upload CSV, PDF statement, XLSX, or photo of receipt.{'\n'}
+            Upload a CSV bank statement.{'\n'}
             Parsed transactions go to your staging inbox for review before being added.
           </AppText>
         </Animated.View>
@@ -517,7 +462,7 @@ export const ExpenseImport: React.FC = () => {
                 </AppText>
 
                 <AppText style={styles.dropzoneSubtext}>
-                  PDF • CSV • XLSX • RECEIPT IMAGES
+                  CSV • TEXT BANK STATEMENTS
                 </AppText>
               </View>
             )}
@@ -704,7 +649,7 @@ export const ExpenseImport: React.FC = () => {
                       >
                         <Tag size={10} color={cat.color} />
                         <AppText style={[styles.categoryPillText, { color: cat.color }]}>
-                          {cat.name} {cat.emoji || ''}
+                          {cat.name}
                         </AppText>
                       </TouchableOpacity>
                     </View>

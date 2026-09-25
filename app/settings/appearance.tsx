@@ -31,7 +31,7 @@ export default function AppearanceScreen() {
         {/* Coming Soon Banner */}
         <View style={styles.comingSoonBanner}>
           <View style={styles.comingSoonIcon}>
-            <Clock size={22} color="#FF9500" />
+            <Clock size={22} color="#F4CD89" />
           </View>
           <View style={styles.comingSoonText}>
             <AppText variant="body" weight="700" color={colors.white}>Coming Soon</AppText>
@@ -91,18 +91,18 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-start",
     gap: spacing[12],
-    backgroundColor: hexToRGBA("#FF9500", 0.1),
+    backgroundColor: hexToRGBA("#F4CD89", 0.1),
     borderRadius: radius[16],
     padding: spacing[16],
     borderWidth: 0.5,
-    borderColor: hexToRGBA("#FF9500", 0.25),
+    borderColor: hexToRGBA("#F4CD89", 0.25),
     marginTop: spacing[8],
   },
   comingSoonIcon: {
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: hexToRGBA("#FF9500", 0.15),
+    backgroundColor: hexToRGBA("#F4CD89", 0.15),
     alignItems: "center",
     justifyContent: "center",
   },

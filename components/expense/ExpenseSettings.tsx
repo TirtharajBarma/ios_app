@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useCallback, useLayoutEffect } from 'react';
+import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import {
   View,
   StyleSheet,
@@ -16,7 +16,7 @@ import {
   UIManager,
   Keyboard,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useNavigation, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ChevronRight,
@@ -57,6 +57,9 @@ import {
   Wifi,
   Smartphone,
   PiggyBank,
+  Trash2,
+  Cigarette,
+  Repeat,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import * as Sharing from 'expo-sharing';
@@ -98,25 +101,28 @@ const customSpringLayout = {
 
 // Rich collection of icons for categories
 const AVAILABLE_ICONS = [
-  { name: 'Star', component: Star },
+  { name: 'Cigarette', component: Cigarette },
+  { name: 'ShoppingBag', component: ShoppingBag },
+  { name: 'Tv', component: Tv },
+  { name: 'Repeat', component: Repeat },
   { name: 'Heart', component: Heart },
-  { name: 'Home', component: Home },
+  { name: 'Banknote', component: Banknote },
   { name: 'Car', component: Car },
+  { name: 'Zap', component: Zap },
+  { name: 'UtensilsCrossed', component: UtensilsCrossed },
+  { name: 'MoreHorizontal', component: MoreHorizontal },
+  { name: 'Coins', component: Coins },
+  { name: 'Star', component: Star },
+  { name: 'Home', component: Home },
   { name: 'Plane', component: Plane },
   { name: 'Gift', component: Gift },
   { name: 'Coffee', component: Coffee },
-  { name: 'ShoppingBag', component: ShoppingBag },
-  { name: 'UtensilsCrossed', component: UtensilsCrossed },
-  { name: 'Tv', component: Tv },
   { name: 'Gamepad2', component: Gamepad2 },
   { name: 'Music', component: Music },
   { name: 'BookOpen', component: BookOpen },
   { name: 'Briefcase', component: Briefcase },
   { name: 'Laptop', component: Laptop },
-  { name: 'Banknote', component: Banknote },
-  { name: 'Coins', component: Coins },
   { name: 'PiggyBank', component: PiggyBank },
-  { name: 'Zap', component: Zap },
   { name: 'Flame', component: Flame },
   { name: 'Shield', component: Shield },
   { name: 'Leaf', component: Leaf },
@@ -124,26 +130,27 @@ const AVAILABLE_ICONS = [
   { name: 'Sparkles', component: Sparkles },
 ];
 
-// Rich pastel palette for custom categories
+// Rich warm pastel palette for custom categories
 const AVAILABLE_COLORS = [
-  '#F472B6', // Pastel Pink
-  '#FB7185', // Pastel Rose
-  '#FDBA74', // Pastel Peach
-  '#FBBF24', // Pastel Amber
-  '#4ADE80', // Pastel Mint Green
-  '#34D399', // Pastel Emerald
-  '#2DD4BF', // Pastel Teal
-  '#38BDF8', // Pastel Sky Cyan
-  '#60A5FA', // Pastel Soft Blue
-  '#818CF8', // Pastel Indigo
-  '#A78BFA', // Pastel Violet
-  '#C084FC', // Pastel Lilac
-  '#D8B4FE', // Pastel Lavender
-  '#94A3B8', // Pastel Slate Gray
+  '#F8A888', // Warm Peach
+  '#F39C94', // Warm Coral
+  '#EFA2A2', // Dusty Rose
+  '#F2AEC4', // Soft Blush
+  '#D6AEE0', // Warm Lavender
+  '#C4A7E7', // Soft Lilac
+  '#A8B8E8', // Periwinkle
+  '#9DC6EB', // Powder Sky
+  '#82D0D8', // Seafoam Teal
+  '#8CD9C8', // Warm Mint
+  '#A3D6B2', // Sage Celadon
+  '#F4CD89', // Warm Buttercream
+  '#E5B299', // Warm Sand
+  '#A2AEBB', // Warm Slate
 ];
 
 export const ExpenseSettings: React.FC = () => {
   const router = useRouter();
+  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { height: screenHeight, width: screenWidth } = useWindowDimensions();
 
@@ -161,6 +168,7 @@ export const ExpenseSettings: React.FC = () => {
     updateCategory,
     deleteCategory,
     reorderCategories,
+    resetAllData,
   } = useExpenseStore();
 
   const { userName, setCurrencyCode } = useSettingsStore();
@@ -175,11 +183,29 @@ export const ExpenseSettings: React.FC = () => {
   const [isEditingCategories, setIsEditingCategories] = useState(false);
   const [isDraggingAnyTile, setIsDraggingAnyTile] = useState(false);
 
+  // Automatically exit category edit mode when switching tabs or navigating away
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        setIsEditingCategories(false);
+        setIsDraggingAnyTile(false);
+      };
+    }, [])
+  );
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('blur', () => {
+      setIsEditingCategories(false);
+      setIsDraggingAnyTile(false);
+    });
+    return unsubscribe;
+  }, [navigation]);
+
   const [isCategoryModalVisible, setIsCategoryModalVisible] = useState(false);
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [categoryName, setCategoryName] = useState('');
   const [selectedIcon, setSelectedIcon] = useState('Star');
-  const [selectedColor, setSelectedColor] = useState('#C084FC');
+  const [selectedColor, setSelectedColor] = useState('#F8A888');
 
   // Currency Picker State
   const [isCurrencyModalVisible, setIsCurrencyModalVisible] = useState(false);
@@ -319,12 +345,12 @@ export const ExpenseSettings: React.FC = () => {
         setEditingCategoryId(cat.id);
         setCategoryName(cat.name);
         setSelectedIcon(cat.iconName || 'Star');
-        setSelectedColor(cat.color || '#C084FC');
+        setSelectedColor(cat.color || '#F8A888');
       } else {
         setEditingCategoryId(null);
         setCategoryName('');
         setSelectedIcon('Star');
-        setSelectedColor('#C084FC');
+        setSelectedColor('#F8A888');
       }
       categoryTranslateY.setValue(screenHeight);
       categoryBackdropOpacity.setValue(0);
@@ -403,7 +429,11 @@ export const ExpenseSettings: React.FC = () => {
   const handleSelectCurrency = async (item: { code: string; symbol: string; name: string }) => {
     Haptics.selectionAsync();
     const oldCode = currencyCode;
-    await convertAllCurrencies(oldCode, item.code);
+    try {
+      await convertAllCurrencies(oldCode, item.code);
+    } catch (err) {
+      console.warn('Currency conversion failed, continuing without converting balances:', err);
+    }
     await setCurrencyCode(item.code);
     setCurrency(item.code, item.symbol);
     closeCurrencyModal();
@@ -444,30 +474,18 @@ export const ExpenseSettings: React.FC = () => {
     reorderCategories(fromIdx, toIdx);
   };
 
-  const handleSignOut = () => {
-    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Sign Out',
-        style: 'destructive',
-        onPress: () => {
-          Alert.alert('Signed Out', 'You have been signed out.');
-        },
-      },
-    ]);
-  };
-
-  const handleDeleteAccount = () => {
+  const handleEraseAllData = () => {
     Alert.alert(
-      'Delete Account',
-      'This action is permanent and cannot be undone. Are you sure?',
+      'Erase All Expense Data',
+      'This permanently removes every transaction, account, category, budget and vault. The audit log is intentionally kept. This cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Delete',
+          text: 'Erase Everything',
           style: 'destructive',
           onPress: () => {
-            Alert.alert('Account Deletion', 'Account deletion request submitted.');
+            resetAllData();
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           },
         },
       ]
@@ -777,14 +795,8 @@ export const ExpenseSettings: React.FC = () => {
 
           <View style={styles.profileDivider} />
 
-          <TouchableOpacity style={styles.destructiveActionRow} onPress={handleSignOut}>
-            <AppText style={styles.destructiveActionText}>Sign Out</AppText>
-          </TouchableOpacity>
-
-          <View style={styles.profileDivider} />
-
-          <TouchableOpacity style={styles.destructiveActionRow} onPress={handleDeleteAccount}>
-            <AppText style={styles.destructiveActionText}>Delete Account</AppText>
+          <TouchableOpacity style={styles.destructiveActionRow} onPress={handleEraseAllData}>
+            <AppText style={styles.destructiveActionText}>Erase All Expense Data</AppText>
           </TouchableOpacity>
         </Animated.View>
       </ScrollView>
@@ -798,11 +810,7 @@ export const ExpenseSettings: React.FC = () => {
         animationType="none"
         onRequestClose={closeCategoryModal}
       >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
-          style={styles.modalOverlay}
-        >
+        <View style={styles.modalOverlay}>
           <Animated.View
             style={[
               styles.modalBackdrop,
@@ -822,7 +830,7 @@ export const ExpenseSettings: React.FC = () => {
               {
                 transform: [{ translateY: categoryTranslateY }],
                 maxHeight: '88%',
-                paddingBottom: insets.bottom + 24,
+                paddingBottom: 0,
               },
             ]}
           >
@@ -831,6 +839,8 @@ export const ExpenseSettings: React.FC = () => {
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="on-drag"
               showsVerticalScrollIndicator={false}
+              automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+              contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 24) + 40 }}
             >
             {/* Gesture Handle Bar Area (Swipe down anywhere here closes like iPhone) */}
             <View {...categoryPanResponder.panHandlers} style={styles.dragHeaderArea}>
@@ -849,6 +859,8 @@ export const ExpenseSettings: React.FC = () => {
                 placeholder="Category name"
                 placeholderTextColor="#5A5E6D"
                 style={styles.textInput}
+                returnKeyType="done"
+                onSubmitEditing={() => Keyboard.dismiss()}
               />
             </View>
 
@@ -919,6 +931,7 @@ export const ExpenseSettings: React.FC = () => {
                   closeCategoryModal();
                 }}
               >
+                <Trash2 size={16} color={expenseColors.accentRed} strokeWidth={2.2} />
                 <AppText style={styles.deleteCategoryBtnText}>
                   Delete Category
                 </AppText>
@@ -926,7 +939,7 @@ export const ExpenseSettings: React.FC = () => {
             )}
             </ScrollView>
           </Animated.View>
-        </KeyboardAvoidingView>
+        </View>
       </Modal>
 
       {/* ══════════════════════════════════════════════
@@ -938,11 +951,7 @@ export const ExpenseSettings: React.FC = () => {
         animationType="none"
         onRequestClose={closeCurrencyModal}
       >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
-          style={styles.modalOverlay}
-        >
+        <View style={styles.modalOverlay}>
           <Animated.View
             style={[
               styles.modalBackdrop,
@@ -1008,6 +1017,7 @@ export const ExpenseSettings: React.FC = () => {
               onScrollBeginDrag={() => Keyboard.dismiss()}
               contentContainerStyle={{ paddingBottom: insets.bottom + 24, backgroundColor: '#1A1D23' }}
               style={{ backgroundColor: '#1A1D23' }}
+              automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
             >
               {filteredCurrencies.map((item) => {
                 const isSelected = currencyCode === item.code;
@@ -1049,7 +1059,7 @@ export const ExpenseSettings: React.FC = () => {
               })}
             </ScrollView>
           </Animated.View>
-        </KeyboardAvoidingView>
+        </View>
       </Modal>
     </View>
   );
@@ -1102,18 +1112,14 @@ const DraggableCategoriesGrid: React.FC<DraggableCategoriesGridProps> = ({
   const hoverIndexRef = useRef<number | null>(null);
   const isDraggingActiveRef = useRef<boolean>(false);
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isDroppingRef = useRef<boolean>(false);
 
-  useLayoutEffect(() => {
-    if (isDroppingRef.current) {
-      isDroppingRef.current = false;
-      dragPan.setValue({ x: 0, y: 0 });
-      Object.values(shiftAnims.current).forEach((a) => a.setValue({ x: 0, y: 0 }));
-      setDraggingCatId(null);
-      hoverIndexRef.current = null;
-      setIsDraggingAny(false);
-    }
-  }, [categories, dragPan, setIsDraggingAny]);
+  useEffect(() => {
+    return () => {
+      if (holdTimerRef.current) {
+        clearTimeout(holdTimerRef.current);
+      }
+    };
+  }, []);
 
   const getTargetSlot = useCallback(
     (origIdx: number, dx: number, dy: number) => {
@@ -1269,16 +1275,16 @@ const DraggableCategoriesGrid: React.FC<DraggableCategoriesGridProps> = ({
                 useNativeDriver: true,
               }),
             ]).start(() => {
+              // Synchronously reset animated offsets and drag state before reordering to prevent glitching/flashing
+              dragPan.setValue({ x: 0, y: 0 });
+              Object.values(shiftAnims.current).forEach((a) => a.setValue({ x: 0, y: 0 }));
+              setDraggingCatId(null);
+              hoverIndexRef.current = null;
+              setIsDraggingAny(false);
+
               if (fromIdx !== toIdx) {
                 Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                isDroppingRef.current = true;
                 onReorder(fromIdx, toIdx);
-              } else {
-                dragPan.setValue({ x: 0, y: 0 });
-                Object.values(shiftAnims.current).forEach((a) => a.setValue({ x: 0, y: 0 }));
-                setDraggingCatId(null);
-                hoverIndexRef.current = null;
-                setIsDraggingAny(false);
               }
             });
           } else {
@@ -1381,7 +1387,7 @@ const DraggableCategoriesGrid: React.FC<DraggableCategoriesGridProps> = ({
             </View>
 
             <AppText style={styles.categoryTileName} numberOfLines={1}>
-              {cat.name.toUpperCase()} {cat.emoji || ''}
+              {cat.name.toUpperCase()}
             </AppText>
           </Animated.View>
         );
@@ -1613,7 +1619,7 @@ const styles = StyleSheet.create({
     width: 17,
     height: 17,
     borderRadius: 8.5,
-    backgroundColor: '#FF5B5B',
+    backgroundColor: expenseColors.accentRed,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 10,
@@ -1798,15 +1804,21 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   deleteCategoryBtn: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12,
-    marginTop: 6,
+    gap: 8,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: 'rgba(244, 139, 139, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(244, 139, 139, 0.3)',
+    marginTop: 12,
   },
   deleteCategoryBtnText: {
     color: expenseColors.accentRed,
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 15,
+    fontWeight: '700',
   },
 
   // Currency Search & Rows
