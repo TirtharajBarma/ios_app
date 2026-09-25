@@ -31,6 +31,7 @@ import { useExpenseStore } from '@/store/useExpenseStore';
 import { expenseColors } from '@/constants/expenseColors';
 import { ExpenseAccount, SavingsVault } from '@/types/expense';
 import { EditAccountModal } from './EditAccountModal';
+import { AccountIcon } from './AccountIcon';
 
 const EMOJI_OPTIONS = ['🛡️', '🌴', '💻', '🚗', '🏠', '💍', '📚', '📈', '🎁', '⚡'];
 const COLOR_OPTIONS = ['#8CD9C8', '#9DC6EB', '#F2AEC4', '#F4CD89', '#C4A7E7', '#F8A888'];
@@ -252,9 +253,7 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
                       activeOpacity={0.7}
                     >
                       {/* Left Icon */}
-                      <View style={styles.iconCircle}>
-                        {getAccountIcon(account)}
-                      </View>
+                      <AccountIcon type={account.type || 'savings'} size={18} containerSize={40} borderRadius={12} />
 
                       {/* Middle Info */}
                       <View style={styles.infoCol}>
@@ -299,9 +298,7 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
                           activeOpacity={0.75}
                           onPress={() => handleOpenEdit(account)}
                         >
-                          <View style={styles.iconCircle}>
-                            {getAccountIcon(account)}
-                          </View>
+                          <AccountIcon type={account.type || 'savings'} size={18} containerSize={40} borderRadius={12} />
                           <View style={styles.infoCol}>
                             <AppText style={styles.accountName}>
                               {account.name}
@@ -805,6 +802,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.05)',
+    gap: 14,
   },
   iconCircle: {
     width: 38,
@@ -817,25 +815,25 @@ const styles = StyleSheet.create({
   },
   infoCol: {
     flex: 1,
+    justifyContent: 'center',
+    gap: 4,
   },
   accountName: {
     color: '#FFFFFF',
     fontSize: 15,
-    lineHeight: 19,
+    lineHeight: 20,
     fontWeight: '700',
   },
   balanceText: {
     color: '#8E95A5',
     fontSize: 13,
     lineHeight: 17,
-    marginTop: 2,
     fontWeight: '500',
   },
   dueText: {
     color: expenseColors.accentRed,
     fontSize: 13,
     lineHeight: 17,
-    marginTop: 2,
     fontWeight: '600',
   },
   rightGroup: {

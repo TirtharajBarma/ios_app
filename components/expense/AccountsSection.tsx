@@ -1,10 +1,11 @@
 import React from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
-import { Banknote, CreditCard, Wallet } from 'lucide-react-native';
+import { ChevronRight } from 'lucide-react-native';
 import { AppText } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
 import { ExpenseAccount } from '@/types/expense';
 import { expenseColors } from '@/constants/expenseColors';
+import { AccountIcon } from './AccountIcon';
 
 interface AccountsSectionProps {
   onAccountPress?: (account: ExpenseAccount) => void;
@@ -14,14 +15,10 @@ export const AccountsSection: React.FC<AccountsSectionProps> = ({ onAccountPress
   const { accounts, currencySymbol, formatAmount } = useExpenseStore();
   const sym = currencySymbol || '₹';
 
-  const renderAccountIcon = (acc: ExpenseAccount) => {
-    if (acc.type === 'wallet') {
-      return <Wallet size={16} color={expenseColors.textSubtle} strokeWidth={2} />;
-    }
-    if (acc.type === 'credit') {
-      return <CreditCard size={16} color={expenseColors.textSubtle} strokeWidth={2} />;
-    }
-    return <Banknote size={16} color={expenseColors.textSubtle} strokeWidth={2} />;
+  const getAccountTypeLabel = (acc: ExpenseAccount) => {
+    if (acc.type === 'credit') return 'Credit Card';
+    if (acc.type === 'wallet') return 'Wallet';
+    return 'Savings';
   };
 
   const activeAccounts = accounts.filter((acc) => !acc.isArchived);
@@ -36,9 +33,8 @@ export const AccountsSection: React.FC<AccountsSectionProps> = ({ onAccountPress
         {activeAccounts.map((acc) => {
           const isCredit = acc.type === 'credit';
           const hasDue = isCredit && (acc.dueAmount || 0) > 0;
-
-          const isOutflow = acc.monthlyChange < 0;
-          const isInflow = acc.monthlyChange > 0;
+          const typeLabel = getAccountTypeLabel(acc);
+          const txLabel = `${acc.txnCountThisMonth} txn${acc.txnCountThisMonth !== 1 ? 's' : ''}`;
 
           return (
             <TouchableOpacity
@@ -49,46 +45,35 @@ export const AccountsSection: React.FC<AccountsSectionProps> = ({ onAccountPress
             >
               {/* Left side icon & info */}
               <View style={styles.leftContent}>
-                <View style={styles.iconBox}>
-                  {renderAccountIcon(acc)}
-                </View>
+                <AccountIcon type={acc.type || 'savings'} size={17} containerSize={38} borderRadius={12} />
                 <View style={styles.textContainer}>
                   <AppText style={styles.accountName} numberOfLines={1}>
                     {acc.name.toUpperCase()}
                   </AppText>
                   <AppText style={styles.txnSubtitle} numberOfLines={1}>
-                    {acc.txnCountThisMonth} txn{acc.txnCountThisMonth !== 1 ? 's' : ''} this month
+                    {typeLabel} • {txLabel}
                   </AppText>
                 </View>
               </View>
 
-              {/* Right side balance & change status */}
+              {/* Right side clean balance */}
               <View style={styles.rightContent}>
                 {isCredit ? (
-                  <AppText style={styles.dueBalanceText}>
-                    {(acc.dueAmount || 0) > 0 ? `Due: ${formatAmount(acc.dueAmount || 0)}` : `Due: ${sym}0`}
-                  </AppText>
+                  hasDue ? (
+                    <AppText style={styles.dueBalanceText}>
+                      Due: {formatAmount(acc.dueAmount || 0)}
+                    </AppText>
+                  ) : (
+                    <AppText style={styles.noDueText}>
+                      No Due
+                    </AppText>
+                  )
                 ) : (
                   <AppText style={styles.positiveBalanceText}>
                     {formatAmount(acc.balance)}
                   </AppText>
                 )}
-
-                {isOutflow ? (
-                  <View style={styles.duePill}>
-                    <AppText style={styles.duePillText}>
-                      ↘ -{formatAmount(Math.abs(acc.monthlyChange))}
-                    </AppText>
-                  </View>
-                ) : isInflow ? (
-                  <View style={styles.positivePill}>
-                    <AppText style={styles.positivePillText}>
-                      ↗ +{formatAmount(Math.abs(acc.monthlyChange))}
-                    </AppText>
-                  </View>
-                ) : (
-                  <AppText style={styles.noChangeText}>No change</AppText>
-                )}
+                <ChevronRight size={15} color={expenseColors.textMuted} style={styles.chevron} />
               </View>
             </TouchableOpacity>
           );
@@ -121,21 +106,21 @@ const styles = StyleSheet.create({
     backgroundColor: expenseColors.bgCard,
     borderRadius: 14,
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 12,
     borderWidth: 1,
     borderColor: expenseColors.borderCard,
   },
   leftContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 12,
     flex: 1,
   },
   iconBox: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: expenseColors.circleBtnBg,
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: '#1E2028',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -145,10 +130,10 @@ const styles = StyleSheet.create({
   },
   accountName: {
     color: expenseColors.textPrimary,
-    fontSize: 12,
-    lineHeight: 16,
+    fontSize: 13,
+    lineHeight: 17,
     fontWeight: '700',
-    letterSpacing: 0.5,
+    letterSpacing: 0.4,
     marginBottom: 2,
   },
   txnSubtitle: {
@@ -158,58 +143,30 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   rightContent: {
-    alignItems: 'flex-end',
-    justifyContent: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   positiveBalanceText: {
     color: expenseColors.textPrimary,
     fontSize: 15,
     lineHeight: 19,
     fontWeight: '700',
-    marginBottom: 2,
   },
   dueBalanceText: {
-    color: expenseColors.accentRed,
+    color: '#FF6B6B',
     fontSize: 14,
     lineHeight: 18,
     fontWeight: '700',
-    marginBottom: 2,
   },
-  neutralBalanceText: {
-    color: expenseColors.textPrimary,
-    fontSize: 15,
-    lineHeight: 19,
-    fontWeight: '700',
-    marginBottom: 2,
-  },
-  positivePill: {
-    backgroundColor: expenseColors.accentGreenBg,
-    paddingHorizontal: 7,
-    paddingVertical: 2.5,
-    borderRadius: 6,
-  },
-  positivePillText: {
-    color: expenseColors.accentGreen,
-    fontSize: 10,
-    lineHeight: 13,
-    fontWeight: '700',
-  },
-  duePill: {
-    backgroundColor: expenseColors.accentRedBg,
-    paddingHorizontal: 7,
-    paddingVertical: 2.5,
-    borderRadius: 6,
-  },
-  duePillText: {
-    color: expenseColors.accentRed,
-    fontSize: 10,
-    lineHeight: 13,
-    fontWeight: '700',
-  },
-  noChangeText: {
+  noDueText: {
     color: expenseColors.textMuted,
-    fontSize: 11,
-    lineHeight: 14,
-    fontWeight: '500',
+    fontSize: 13,
+    lineHeight: 17,
+    fontWeight: '600',
+  },
+  chevron: {
+    marginLeft: 2,
+    opacity: 0.6,
   },
 });

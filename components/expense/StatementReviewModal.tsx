@@ -41,6 +41,7 @@ import { AppText } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
 import { expenseColors } from '@/constants/expenseColors';
 import { CategoryIcon } from './CategoryIcon';
+import { AccountIcon } from './AccountIcon';
 import { NormalizedStatementResult, StagedStatementTxn } from '@/utils/statementNormalizer';
 import { ExpenseAccount } from '@/types/expense';
 
@@ -795,7 +796,7 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                     <View key={item.key} style={styles.accountCard}>
                       {/* Card Header */}
                       <View style={styles.accountCardTop}>
-                        <View style={styles.iconCircle}>{renderIcon(currentType)}</View>
+                        <AccountIcon type={currentType} size={16} containerSize={34} borderRadius={10} />
                         <View style={styles.accountTextCol}>
                           <AppText style={styles.accountName} numberOfLines={1}>
                             {item.name.toUpperCase()}
@@ -967,7 +968,7 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                 {addedCustomAccounts.map((cAcc, idx) => (
                   <View key={idx} style={styles.accountCard}>
                     <View style={styles.accountCardTop}>
-                      <View style={styles.iconCircle}>{renderIcon(cAcc.type)}</View>
+                      <AccountIcon type={cAcc.type} size={16} containerSize={34} borderRadius={10} />
                       <View style={styles.accountTextCol}>
                         <AppText style={styles.accountName}>{cAcc.name.toUpperCase()}</AppText>
                         <AppText style={styles.accountTypeLabel}>

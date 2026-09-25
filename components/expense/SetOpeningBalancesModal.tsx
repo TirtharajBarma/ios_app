@@ -24,6 +24,7 @@ import { AppText } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
 import { expenseColors } from '@/constants/expenseColors';
 import { ExpenseAccount } from '@/types/expense';
+import { AccountIcon } from './AccountIcon';
 
 interface SetOpeningBalancesModalProps {
   visible: boolean;
@@ -214,9 +215,7 @@ export const SetOpeningBalancesModal: React.FC<SetOpeningBalancesModalProps> = (
               return (
                 <View key={acc.id} style={styles.accountCard}>
                   <View style={styles.accountCardTop}>
-                    <View style={styles.iconCircle}>
-                      {renderIcon(currentType)}
-                    </View>
+                    <AccountIcon type={currentType} size={16} containerSize={34} borderRadius={10} />
                     <View style={styles.accountTextCol}>
                       <AppText style={styles.accountName} numberOfLines={1}>
                         {acc.name.toUpperCase()}

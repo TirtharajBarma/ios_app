@@ -12,19 +12,21 @@ import {
 } from 'react-native';
 import {
   X,
-  Banknote,
-  CreditCard,
-  Wallet,
+  Landmark,
+  CreditCard as LucideCreditCard,
+  Wallet as LucideWallet,
   Info,
   Edit3,
   Archive,
   Trash2,
   ChevronRight,
 } from 'lucide-react-native';
+import { SymbolView } from 'expo-symbols';
 import { AppText } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
 import { expenseColors } from '@/constants/expenseColors';
 import { ExpenseAccount } from '@/types/expense';
+import { AccountIcon } from './AccountIcon';
 
 interface EditAccountModalProps {
   visible: boolean;
@@ -199,10 +201,18 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
                 ]}
                 onPress={() => setType('savings')}
               >
-                <Banknote
-                  size={15}
-                  color={type === 'savings' ? '#0F1015' : '#8E919D'}
-                />
+                {Platform.OS === 'ios' ? (
+                  <SymbolView
+                    name="building.columns.fill"
+                    size={14}
+                    tintColor={type === 'savings' ? '#0F1015' : '#8E919D'}
+                  />
+                ) : (
+                  <Landmark
+                    size={14}
+                    color={type === 'savings' ? '#0F1015' : '#8E919D'}
+                  />
+                )}
                 <AppText
                   style={[
                     styles.typePillText,
@@ -220,10 +230,18 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
                 ]}
                 onPress={() => setType('credit')}
               >
-                <CreditCard
-                  size={15}
-                  color={type === 'credit' ? '#0F1015' : '#8E919D'}
-                />
+                {Platform.OS === 'ios' ? (
+                  <SymbolView
+                    name="creditcard.fill"
+                    size={14}
+                    tintColor={type === 'credit' ? '#0F1015' : '#8E919D'}
+                  />
+                ) : (
+                  <LucideCreditCard
+                    size={14}
+                    color={type === 'credit' ? '#0F1015' : '#8E919D'}
+                  />
+                )}
                 <AppText
                   style={[
                     styles.typePillText,
@@ -241,10 +259,18 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
                 ]}
                 onPress={() => setType('wallet')}
               >
-                <Wallet
-                  size={15}
-                  color={type === 'wallet' ? '#0F1015' : '#8E919D'}
-                />
+                {Platform.OS === 'ios' ? (
+                  <SymbolView
+                    name="wallet.pass.fill"
+                    size={14}
+                    tintColor={type === 'wallet' ? '#0F1015' : '#8E919D'}
+                  />
+                ) : (
+                  <LucideWallet
+                    size={14}
+                    color={type === 'wallet' ? '#0F1015' : '#8E919D'}
+                  />
+                )}
                 <AppText
                   style={[
                     styles.typePillText,
