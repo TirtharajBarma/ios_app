@@ -258,7 +258,7 @@ export const ExpenseImport: React.FC = () => {
             txnCountThisMonth: 0,
             monthlyChange: 0,
             statusType: isCredit && customBal > 0 ? 'due' : 'positive',
-            openingBalance: isCredit ? 0 : customBal,
+            openingBalance: customBal,
           });
         }
       });
@@ -277,7 +277,7 @@ export const ExpenseImport: React.FC = () => {
           txnCountThisMonth: 0,
           monthlyChange: 0,
           statusType: isCredit && cAcc.balance > 0 ? 'due' : 'positive',
-          openingBalance: isCredit ? 0 : cAcc.balance,
+          openingBalance: cAcc.balance,
         });
       });
     }
@@ -333,7 +333,7 @@ export const ExpenseImport: React.FC = () => {
           if (isCredit) {
             updates.dueAmount = numBal;
             updates.balance = 0;
-            updates.openingBalance = 0;
+            updates.openingBalance = numBal;
           } else {
             updates.balance = numBal;
             updates.openingBalance = numBal;

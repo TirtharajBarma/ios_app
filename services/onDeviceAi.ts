@@ -76,6 +76,24 @@ export function getDeviceAiEngineInfo(): { name: string; chip: string; isHardwar
 const SMART_QUERY_CACHE = new Map<string, SmartQueryResult>();
 const SMART_QUERY_CACHE_LIMIT = 30;
 
+function parseLocalDateComponents(dateStr: string): { year: number; monthIndex: number; day: number; dayOfWeek: number } {
+  const parts = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (parts) {
+    const year = parseInt(parts[1], 10);
+    const monthIndex = parseInt(parts[2], 10) - 1;
+    const day = parseInt(parts[3], 10);
+    const localDate = new Date(year, monthIndex, day);
+    return { year, monthIndex, day, dayOfWeek: localDate.getDay() };
+  }
+  const fallback = new Date(dateStr);
+  return {
+    year: fallback.getFullYear(),
+    monthIndex: fallback.getMonth(),
+    day: fallback.getDate(),
+    dayOfWeek: fallback.getDay(),
+  };
+}
+
 function smartQueryCacheKey(
   rawQuery: string,
   transactions: ExpenseTransaction[],
@@ -83,7 +101,7 @@ function smartQueryCacheKey(
   accounts: ExpenseAccount[],
   currencySymbol: string
 ): string {
-  const fingerprint = transactions.map((t) => t.id).join('|');
+  const fingerprint = transactions.map((t) => `${t.id}:${t.amount}:${t.date}:${t.categoryId}:${t.accountId}:${t.type}`).join('|');
   return `${rawQuery}\u0000${categories.length}\u0000${accounts.length}\u0000${currencySymbol}\u0000${fingerprint}`;
 }
 
@@ -641,8 +659,8 @@ export function executeSmartQuery(
 
   // 1. Filter transactions through intelligent multi-stage pipeline
   const matched = transactions.filter((t) => {
-    const txDate = new Date(t.date);
-    const dayOfWeek = txDate.getDay(); // 0 = Sun, 6 = Sat
+    const txDate = parseLocalDateComponents(t.date);
+    const dayOfWeek = txDate.dayOfWeek; // 0 = Sun, 6 = Sat
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
 
     // Weekend / Weekday filter
@@ -675,8 +693,8 @@ export function executeSmartQuery(
     if (criteria.startDate && t.date < criteria.startDate) return false;
     if (criteria.endDate && t.date > criteria.endDate) return false;
 
-    if (criteria.monthIndex !== undefined && txDate.getMonth() !== criteria.monthIndex) return false;
-    if (criteria.year !== undefined && txDate.getFullYear() !== criteria.year) return false;
+    if (criteria.monthIndex !== undefined && txDate.monthIndex !== criteria.monthIndex) return false;
+    if (criteria.year !== undefined && txDate.year !== criteria.year) return false;
 
     // Split filter
     if (criteria.isSplitOnly && !t.split) return false;

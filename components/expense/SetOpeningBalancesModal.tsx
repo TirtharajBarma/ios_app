@@ -133,6 +133,8 @@ export const SetOpeningBalancesModal: React.FC<SetOpeningBalancesModalProps> = (
         if (!isNaN(numVal) && numVal >= 0) {
           if (isCredit) {
             updates.dueAmount = numVal;
+            updates.openingBalance = numVal;
+            updates.balance = 0;
           } else {
             updates.balance = numVal;
             updates.openingBalance = numVal;

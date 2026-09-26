@@ -202,7 +202,15 @@ export async function computeSavings(
     ) {
       const fullPrice = sub.price;
       const userShare = activePrice;
-      const monthlySaving = fullPrice - userShare;
+      const cycle = (sub.rawBillingCycle || sub.billingCycle || 'monthly').toLowerCase();
+      let monthlySaving = fullPrice - userShare;
+      if (cycle === 'yearly' || cycle === 'annual') {
+        monthlySaving = (fullPrice - userShare) / 12;
+      } else if (cycle === 'quarterly') {
+        monthlySaving = (fullPrice - userShare) / 3;
+      } else if (cycle === 'weekly') {
+        monthlySaving = (fullPrice - userShare) * 4.33;
+      }
 
       if (monthlySaving > 0) {
         splitSavings.push({

@@ -431,7 +431,7 @@ export const BudgetCard: React.FC = () => {
               {hasFixedBudget && catBudget > 0 ? (
                 <>
                   <AppText style={styles.selectedRemainingValue}>
-                    {formatCompactCurrency(Math.max(catBudget - catSpent, 0))}
+                    {formatCompactCurrency(Math.max(catBudget - catSpent, 0), sym)}
                   </AppText>
                   <AppText style={styles.selectedRemainingLabel}>left</AppText>
                 </>

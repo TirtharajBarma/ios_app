@@ -52,11 +52,13 @@ export function generateCompositeHash(
   amount: number,
   type: string,
   narration: string,
-  refNo?: string
+  refNo?: string,
+  accountId?: string
 ): string {
-  const normNarration = narration.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 30);
+  const normNarration = narration.toLowerCase().replace(/[^a-z0-9]/g, '');
   const normRef = (refNo || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const key = `${date}|${Math.round(amount * 100)}|${type}|${normNarration}|${normRef}`;
+  const normAcc = (accountId || '').toLowerCase();
+  const key = `${date}|${Math.round(amount * 100)}|${type}|${normNarration}|${normRef}|${normAcc}`;
   
   // Simple fast string hash
   let hash = 0;
@@ -71,33 +73,44 @@ export function generateCompositeHash(
 // Convert various date formats into standardized ISO "YYYY-MM-DD"
 export function normalizeDateToISO(dateStr: string): string {
   const clean = dateStr.trim();
-  const todayISO = new Date().toISOString().split('T')[0];
+  const now = new Date();
+  const todayISO = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
-  // 1. "DD MMM YYYY" e.g. "13 Sep 2026", "21-Sep-2026", "21/Sep/26"
+  // 1. "DD MMM YYYY" e.g. "13 Sep 2026", "21-Sept-2026", "21/Sep./26", "15 September 2026"
   const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
-  const dmyWord = clean.match(/(\d{1,2})[\s\-/]+([A-Za-z]{3})[\s\-/]+(\d{2,4})/);
+  const dmyWord = clean.match(/(\d{1,2})[\s\-/]+([A-Za-z]{3,9}\.?)[\s\-/]+(\d{2,4})/);
   if (dmyWord) {
     const day = dmyWord[1].padStart(2, '0');
-    const mIdx = months.indexOf(dmyWord[2].toLowerCase());
+    const wordClean = dmyWord[2].toLowerCase().replace(/[^a-z]/g, '').slice(0, 3);
+    const mIdx = months.indexOf(wordClean);
     const month = (mIdx >= 0 ? mIdx + 1 : 1).toString().padStart(2, '0');
     let year = dmyWord[3];
     if (year.length === 2) year = `20${year}`;
     return `${year}-${month}-${day}`;
   }
 
-  // 2. "DD/MM/YYYY" or "DD-MM-YYYY" or "YYYY-MM-DD"
+  // 2. "DD/MM/YYYY" or "MM/DD/YYYY" or "YYYY-MM-DD"
   const parts = clean.split(/[-/.]/);
   if (parts.length === 3) {
     if (parts[0].length === 4) {
       // YYYY-MM-DD
       return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
     }
-    // DD/MM/YYYY or DD/MM/YY
-    const day = parts[0].padStart(2, '0');
-    const month = parts[1].padStart(2, '0');
+    const p0 = parseInt(parts[0], 10);
+    const p1 = parseInt(parts[1], 10);
     let year = parts[2];
     if (year.length === 2) year = `20${year}`;
-    return `${year}-${month}-${day}`;
+
+    // Disambiguate MM/DD/YYYY vs DD/MM/YYYY
+    if (p0 > 12 && p1 <= 12) {
+      // Must be DD/MM/YYYY
+      return `${year}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+    } else if (p1 > 12 && p0 <= 12) {
+      // Must be MM/DD/YYYY
+      return `${year}-${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}`;
+    }
+    // Default to DD/MM/YYYY for Indian/UK format
+    return `${year}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
   }
 
   return todayISO;
@@ -525,10 +538,10 @@ export function normalizeStatementData(
         );
         const numbers =
           lineWithoutDate.match(
-            /(?:₹|\$|INR)?\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]{1,2})?|[0-9]+(?:\.[0-9]{1,2})?)/g
+            /(?:₹|\$|INR)?\s*(?:-|\()?\s*([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]{1,2})?|[0-9]+(?:\.[0-9]{1,2})?)\)?/g
           ) || [];
         const cleanNums = numbers
-          .map((n) => parseFloat(n.replace(/[₹$, INR\s]/g, '')))
+          .map((n) => parseFloat(n.replace(/[₹$, INR()\s]/g, '').replace(/^-/, '')))
           .filter((n) => !isNaN(n) && n > 0 && n < 10000000);
 
         const isSalaryOrIncome = /salary|payroll|dividend|refund|cashback|bonus|stipend|interest credit/i.test(line);

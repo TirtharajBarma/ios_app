@@ -63,8 +63,8 @@ const TILE_W       = Math.floor((INNER_W - CAL_GAP * 6) / 7);
 const TILE_H       = 32;       // compact tile height to reduce card height
 
 // ── Sankey ───────────────────────────────────
-const INCOME_W  = 38;
-const RLABEL_W  = Math.max(96, Math.min(112, Math.round(INNER_W * 0.31)));
+const INCOME_W  = 50;
+const RLABEL_W  = Math.max(92, Math.min(108, Math.round(INNER_W * 0.30)));
 const SVG_W     = INNER_W - INCOME_W - RLABEL_W;
 const CHART_H   = 200;
 const SRC_W     = 8;
@@ -266,7 +266,9 @@ function horizonWindow(
   if (timeHorizon === '1M') {
     return {
       start: new Date(curYear, curMonth, 1, 0, 0, 0, 0),
-      end: new Date(curYear, curMonth, daysInMonth, 23, 59, 59, 999),
+      end: isCurrentMonth
+        ? new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999)
+        : new Date(curYear, curMonth, daysInMonth, 23, 59, 59, 999),
     };
   }
   if (timeHorizon === '6M') {
@@ -778,10 +780,13 @@ export const ExpenseVisualizer: React.FC = () => {
   const heaviestDayName = weekdayTotals[heaviestIdx] > 0 ? WDN[heaviestIdx] : 'None';
   const heaviestDayAmount = weekdayTotals[heaviestIdx];
 
-  // Longest no-spend streak dynamically calculated
+  // Longest no-spend streak dynamically calculated (capped at today for active month)
   const noSpendStreak = useMemo(() => {
+    const now = new Date();
+    const isCurrentMonth = curYear === now.getFullYear() && curMonth === now.getMonth();
+    const limitDay = isCurrentMonth ? now.getDate() : daysInMonth;
     let cur = 0, best = 0;
-    for (let d = 1; d <= daysInMonth; d++) {
+    for (let d = 1; d <= limitDay; d++) {
       if (!dailySpend[d]) {
         cur++;
         if (cur > best) best = cur;
@@ -790,7 +795,7 @@ export const ExpenseVisualizer: React.FC = () => {
       }
     }
     return best;
-  }, [dailySpend, daysInMonth]);
+  }, [dailySpend, daysInMonth, curYear, curMonth]);
 
   // Dynamic Weekly Rhythm calculated from horizonExpenses
   const rhythmData = useMemo(() => {
@@ -1285,6 +1290,7 @@ export const ExpenseVisualizer: React.FC = () => {
               <AppText style={st.insightVal} numberOfLines={1} adjustsFontSizeToFit>
                 {heaviestDayAmount > 0 ? `${heaviestDayName} (${formatCompactCurrency(heaviestDayAmount, sym)})` : 'None'}
               </AppText>
+              <AppText style={st.insightSub}>Top spend day of month</AppText>
             </View>
             <View style={st.insightCard}>
               <View style={st.insightHeadRow}>
@@ -1292,8 +1298,9 @@ export const ExpenseVisualizer: React.FC = () => {
                 <AppText style={st.insightHead}>NO-SPEND STREAK</AppText>
               </View>
               <AppText style={st.insightVal} numberOfLines={1} adjustsFontSizeToFit>
-                {noSpendStreak} {noSpendStreak === 1 ? 'day' : 'days'} streak
+                {noSpendStreak} {noSpendStreak === 1 ? 'day' : 'days'}
               </AppText>
+              <AppText style={st.insightSub}>Consecutive ₹0 spend days</AppText>
             </View>
           </View>
 
@@ -2037,6 +2044,12 @@ const st = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
     fontWeight: '700',
+  },
+  insightSub: {
+    color: '#8E919D',
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: '500',
   },
 
   // ── Selected Day Popup Card ──

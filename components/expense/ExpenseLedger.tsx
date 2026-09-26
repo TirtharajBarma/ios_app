@@ -152,9 +152,12 @@ export const ExpenseLedger: React.FC = () => {
     categories.forEach((cat) => {
       const catTxs = transactions.filter((t) => t.categoryId === cat.id && t.type === 'expense');
       if (catTxs.length >= 2) {
-        const sum = catTxs.reduce((acc, t) => acc + t.amount, 0);
+        const sum = catTxs.reduce((acc, t) => acc + (t.split ? (t.split.yourShare ?? t.amount) : t.amount), 0);
         const avg = sum / catTxs.length;
-        const variance = catTxs.reduce((acc, t) => acc + Math.pow(t.amount - avg, 2), 0) / catTxs.length;
+        const variance = catTxs.reduce((acc, t) => {
+          const personalAmt = t.split ? (t.split.yourShare ?? t.amount) : t.amount;
+          return acc + Math.pow(personalAmt - avg, 2);
+        }, 0) / catTxs.length;
         const stdDev = Math.sqrt(variance);
         map[cat.id] = { avg, stdDev };
       }
@@ -245,15 +248,13 @@ export const ExpenseLedger: React.FC = () => {
   }, [categories, selectedCategoryFilter]);
 
   const getCategoryObj = (catId?: string, type?: string): ExpenseCategory => {
-    if (type === 'income' || catId?.includes('income') || catId?.includes('salary') || catId?.includes('bonus') || catId?.includes('freelance') || catId?.includes('invest')) {
-      const incMatch = INCOME_CATEGORIES.find((c) => c.id === catId);
-      if (incMatch) return incMatch;
-      return { id: 'cat_salary', name: 'Salary / Income', emoji: '💼', color: '#8CD9C8', iconName: 'Briefcase' };
-    }
     const cat = categories.find((c) => c.id === catId);
     if (cat) return cat;
-    const incCat = INCOME_CATEGORIES.find((c) => c.id === catId);
-    if (incCat) return incCat;
+    const incMatch = INCOME_CATEGORIES.find((c) => c.id === catId);
+    if (incMatch) return incMatch;
+    if (type === 'income' || catId?.includes('income') || catId?.includes('salary') || catId?.includes('bonus') || catId?.includes('freelance') || catId?.includes('invest')) {
+      return { id: 'cat_salary', name: 'Salary / Income', emoji: '💼', color: '#8CD9C8', iconName: 'Briefcase' };
+    }
     return categories.find((c) => c.id === 'cat_misc') || {
       id: 'cat_misc',
       name: 'General',
@@ -393,11 +394,12 @@ export const ExpenseLedger: React.FC = () => {
     }
 
     const catStats = categoryAverages[tx.categoryId];
+    const effectivePersonalAmt = tx.split ? (tx.split.yourShare ?? tx.amount) : tx.amount;
     const isOutlier =
       tx.type === 'expense' &&
       catStats &&
       catStats.stdDev > 25 &&
-      tx.amount > catStats.avg + 1.8 * catStats.stdDev;
+      effectivePersonalAmt > catStats.avg + 1.8 * catStats.stdDev;
 
     const txActions: MenuAction[] = [
       {
@@ -441,9 +443,68 @@ export const ExpenseLedger: React.FC = () => {
       tx.split?.settled || (splitTotalLent > 0 && splitCollected >= splitTotalLent)
     );
 
+    const rowBgStyle = isDebtLend
+      ? (isSettled ? styles.rowSettledBg : styles.rowDebtLendBg)
+      : isDebtBorrow
+      ? (isSettled ? styles.rowSettledBg : styles.rowDebtBorrowBg)
+      : isSplit
+      ? (splitIsAllSettled ? styles.rowSettledBg : styles.rowSplitBg)
+      : null;
+
+    const { displayTitle, displayContext } = (() => {
+      if (!tx.note) {
+        return {
+          displayTitle: (isTransfer ? 'ACCOUNT TRANSFER' : cat.name).toUpperCase(),
+          displayContext: null,
+        };
+      }
+      const trimmed = tx.note.trim();
+
+      // Legacy verbose: "Received from Ravi (Split Share - Dinner at Barbeque Nation)"
+      const matchSplitWithReason = /^Received from (.+?)\s*\(\s*Split Share\s*-\s*(.+?)\s*\)$/i.exec(trimmed);
+      if (matchSplitWithReason) {
+        return {
+          displayTitle: `FROM ${matchSplitWithReason[1].trim()}`.toUpperCase(),
+          displayContext: matchSplitWithReason[2].trim().toUpperCase(),
+        };
+      }
+
+      // Modern dot separator: "From Ravi · Dinner at Barbeque Nation"
+      const matchDotReason = /^From (.+?)\s*·\s*(.+)$/i.exec(trimmed);
+      if (matchDotReason) {
+        return {
+          displayTitle: `FROM ${matchDotReason[1].trim()}`.toUpperCase(),
+          displayContext: matchDotReason[2].trim().toUpperCase(),
+        };
+      }
+
+      // Simple: "Received from Ravi (Split Share)" or "Received from Ravi (Settled)"
+      const matchSplitSimple = /^Received from (.+?)\s*\((?:Split Share|Settled)[^)]*\)$/i.exec(trimmed);
+      if (matchSplitSimple) {
+        return {
+          displayTitle: `FROM ${matchSplitSimple[1].trim()}`.toUpperCase(),
+          displayContext: null,
+        };
+      }
+
+      // Repaid: "Repaid to Ravi (Debt Cleared)"
+      const matchDebtCleared = /^Repaid to (.+?)\s*\(Debt Cleared\)$/i.exec(trimmed);
+      if (matchDebtCleared) {
+        return {
+          displayTitle: `REPAID TO ${matchDebtCleared[1].trim()}`.toUpperCase(),
+          displayContext: null,
+        };
+      }
+
+      return {
+        displayTitle: trimmed.toUpperCase(),
+        displayContext: null,
+      };
+    })();
+
     const rowContent = (
       <TouchableOpacity
-        style={[styles.transactionRow, !isLast && styles.rowDivider]}
+        style={[styles.transactionRow, !isLast && styles.rowDivider, rowBgStyle]}
         activeOpacity={0.7}
         onPress={() => {
           if (isSelectMode) {
@@ -488,10 +549,6 @@ export const ExpenseLedger: React.FC = () => {
             {
               backgroundColor: isTransfer
                 ? 'rgba(96, 165, 250, 0.15)'
-                : isSplit
-                ? splitIsAllSettled
-                  ? 'rgba(124, 217, 168, 0.12)'
-                  : 'rgba(255, 157, 102, 0.15)'
                 : isDebtLend
                 ? isSettled
                   ? 'rgba(124, 217, 168, 0.12)'
@@ -500,14 +557,16 @@ export const ExpenseLedger: React.FC = () => {
                 ? isSettled
                   ? 'rgba(124, 217, 168, 0.12)'
                   : 'rgba(251, 191, 36, 0.12)'
+                : isSplit
+                ? splitIsAllSettled
+                  ? 'rgba(124, 217, 168, 0.12)'
+                  : 'rgba(255, 157, 102, 0.12)'
                 : '#202330',
             },
           ]}
         >
           {isTransfer ? (
             <ArrowRightLeft size={16} color="#9DC6EB" />
-          ) : isSplit ? (
-            <Users size={16} color={splitIsAllSettled ? '#70D6BC' : '#FF9D66'} />
           ) : isDebtLend ? (
             <HandCoins size={16} color={isSettled ? '#70D6BC' : '#F48B8B'} />
           ) : isDebtBorrow ? (
@@ -519,8 +578,8 @@ export const ExpenseLedger: React.FC = () => {
 
         {/* Center: Title & Subtitle Badge */}
         <View style={styles.transactionCenter}>
-          <AppText style={styles.transactionTitle} numberOfLines={1}>
-            {(tx.note || (isTransfer ? 'ACCOUNT TRANSFER' : cat.name)).toUpperCase()}
+          <AppText style={styles.transactionTitle} numberOfLines={1} ellipsizeMode="tail">
+            {displayTitle}
           </AppText>
 
           {/* Badges / Flow details */}
@@ -570,6 +629,13 @@ export const ExpenseLedger: React.FC = () => {
                 <AppText style={[styles.categoryPillText, { color: cat.color || expenseColors.accentPeach }]}>
                   {cat.name.toUpperCase()}
                 </AppText>
+              </View>
+            )}
+
+            {/* Split Context Pill (e.g. DINNER / BARBEQUE NATION) */}
+            {displayContext && (
+              <View style={styles.splitContextPill}>
+                <AppText style={styles.splitContextPillText}>{displayContext}</AppText>
               </View>
             )}
 
@@ -1375,22 +1441,22 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   filterScrollView: {
-    height: 42,
+    height: 32,
     flexGrow: 0,
     flexShrink: 0,
-    marginBottom: 16,
+    marginBottom: 8,
   },
   filterScrollContainer: {
-    height: 42,
+    height: 32,
     paddingHorizontal: 16,
-    gap: 8,
+    gap: 6,
     alignItems: 'center',
     flexDirection: 'row',
   },
   filterPill: {
-    height: 36,
-    paddingHorizontal: 16,
-    borderRadius: 18,
+    height: 28,
+    paddingHorizontal: 12,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1401,8 +1467,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#1E212B',
   },
   filterPillText: {
-    fontSize: 13,
-    fontWeight: '600',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.2,
   },
   filterTextActive: {
     color: '#0F1015',
@@ -1418,17 +1485,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     paddingHorizontal: 16,
-    marginBottom: 14,
+    marginBottom: 10,
   },
   categoryFilterTrigger: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 8,
+    gap: 6,
     backgroundColor: '#171922',
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 9,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
   },
@@ -1439,11 +1506,11 @@ const styles = StyleSheet.create({
   categoryFilterTriggerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
   },
   categoryFilterTriggerText: {
     color: '#8E919D',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
     letterSpacing: 0.3,
   },
@@ -1495,6 +1562,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 14,
+  },
+  rowDebtLendBg: {
+    backgroundColor: 'rgba(244, 139, 139, 0.055)',
+  },
+  rowDebtBorrowBg: {
+    backgroundColor: 'rgba(244, 205, 137, 0.055)',
+  },
+  rowSplitBg: {
+    backgroundColor: 'rgba(255, 157, 102, 0.055)',
+  },
+  rowSettledBg: {
+    backgroundColor: 'rgba(112, 214, 188, 0.035)',
   },
   rowDivider: {
     borderBottomWidth: 1,
@@ -1690,6 +1769,20 @@ const styles = StyleSheet.create({
   },
   splitSettledPillText: {
     color: '#70D6BC',
+  },
+  splitContextPill: {
+    backgroundColor: 'rgba(255, 255, 255, 0.07)',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  splitContextPillText: {
+    color: '#D1D5DB',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.3,
   },
   splitPeoplePill: {
     backgroundColor: 'rgba(255, 255, 255, 0.06)',

@@ -66,7 +66,7 @@ import * as Haptics from 'expo-haptics';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
 import { AppText, ProfileAvatar } from '@/components/ui';
-import { useExpenseStore, AppThemeMode } from '@/store/useExpenseStore';
+import { useExpenseStore } from '@/store/useExpenseStore';
 import { useSettingsStore } from '@/store/useSettingsStore';
 import { useSubscriptionStore } from '@/store/useSubscriptionStore';
 import { FixedBottomNav } from './FixedBottomNav';
@@ -162,14 +162,12 @@ export const ExpenseSettings: React.FC = () => {
   const { height: screenHeight, width: screenWidth } = useWindowDimensions();
 
   const {
-    themeMode,
     monthlyBudget,
     currencySymbol,
     currencyCode,
     categories,
     transactions,
     categoryBudgets,
-    setThemeMode,
     setCurrency,
     convertAllCurrencies: convertExpenseCurrencies,
     addCategory,
@@ -242,7 +240,6 @@ export const ExpenseSettings: React.FC = () => {
 
   // Settings Cards Animated Values
   const animHeader = useRef(new Animated.Value(1)).current;
-  const animAppearance = useRef(new Animated.Value(1)).current;
   const animCurrency = useRef(new Animated.Value(1)).current;
   const animCategories = useRef(new Animated.Value(1)).current;
   const animBudget = useRef(new Animated.Value(1)).current;
@@ -274,13 +271,6 @@ export const ExpenseSettings: React.FC = () => {
         c.symbol.toLowerCase().includes(q)
     );
   }, [currencySearch]);
-
-  const themeOptions: Array<{ id: AppThemeMode; label: string; bg: string }> = [
-    { id: 'editorial', label: 'EDITORIAL', bg: '#EAE5D9' },
-    { id: 'cream', label: 'CREAM', bg: '#F5F2EB' },
-    { id: 'midnight', label: 'MIDNIGHT', bg: '#16171E' },
-    { id: 'system', label: 'SYSTEM', bg: '#3A3D4A' },
-  ];
 
   // ── Glitch-free Currency Modal Open & Close ──
   const openCurrencyModal = useCallback(() => {
@@ -572,53 +562,10 @@ export const ExpenseSettings: React.FC = () => {
           <AppText style={styles.headerTitle}>SETTINGS</AppText>
         </Animated.View>
 
-        {/* 1. Appearance Card */}
-        <Animated.View
-          style={[
-            styles.cardContainer,
-            {
-              opacity: animAppearance,
-              transform: [
-                {
-                  translateY: animAppearance.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [14, 0],
-                  }),
-                },
-              ],
-            },
-          ]}
-        >
-          <AppText style={styles.cardTitle}>APPEARANCE</AppText>
-          <View style={styles.themeGrid}>
-            {themeOptions.map((opt) => {
-              const isSelected = themeMode === opt.id;
-              return (
-                <TouchableOpacity
-                  key={opt.id}
-                  style={styles.themeTileCol}
-                  activeOpacity={0.8}
-                  onPress={() => setThemeMode(opt.id)}
-                >
-                  <View style={[styles.themeTile, { backgroundColor: opt.bg }]}>
-                    <View style={styles.themePreviewLine1} />
-                    <View style={styles.themePreviewLine2} />
-                  </View>
-                  <AppText style={styles.themeLabel}>{opt.label}</AppText>
-                  {isSelected ? (
-                    <View style={styles.themeSelectedDot} />
-                  ) : (
-                    <View style={styles.dotPlaceholder} />
-                  )}
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </Animated.View>
-
         {/* 2. Currency Card */}
         <Animated.View
           style={{
+            marginTop: 16,
             opacity: animCurrency,
             transform: [
               {
@@ -750,10 +697,7 @@ export const ExpenseSettings: React.FC = () => {
           </TouchableOpacity>
         </Animated.View>
 
-        {/* 5. App Feature Guide Walkthrough Card */}
 
-
-        {/* 6. Your Data Card */}
         <Animated.View
           style={{
             opacity: animData,
@@ -1144,6 +1088,8 @@ export const ExpenseSettings: React.FC = () => {
         visible={showWalkthroughModal}
         onClose={() => setShowWalkthroughModal(false)}
       />
+
+
     </View>
   );
 };

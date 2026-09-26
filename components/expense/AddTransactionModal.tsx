@@ -68,6 +68,8 @@ export const INCOME_CATEGORIES: ExpenseCategory[] = [
   { id: 'cat_salary', name: 'Salary', emoji: '💼', color: '#8CD9C8', iconName: 'Briefcase' },
   { id: 'cat_freelance', name: 'Freelance', emoji: '💻', color: '#9DC6EB', iconName: 'Laptop' },
   { id: 'cat_invest', name: 'Investments', emoji: '📈', color: '#F4CD89', iconName: 'TrendingUp' },
+  { id: 'cat_split_return', name: 'Split Received', emoji: '👥', color: '#70D6BC', iconName: 'Users' },
+  { id: 'cat_debt_repayment', name: 'Debt Repayment', emoji: '🤝', color: '#88C0D0', iconName: 'Coins' },
   { id: 'cat_bonus', name: 'Bonus', emoji: '🎁', color: '#F2AEC4', iconName: 'Gift' },
   { id: 'cat_rental', name: 'Rental', emoji: '🏠', color: '#C4A7E7', iconName: 'Home' },
   { id: 'cat_refund', name: 'Refund', emoji: '🔄', color: '#82D0D8', iconName: 'RefreshCw' },
@@ -269,6 +271,10 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   const [splitFriends, setSplitFriends] = useState<Array<{ id: string; name: string; amount: string }>>([
     { id: 'f_1', name: '', amount: '' },
   ]);
+  const [splitExplanationModal, setSplitExplanationModal] = useState<{
+    visible: boolean;
+    mode: 'all_equal' | 'they_owe' | 'auto_balance';
+  } | null>(null);
 
   // Debt Person Name
   const [debtPerson, setDebtPerson] = useState<string>('');
@@ -446,19 +452,58 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
     const remainingForFriends = Math.max(0, numAmount - (parseFloat(yourShare) || 0));
     const activeFriends = splitFriends.length;
     if (activeFriends === 0) return;
-    const perFriend = (remainingForFriends / activeFriends).toFixed(0);
-    setSplitFriends(splitFriends.map((f) => ({ ...f, amount: perFriend })));
+    const base = Math.floor(remainingForFriends / activeFriends);
+    const remainder = remainingForFriends % activeFriends;
+    setSplitFriends(splitFriends.map((f, i) => ({ ...f, amount: (base + (i < remainder ? 1 : 0)).toString() })));
+    Haptics.selectionAsync().catch(() => {});
+  };
+
+  const handleSplitAllEqually = () => {
+    if (numAmount <= 0) return;
+    const totalPeople = 1 + splitFriends.length;
+    const base = Math.floor(numAmount / totalPeople);
+    const remainder = numAmount % totalPeople;
+    setYourShare((base + (remainder > 0 ? 1 : 0)).toString());
+    setSplitFriends(splitFriends.map((f, i) => ({
+      ...f,
+      amount: (base + (i + 1 < remainder ? 1 : 0)).toString(),
+    })));
+    Haptics.selectionAsync().catch(() => {});
+  };
+
+  const handleTheyOweAll = () => {
+    if (numAmount <= 0 || splitFriends.length === 0) return;
+    setYourShare('0');
+    const base = Math.floor(numAmount / splitFriends.length);
+    const remainder = numAmount % splitFriends.length;
+    setSplitFriends(splitFriends.map((f, i) => ({
+      ...f,
+      amount: (base + (i < remainder ? 1 : 0)).toString(),
+    })));
+    Haptics.selectionAsync().catch(() => {});
+  };
+
+  const handleAutoBalanceMyShare = () => {
+    const friendsSum = splitFriends.reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0);
+    setYourShare(Math.max(0, numAmount - friendsSum).toString());
     Haptics.selectionAsync().catch(() => {});
   };
 
   const handleAddSplitFriend = () => {
-    setSplitFriends([...splitFriends, { id: `f_${Date.now()}_${Math.random().toString(36).substr(2, 3)}`, name: '', amount: '' }]);
+    const nextFriends = [...splitFriends, { id: `f_${Date.now()}_${Math.random().toString(36).substr(2, 3)}`, name: '', amount: '' }];
+    setSplitFriends(nextFriends);
     Haptics.selectionAsync().catch(() => {});
   };
 
   const handleRemoveSplitFriend = (id: string) => {
     if (splitFriends.length <= 1) return;
-    setSplitFriends(splitFriends.filter((f) => f.id !== id));
+    const remaining = splitFriends.filter((f) => f.id !== id);
+    setSplitFriends(remaining);
+    // Auto-rebalance your share live
+    if (numAmount > 0) {
+      const friendsSum = remaining.reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0);
+      setYourShare(Math.max(0, numAmount - friendsSum).toString());
+    }
     Haptics.selectionAsync().catch(() => {});
   };
 
@@ -741,17 +786,25 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
       }
 
       if (isSplitEnabled) {
+        const existingFriends = initialTransaction?.split?.friends || [];
         const mappedFriends = splitFriends
           .filter((f) => f.name.trim() && (parseFloat(f.amount) || 0) > 0)
-          .map((f) => ({
-            id: f.id,
-            name: f.name.trim(),
-            amount: parseFloat(f.amount) || 0,
-            settled: false,
-          }));
+          .map((f) => {
+            const prev = existingFriends.find((ef) => ef.id === f.id || ef.name.toLowerCase() === f.name.trim().toLowerCase());
+            return {
+              id: f.id,
+              name: f.name.trim(),
+              amount: parseFloat(f.amount) || 0,
+              settled: prev ? prev.settled ?? false : false,
+            };
+          });
 
         const friendNamesStr = mappedFriends.map((f) => f.name).join(', ') || 'Friends';
         const totalFriendsSum = mappedFriends.reduce((sum, f) => sum + f.amount, 0);
+
+        const isFullySettled = mappedFriends.length > 0
+          ? mappedFriends.every((f) => f.settled)
+          : (initialTransaction?.split?.settled ?? false);
 
         const splitData = {
           totalPaid: numAmount,
@@ -759,7 +812,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
           friendsShare: totalFriendsSum > 0 ? totalFriendsSum : friendsShare,
           friendNames: friendNamesStr,
           friends: mappedFriends.length > 0 ? mappedFriends : undefined,
-          settled: false,
+          settled: isFullySettled,
         };
 
         if (initialTransaction) {
@@ -793,9 +846,11 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
         }
       } else {
         if (initialTransaction) {
+          const isVaultTx = initialTransaction.type === 'vault_deposit' || initialTransaction.type === 'vault_withdraw';
           updateTransaction(initialTransaction.id, {
             amount: numAmount,
-            type: 'expense',
+            type: isVaultTx ? initialTransaction.type : 'expense',
+            vaultId: isVaultTx ? initialTransaction.vaultId : undefined,
             categoryId: selectedCategoryId,
             accountId: selectedAccountId,
             folderId: selectedFolderId || undefined,
@@ -1527,7 +1582,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                 <View style={{ flex: 1 }}>
                   <AppText style={styles.splitToggleTitle}>SPLIT WITH FRIENDS</AppText>
                   <AppText style={styles.splitToggleSubtitle}>
-                    I paid full bill, record friends' shares
+                    I paid full bill • Hold any mode for info
                   </AppText>
                 </View>
                 <Switch
@@ -1545,6 +1600,46 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
 
               {isSplitEnabled && (
                 <View style={styles.splitBody}>
+                  {/* Quick Smart Presets */}
+                  <View style={styles.smartSplitPresetsRow}>
+                    <TouchableOpacity
+                      style={styles.smartSplitPresetChip}
+                      onPress={handleSplitAllEqually}
+                      onLongPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                        setSplitExplanationModal({ visible: true, mode: 'all_equal' });
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Zap size={11} color="#FF9D66" />
+                      <AppText style={styles.smartSplitPresetText}>All Equal</AppText>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.smartSplitPresetChip}
+                      onPress={handleTheyOweAll}
+                      onLongPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                        setSplitExplanationModal({ visible: true, mode: 'they_owe' });
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Users size={11} color="#70D6BC" />
+                      <AppText style={styles.smartSplitPresetText}>They Owe All</AppText>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.smartSplitPresetChip}
+                      onPress={handleAutoBalanceMyShare}
+                      onLongPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                        setSplitExplanationModal({ visible: true, mode: 'auto_balance' });
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <RefreshCw size={11} color="#9DC6EB" />
+                      <AppText style={styles.smartSplitPresetText}>Auto-Balance</AppText>
+                    </TouchableOpacity>
+                  </View>
+
                   {/* Your Share Row */}
                   <View style={styles.splitShareRow}>
                     <AppText style={styles.splitShareLabel}>MY SHARE ({sym})</AppText>
@@ -1589,7 +1684,12 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                           keyboardType="numeric"
                           value={friend.amount}
                           onChangeText={(t) => {
-                            setSplitFriends(splitFriends.map((f) => f.id === friend.id ? { ...f, amount: t } : f));
+                            const nextFriends = splitFriends.map((f) => f.id === friend.id ? { ...f, amount: t } : f);
+                            setSplitFriends(nextFriends);
+                            if (numAmount > 0) {
+                              const friendsSum = nextFriends.reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0);
+                              setYourShare(Math.max(0, numAmount - friendsSum).toString());
+                            }
                           }}
                           onFocus={() => handleInputFocus(550 + idx * 65)}
                         />
@@ -1615,12 +1715,36 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                     <AppText style={styles.addFriendRowBtnText}>Add Another Friend</AppText>
                   </TouchableOpacity>
 
-                  {/* Split Summary Pill */}
-                  <View style={styles.splitSummaryBox}>
-                    <AppText style={styles.splitSummaryText}>
-                      Total: {sym}{numAmount.toLocaleString('en-IN')}  •  My Share: {sym}{numYourShare.toLocaleString('en-IN')}  •  Friends: {sym}{friendsShare.toLocaleString('en-IN')}
-                    </AppText>
-                  </View>
+                  {/* Dynamic Real-Time Balance Validation Status */}
+                  {numAmount > 0 && (
+                    <View
+                      style={[
+                        styles.splitSummaryBox,
+                        (numYourShare + totalFriendsEntered) === numAmount
+                          ? styles.splitSummaryBalanced
+                          : (numAmount - (numYourShare + totalFriendsEntered)) > 0
+                          ? styles.splitSummaryUnder
+                          : styles.splitSummaryOver,
+                      ]}
+                    >
+                      <AppText
+                        style={[
+                          styles.splitSummaryText,
+                          (numYourShare + totalFriendsEntered) === numAmount
+                            ? styles.splitSummaryTextBalanced
+                            : (numAmount - (numYourShare + totalFriendsEntered)) > 0
+                            ? styles.splitSummaryTextUnder
+                            : styles.splitSummaryTextOver,
+                        ]}
+                      >
+                        {(numYourShare + totalFriendsEntered) === numAmount
+                          ? `✅ Balanced: ${sym}${numAmount.toLocaleString('en-IN')} of ${sym}${numAmount.toLocaleString('en-IN')} allocated`
+                          : (numAmount - (numYourShare + totalFriendsEntered)) > 0
+                          ? `⚠️ ${sym}${(numAmount - (numYourShare + totalFriendsEntered)).toLocaleString('en-IN')} unallocated · Tap Auto-Balance`
+                          : `⚠️ Exceeds total bill by ${sym}${Math.abs((numYourShare + totalFriendsEntered) - numAmount).toLocaleString('en-IN')}`}
+                      </AppText>
+                    </View>
+                  )}
                 </View>
               )}
             </View>
@@ -2334,6 +2458,98 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             </View>
           </KeyboardAvoidingView>
         </Modal>
+
+        {/* ── SPLIT MODE EXPLANATION MODAL (Apple HIG Frosted Sheet) ── */}
+        <Modal
+          visible={Boolean(splitExplanationModal?.visible)}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setSplitExplanationModal(null)}
+        >
+          <View style={styles.explanationOverlay}>
+            <TouchableOpacity
+              style={StyleSheet.absoluteFill}
+              activeOpacity={1}
+              onPress={() => setSplitExplanationModal(null)}
+            />
+            <View style={styles.explanationSheet}>
+              <View style={styles.explanationHeader}>
+                <View
+                  style={[
+                    styles.explanationIconWrap,
+                    splitExplanationModal?.mode === 'all_equal'
+                      ? { backgroundColor: 'rgba(255, 157, 102, 0.15)' }
+                      : splitExplanationModal?.mode === 'they_owe'
+                      ? { backgroundColor: 'rgba(112, 214, 188, 0.15)' }
+                      : { backgroundColor: 'rgba(157, 198, 235, 0.15)' },
+                  ]}
+                >
+                  {splitExplanationModal?.mode === 'all_equal' ? (
+                    <Zap size={20} color="#FF9D66" />
+                  ) : splitExplanationModal?.mode === 'they_owe' ? (
+                    <Users size={20} color="#70D6BC" />
+                  ) : (
+                    <RefreshCw size={20} color="#9DC6EB" />
+                  )}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <AppText style={styles.explanationTitle}>
+                    {splitExplanationModal?.mode === 'all_equal'
+                      ? 'ALL EQUAL SPLIT'
+                      : splitExplanationModal?.mode === 'they_owe'
+                      ? 'THEY OWE ALL'
+                      : 'AUTO-BALANCE'}
+                  </AppText>
+                  <AppText style={styles.explanationTagline}>
+                    {splitExplanationModal?.mode === 'all_equal'
+                      ? 'Lossless integer remainder division'
+                      : splitExplanationModal?.mode === 'they_owe'
+                      ? 'You paid full · 100% friend share'
+                      : 'Real-time itemized remainder calculation'}
+                  </AppText>
+                </View>
+                <TouchableOpacity
+                  style={styles.explanationCloseBtn}
+                  onPress={() => setSplitExplanationModal(null)}
+                >
+                  <X size={16} color="#A2AEBB" />
+                </TouchableOpacity>
+              </View>
+
+              {/* Explanation Body */}
+              <View style={styles.explanationCard}>
+                <AppText style={styles.explanationText}>
+                  {splitExplanationModal?.mode === 'all_equal'
+                    ? 'Divides the total bill equally among everyone including you. Odd pennies (like ₹1,000 / 3) are distributed losslessly as ₹334, ₹333, ₹333 so zero money is lost in fractions.'
+                    : splitExplanationModal?.mode === 'they_owe'
+                    ? 'Sets your personal share to ₹0 and divides 100% of the bill equally among your friends. Ideal when purchasing concert tickets, booking cabs, or ordering food solely for friends.'
+                    : 'Calculates your share automatically as (Total Bill − Friends\' Shares). Enter what each friend ordered individually, and the engine fills in your remaining share in real-time.'}
+                </AppText>
+
+                <View style={styles.explanationExampleBox}>
+                  <AppText style={styles.explanationExampleTitle}>EXAMPLE FORMULA</AppText>
+                  <AppText style={styles.explanationExampleMath}>
+                    {splitExplanationModal?.mode === 'all_equal'
+                      ? `${sym}3,000 ÷ 3 people = ${sym}1,000 each`
+                      : splitExplanationModal?.mode === 'they_owe'
+                      ? `You: ${sym}0  •  Friends: 100% of bill`
+                      : `My Share = Total Bill − (Friend 1 + Friend 2)`}
+                  </AppText>
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={styles.explanationDismissBtn}
+                onPress={() => {
+                  Haptics.selectionAsync().catch(() => {});
+                  setSplitExplanationModal(null);
+                }}
+              >
+                <AppText style={styles.explanationDismissText}>Got It</AppText>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
       </KeyboardAvoidingView>
     </Modal>
   );
@@ -2903,6 +3119,29 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     gap: 12,
   },
+  smartSplitPresetsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  smartSplitPresetChip: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    backgroundColor: '#1C1F2B',
+    paddingVertical: 7,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  smartSplitPresetText: {
+    color: '#D1D5DB',
+    fontSize: 11,
+    fontWeight: '700',
+  },
   splitShareRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -3022,15 +3261,129 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   splitSummaryBox: {
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
     borderRadius: 10,
-    padding: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
     alignItems: 'center',
+    borderWidth: 1,
+  },
+  splitSummaryBalanced: {
+    backgroundColor: 'rgba(112, 214, 188, 0.08)',
+    borderColor: 'rgba(112, 214, 188, 0.25)',
+  },
+  splitSummaryUnder: {
+    backgroundColor: 'rgba(244, 205, 137, 0.08)',
+    borderColor: 'rgba(244, 205, 137, 0.25)',
+  },
+  splitSummaryOver: {
+    backgroundColor: 'rgba(244, 139, 139, 0.08)',
+    borderColor: 'rgba(244, 139, 139, 0.25)',
   },
   splitSummaryText: {
-    color: '#A0A5B5',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  splitSummaryTextBalanced: {
+    color: '#70D6BC',
+  },
+  splitSummaryTextUnder: {
+    color: '#F4CD89',
+  },
+  splitSummaryTextOver: {
+    color: '#F48B8B',
+  },
+
+  // ── Split Explanation Bottom Modal (Frosted Sheet) ──
+  explanationOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(10, 11, 15, 0.85)',
+    justifyContent: 'flex-end',
+  },
+  explanationSheet: {
+    backgroundColor: '#181A24',
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    gap: 16,
+  },
+  explanationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  explanationIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  explanationTitle: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+  },
+  explanationTagline: {
+    color: '#8E919D',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  explanationCloseBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  explanationCard: {
+    backgroundColor: '#202330',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    gap: 14,
+  },
+  explanationText: {
+    color: '#D1D5DB',
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: '500',
+  },
+  explanationExampleBox: {
+    backgroundColor: '#161822',
+    borderRadius: 10,
+    padding: 12,
+    gap: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.04)',
+  },
+  explanationExampleTitle: {
+    color: '#FF9D66',
     fontSize: 10,
-    fontWeight: '600',
+    fontWeight: '800',
+    letterSpacing: 0.6,
+  },
+  explanationExampleMath: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  explanationDismissBtn: {
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 13,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  explanationDismissText: {
+    color: '#0D0E12',
+    fontSize: 14,
+    fontWeight: '800',
   },
 
   // ── Date & Tags ──

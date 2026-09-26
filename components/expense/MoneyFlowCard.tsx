@@ -1,8 +1,10 @@
-import React, { useMemo } from 'react';
-import { View, StyleSheet } from 'react-native';
-import { ArrowDownLeft, ArrowUpRight, TrendingUp, Sparkles, Flame } from 'lucide-react-native';
+import React, { useMemo, useState } from 'react';
+import { View, StyleSheet, TouchableOpacity, Modal, Pressable } from 'react-native';
+import { BlurView } from 'expo-blur';
+import { ArrowDownLeft, ArrowUpRight, TrendingUp, Sparkles, Flame, X } from 'lucide-react-native';
+import * as Haptics from 'expo-haptics';
 import { AppText } from '@/components/ui';
-import { useExpenseStore } from '@/store/useExpenseStore';
+import { useExpenseStore, isInMonth, monthKeyToYearMonth } from '@/store/useExpenseStore';
 import { expenseColors } from '@/constants/expenseColors';
 
 export const formatCompactCurrency = (amount: number, symbol: string = '₹'): string => {
@@ -48,12 +50,31 @@ export const MoneyFlowCard: React.FC = () => {
 
   const sym = currencySymbol || '₹';
 
+  const { year, month } = useMemo(() => monthKeyToYearMonth(selectedMonth), [selectedMonth]);
+
   const totalIncome = getTotalIncome();
   const totalSpent = getTotalSpent();
-  const netCashFlow = totalIncome - totalSpent;
+
+  const vaultDepositsThisMonth = useMemo(() => {
+    return transactions
+      .filter((t) => t.type === 'vault_deposit' && isInMonth(t.date, year, month))
+      .reduce((sum, t) => sum + t.amount, 0);
+  }, [transactions, year, month]);
+
+  const vaultWithdrawsThisMonth = useMemo(() => {
+    return transactions
+      .filter((t) => t.type === 'vault_withdraw' && isInMonth(t.date, year, month))
+      .reduce((sum, t) => sum + t.amount, 0);
+  }, [transactions, year, month]);
+
+  const [showStreakModal, setShowStreakModal] = useState(false);
+
+  const netCashFlow = totalIncome - totalSpent - vaultDepositsThisMonth + vaultWithdrawsThisMonth;
   const savingsRate = totalIncome > 0
-    ? Math.round(((totalIncome - totalSpent) / totalIncome) * 100)
+    ? Math.round((netCashFlow / totalIncome) * 100)
     : 0;
+
+  const averageDailyLimit = monthlyBudget > 0 ? Math.round(monthlyBudget / 30) : 1000;
 
   // Streak Calculation
   const streakDays = useMemo(() => {
@@ -69,14 +90,17 @@ export const MoneyFlowCard: React.FC = () => {
     transactions
       .filter((t) => t.type === 'expense')
       .forEach((t) => {
-        const d = new Date(t.date);
-        if (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) {
-          const day = d.getDate();
-          dailySpendMap[day] = (dailySpendMap[day] || 0) + (t.split ? t.split.yourShare : t.amount);
+        const parts = t.date.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (parts) {
+          const y = parseInt(parts[1], 10);
+          const m = parseInt(parts[2], 10) - 1;
+          const day = parseInt(parts[3], 10);
+          if (m === now.getMonth() && y === now.getFullYear()) {
+            dailySpendMap[day] = (dailySpendMap[day] || 0) + (t.split ? t.split.yourShare : t.amount);
+          }
         }
       });
 
-    const averageDailyLimit = monthlyBudget > 0 ? Math.round(monthlyBudget / 30) : 1000;
     let streak = 0;
     for (let day = currentDay; day >= 1; day--) {
       const daySpend = dailySpendMap[day] || 0;
@@ -86,8 +110,8 @@ export const MoneyFlowCard: React.FC = () => {
         break;
       }
     }
-    return Math.max(1, streak);
-  }, [transactions, monthlyBudget]);
+    return streak;
+  }, [transactions, averageDailyLimit]);
 
   return (
     <View style={styles.cardContainer}>
@@ -101,10 +125,17 @@ export const MoneyFlowCard: React.FC = () => {
         </View>
 
         {streakDays > 0 && (
-          <View style={styles.streakPill}>
+          <TouchableOpacity
+            style={styles.streakPill}
+            activeOpacity={0.7}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+              setShowStreakModal(true);
+            }}
+          >
             <Flame size={12} color="#FF9D66" />
             <AppText style={styles.streakPillText}>{streakDays}d streak</AppText>
-          </View>
+          </TouchableOpacity>
         )}
       </View>
 
@@ -167,6 +198,92 @@ export const MoneyFlowCard: React.FC = () => {
           </View>
         )}
       </View>
+
+      {/* Apple-Style Minimal Streak Sheet */}
+      <Modal
+        visible={showStreakModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowStreakModal(false)}
+      >
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => setShowStreakModal(false)}
+        >
+          <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} />
+          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
+            {/* Top Icon + Dismiss */}
+            <View style={styles.modalTopRow}>
+              <View style={styles.modalIconCircle}>
+                <Flame size={20} color="#FF9D66" />
+              </View>
+              <TouchableOpacity
+                onPress={() => setShowStreakModal(false)}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                style={styles.modalCloseCircle}
+              >
+                <X size={14} color="#8E919D" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Hero Header */}
+            <AppText style={styles.modalHeroValue}>
+              {streakDays} {streakDays === 1 ? 'Day' : 'Days'}
+            </AppText>
+            <AppText style={styles.modalHeroSub}>Budget Discipline Streak</AppText>
+
+            {/* Formula & Calculation Breakdown Card */}
+            <View style={styles.breakdownCard}>
+              <View style={styles.breakdownRow}>
+                <AppText style={styles.breakdownLabel}>Monthly Budget</AppText>
+                <AppText style={styles.breakdownVal}>
+                  {monthlyBudget > 0 ? `${sym}${monthlyBudget.toLocaleString('en-IN')}` : 'Not set'}
+                </AppText>
+              </View>
+
+              <View style={styles.breakdownDivider} />
+
+              <View style={styles.breakdownRow}>
+                <View>
+                  <AppText style={styles.breakdownLabel}>Daily Allowance</AppText>
+                  <AppText style={styles.breakdownFormula}>
+                    {monthlyBudget > 0 ? `${sym}${monthlyBudget.toLocaleString('en-IN')} ÷ 30 days` : 'Default baseline'}
+                  </AppText>
+                </View>
+                <AppText style={styles.breakdownValHighlight}>
+                  {sym}{averageDailyLimit.toLocaleString('en-IN')}/day
+                </AppText>
+              </View>
+
+              <View style={styles.breakdownDivider} />
+
+              <View style={styles.breakdownRow}>
+                <View>
+                  <AppText style={styles.breakdownLabel}>Daily Grace Limit</AppText>
+                  <AppText style={styles.breakdownFormula}>125% buffer for small spikes</AppText>
+                </View>
+                <AppText style={styles.breakdownVal}>
+                  {sym}{Math.round(averageDailyLimit * 1.25).toLocaleString('en-IN')}/day
+                </AppText>
+              </View>
+            </View>
+
+            {/* Explanatory Rule Note */}
+            <AppText style={styles.modalFooterNote}>
+              Each consecutive day your total spending stays under {sym}{Math.round(averageDailyLimit * 1.25).toLocaleString('en-IN')} adds +1 to your streak. Spending over this limit resets it.
+            </AppText>
+
+            {/* Action Button */}
+            <TouchableOpacity
+              style={styles.modalDoneBtn}
+              onPress={() => setShowStreakModal(false)}
+              activeOpacity={0.8}
+            >
+              <AppText style={styles.modalDoneBtnText}>Done</AppText>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 };
@@ -340,5 +457,126 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     lineHeight: 14,
+  },
+
+  // Streak Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: '#181A22',
+    borderRadius: 24,
+    padding: 22,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.09)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.45,
+    shadowRadius: 20,
+    elevation: 12,
+  },
+  modalTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  modalIconCircle: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(255, 157, 102, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 157, 102, 0.22)',
+  },
+  modalCloseCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.07)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalHeroValue: {
+    color: '#FFFFFF',
+    fontSize: 26,
+    lineHeight: 32,
+    fontWeight: '800',
+    letterSpacing: -0.5,
+    paddingTop: 2,
+    marginBottom: 2,
+  },
+  modalHeroSub: {
+    color: '#8E919D',
+    fontSize: 13,
+    fontWeight: '500',
+    marginBottom: 18,
+  },
+  breakdownCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.035)',
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    marginBottom: 14,
+  },
+  breakdownRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  breakdownDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  breakdownLabel: {
+    color: '#D1D5DB',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  breakdownFormula: {
+    color: '#6F7383',
+    fontSize: 10,
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  breakdownVal: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  breakdownValHighlight: {
+    color: '#FF9D66',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  modalFooterNote: {
+    color: '#6F7383',
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: '500',
+    marginBottom: 18,
+  },
+  modalDoneBtn: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    paddingVertical: 13,
+    alignItems: 'center',
+  },
+  modalDoneBtnText: {
+    color: '#0A0B0E',
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: -0.2,
   },
 });
