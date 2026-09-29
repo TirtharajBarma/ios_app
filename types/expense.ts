@@ -41,9 +41,11 @@ export interface ExpenseAccount {
   balance: number;
   dueAmount?: number;
   monthlyChange: number; // positive for credit/gain, negative for due/debit
-  statusType: 'positive' | 'due' | 'no_change';
+  statusType: 'positive' | 'negative' | 'due' | 'no_change';
   iconType?: string;
   isArchived?: boolean;
+  dueDay?: number; // Billing payment due day of month (1-31)
+  billingDay?: number; // Statement generation day of month (1-31)
 }
 
 export interface SavingsVault {
@@ -71,7 +73,8 @@ export interface ExpenseTransaction {
   folderId?: string; // Linked Event Folder ID
   folderName?: string; // Linked Event Folder Name
   date: string; // ISO format (yyyy-MM-dd)
-  note?: string;
+  merchant?: string; // Merchant / Payee name (e.g. Starbucks, Uber, Blinkit)
+  note?: string; // Extra user memo / optional notes
   tag?: string; // Event/Trip folder tag e.g. "Goa Trip", "Night Out"
   split?: SplitDetails;
   borrowerOrLender?: string;
@@ -79,6 +82,7 @@ export interface ExpenseTransaction {
   settledTxId?: string; // ID of the auto-generated settlement transaction for this debt/split
   settlementTxId?: string; // ID of the debt/split transaction this settlement resolves
   subscriptionId?: string; // Linked subscription ID in useSubscriptionStore
+  createdAt?: number | string; // Creation timestamp for accurate time-wise reverse-chronological ordering
 }
 
 export interface ExpenseBudget {

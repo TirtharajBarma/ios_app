@@ -271,7 +271,7 @@ export const FixedBottomNav: React.FC<FixedBottomNavProps> = ({
       <View style={styles.androidContentRow}>
         {navItems.map((item, idx) => {
           const isActive = currentTab === item.id;
-          const iconColor = isActive ? '#0F1015' : expenseColors.textSubtle;
+          const iconColor = isActive ? '#0F1015' : '#888DA0';
           const textColor = isActive ? expenseColors.accentPeach : expenseColors.textMuted;
 
           return (
@@ -290,6 +290,7 @@ export const FixedBottomNav: React.FC<FixedBottomNavProps> = ({
                   styles.m3PillContainer,
                   isActive && styles.m3PillActive,
                 ]}
+                renderToHardwareTextureAndroid
               >
                 <item.IconComponent
                   size={20}
@@ -401,7 +402,7 @@ const styles = StyleSheet.create({
     borderTopColor: 'rgba(255, 255, 255, 0.05)',
     paddingTop: 6,
     zIndex: 100,
-    elevation: 8,
+    elevation: 4,
   },
   androidContentRow: {
     flexDirection: 'row',

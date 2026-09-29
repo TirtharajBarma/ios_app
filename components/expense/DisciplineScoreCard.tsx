@@ -3,18 +3,29 @@ import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { Flame, ShieldCheck, TrendingUp, Sparkles } from 'lucide-react-native';
 import { AppText } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
+import { useShallow } from 'zustand/react/shallow';
 import { expenseColors } from '@/constants/expenseColors';
 
 export const DisciplineScoreCard: React.FC = () => {
   const {
-    transactions,
-    monthlyBudget,
-    selectedMonth,
-    getTotalIncome,
-    getTotalSpent,
-    accounts,
-    currencySymbol,
-  } = useExpenseStore();
+  transactions,
+  monthlyBudget,
+  selectedMonth,
+  getTotalIncome,
+  getTotalSpent,
+  accounts,
+  currencySymbol,
+} = useExpenseStore(
+  useShallow((s) => ({
+    transactions: s.transactions,
+    monthlyBudget: s.monthlyBudget,
+    selectedMonth: s.selectedMonth,
+    getTotalIncome: s.getTotalIncome,
+    getTotalSpent: s.getTotalSpent,
+    accounts: s.accounts,
+    currencySymbol: s.currencySymbol,
+  }))
+);
 
   const sym = currencySymbol || '₹';
 
@@ -38,10 +49,22 @@ export const DisciplineScoreCard: React.FC = () => {
     transactions
       .filter((t) => t.type === 'expense')
       .forEach((t) => {
-        const d = new Date(t.date);
-        if (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) {
-          const day = d.getDate();
-          dailySpendMap[day] = (dailySpendMap[day] || 0) + (t.split ? t.split.yourShare : t.amount);
+        const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(t.date || '');
+        let dYear = now.getFullYear();
+        let dMonth = now.getMonth();
+        let dDay = 1;
+        if (m) {
+          dYear = Number(m[1]);
+          dMonth = Number(m[2]) - 1;
+          dDay = Number(m[3]);
+        } else {
+          const d = new Date(t.date);
+          dYear = d.getFullYear();
+          dMonth = d.getMonth();
+          dDay = d.getDate();
+        }
+        if (dMonth === now.getMonth() && dYear === now.getFullYear()) {
+          dailySpendMap[dDay] = (dailySpendMap[dDay] || 0) + (t.split ? t.split.yourShare : t.amount);
         }
       });
 

@@ -5,13 +5,15 @@
   "dependencies": {
     "@expo/ui": "~57.0.18",
     "@hookform/resolvers": "^5.4.0",
+    "@noble/ciphers": "^2.4.0",
+    "@noble/hashes": "^2.4.0",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/datetimepicker": "9.1.0",
     "@supabase/supabase-js": "^2.116.0",
     "date-fns": "^4.4.0",
     "expo": "^57.0.9",
-    "expo-app-intents": "^0.0.1",
     "expo-blur": "~57.0.3",
+    "expo-build-properties": "~57.0.22",
     "expo-clipboard": "~57.0.2",
     "expo-constants": "~57.0.5",
     "expo-device": "~57.0.2",
@@ -34,6 +36,7 @@
     "expo-status-bar": "~57.0.1",
     "expo-symbols": "~57.0.3",
     "expo-system-ui": "~57.0.4",
+    "expo-updates": "~57.0.23",
     "expo-web-browser": "~57.0.3",
     "fflate": "^0.8.3",
     "lucide-react-native": "^1.24.0",
@@ -66,7 +69,11 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "update": "node scripts/publish-update.js",
+    "ios:device": "EXPO_LOCAL_NO_PUSH=1 expo prebuild --platform ios && expo run:ios --device",
+    "ios:release": "EXPO_LOCAL_NO_PUSH=1 expo run:ios --configuration Release --device",
+    "ios:prebuild": "EXPO_LOCAL_NO_PUSH=1 expo prebuild --platform ios"
   },
   "private": true
 }

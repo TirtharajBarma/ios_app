@@ -6,7 +6,9 @@ import {
   TouchableOpacity,
   ScrollView,
   Platform,
+  StatusBar,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   X,
   Users,
@@ -22,12 +24,15 @@ import {
   Banknote,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
-import { MenuAction } from '@expo/ui/community/menu';
 import { AppText, NativeLiquidMenu } from '@/components/ui';
+import type { MenuAction } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
+import { useShallow } from 'zustand/react/shallow';
 import { expenseColors } from '@/constants/expenseColors';
 import { ExpenseTransaction, SplitFriend } from '@/types/expense';
+import { formatMoney } from '@/utils/currency';
 import { CategoryIcon } from './CategoryIcon';
+import { AccountIcon } from './AccountIcon';
 
 interface SplitDetailsModalProps {
   visible: boolean;
@@ -43,13 +48,22 @@ export const SplitDetailsModal: React.FC<SplitDetailsModalProps> = ({
   onEdit,
 }) => {
   const {
-    accounts,
-    categories,
-    currencySymbol,
-    settleFriendShare,
-    settleTransaction,
-    transactions,
-  } = useExpenseStore();
+  accounts,
+  categories,
+  currencySymbol,
+  settleFriendShare,
+  settleTransaction,
+  transactions,
+} = useExpenseStore(
+  useShallow((s) => ({
+    accounts: s.accounts,
+    categories: s.categories,
+    currencySymbol: s.currencySymbol,
+    settleFriendShare: s.settleFriendShare,
+    settleTransaction: s.settleTransaction,
+    transactions: s.transactions,
+  }))
+);
 
   const sym = currencySymbol || '₹';
 
@@ -71,7 +85,7 @@ export const SplitDetailsModal: React.FC<SplitDetailsModalProps> = ({
   const accountMenuActions: MenuAction[] = useMemo(() => {
     return accounts.map((acc) => ({
       id: acc.id,
-      title: `${acc.name} (${sym}${acc.balance.toLocaleString('en-IN')})`,
+      title: `${acc.name} (${formatMoney(acc.balance, sym)})`,
       state: acc.id === selectedAccountId ? ('on' as const) : ('off' as const),
       image: 'building.columns.fill' as any,
     }));
@@ -121,6 +135,23 @@ export const SplitDetailsModal: React.FC<SplitDetailsModalProps> = ({
   const isAllSettled = currentTx?.split?.settled || (friends.length > 0 && settledCount === friends.length);
   const progressPct = totalFriendsShare > 0 ? Math.round((collectedAmount / totalFriendsShare) * 100) : 0;
 
+  const displayBillName = useMemo(() => {
+    if (!currentTx) return 'Split Expense';
+    const merchant = currentTx.merchant?.trim();
+    const note = currentTx.note?.trim();
+    const tag = currentTx.folderName?.trim() || currentTx.tag?.trim();
+    const isSynthetic = !merchant || merchant.toLowerCase().startsWith('split with');
+
+    if (merchant && !isSynthetic) {
+      return note ? `${merchant} · ${note}` : merchant;
+    }
+    if (note) return note;
+    if (tag) return `${tag} Split`;
+    if (category?.name) return `${category.name} Split`;
+    if (merchant) return merchant;
+    return 'Split Expense';
+  }, [currentTx, category]);
+
   const formattedDate = useMemo(() => {
     if (!currentTx?.date) return '';
     try {
@@ -135,15 +166,8 @@ export const SplitDetailsModal: React.FC<SplitDetailsModalProps> = ({
     }
   }, [currentTx]);
 
-  const getAccountIcon = (name: string) => {
-    const lower = (name || '').toLowerCase();
-    if (lower.includes('wallet') || lower.includes('paytm')) {
-      return <Wallet size={15} color="#8E919D" />;
-    }
-    if (lower.includes('credit') || lower.includes('card')) {
-      return <CreditCard size={15} color="#8E919D" />;
-    }
-    return <Building2 size={15} color="#8E919D" />;
+  const getAccountIcon = (name: string, type?: string) => {
+    return <AccountIcon name={name} type={type || 'savings'} size={14} containerSize={26} borderRadius={8} />;
   };
 
   const handleSettleFriend = (friend: SplitFriend) => {
@@ -160,6 +184,9 @@ export const SplitDetailsModal: React.FC<SplitDetailsModalProps> = ({
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
   };
 
+  const insets = useSafeAreaInsets();
+  const androidTopPadding = Platform.OS === 'android' ? Math.max(insets.top, StatusBar.currentHeight || 0, 24) + 10 : 0;
+
   if (!currentTx) return null;
 
   return (
@@ -169,11 +196,13 @@ export const SplitDetailsModal: React.FC<SplitDetailsModalProps> = ({
       presentationStyle="pageSheet"
       onRequestClose={onClose}
     >
-      <View style={styles.modalContainer}>
+      <View style={[styles.modalContainer, { paddingTop: androidTopPadding }]}>
         {/* iOS Drag Handle */}
-        <View style={styles.dragHandleContainer}>
-          <View style={styles.dragHandle} />
-        </View>
+        {Platform.OS === 'ios' && (
+          <View style={styles.dragHandleContainer}>
+            <View style={styles.dragHandle} />
+          </View>
+        )}
 
         {/* Header */}
         <View style={styles.header}>
@@ -236,14 +265,14 @@ export const SplitDetailsModal: React.FC<SplitDetailsModalProps> = ({
             </View>
 
             <AppText style={styles.heroExpenseName} numberOfLines={2}>
-              {currentTx.note || 'Split Expense'}
+              {displayBillName}
             </AppText>
 
             <View style={styles.heroTotalRow}>
               <View>
                 <AppText style={styles.heroTotalLabel}>TOTAL BILL</AppText>
                 <AppText style={styles.heroTotalAmount}>
-                  {sym}{totalBill.toLocaleString('en-IN')}
+                  {formatMoney(totalBill, sym)}
                 </AppText>
               </View>
 
@@ -268,7 +297,7 @@ export const SplitDetailsModal: React.FC<SplitDetailsModalProps> = ({
                     { color: isAllSettled ? expenseColors.accentGreen : expenseColors.accentPeach },
                   ]}
                 >
-                  {isAllSettled ? 'Fully Settled' : `${pendingAmount > 0 ? `${sym}${pendingAmount.toLocaleString('en-IN')} Pending` : 'Pending'}`}
+                  {isAllSettled ? 'Fully Settled' : `${pendingAmount > 0 ? `${formatMoney(pendingAmount, sym)} Pending` : 'Pending'}`}
                 </AppText>
               </View>
             </View>
@@ -280,7 +309,7 @@ export const SplitDetailsModal: React.FC<SplitDetailsModalProps> = ({
             <View style={styles.metricTile}>
               <AppText style={styles.metricLabel}>MY SHARE</AppText>
               <AppText style={styles.metricValue}>
-                {sym}{myShare.toLocaleString('en-IN')}
+                {formatMoney(myShare, sym)}
               </AppText>
               <AppText style={styles.metricSub}>Your net budget cost</AppText>
             </View>
@@ -289,7 +318,7 @@ export const SplitDetailsModal: React.FC<SplitDetailsModalProps> = ({
             <View style={styles.metricTile}>
               <AppText style={styles.metricLabel}>LENT TO FRIENDS</AppText>
               <AppText style={[styles.metricValue, { color: expenseColors.accentPeach }]}>
-                {sym}{totalFriendsShare.toLocaleString('en-IN')}
+                {formatMoney(totalFriendsShare, sym)}
               </AppText>
               <AppText style={styles.metricSub}>{friends.length} friend{friends.length !== 1 ? 's' : ''} total</AppText>
             </View>
@@ -322,14 +351,14 @@ export const SplitDetailsModal: React.FC<SplitDetailsModalProps> = ({
               <View style={styles.progressStatItem}>
                 <AppText style={styles.progressStatLabel}>Collected</AppText>
                 <AppText style={[styles.progressStatValue, { color: expenseColors.accentGreen }]}>
-                  {sym}{collectedAmount.toLocaleString('en-IN')}
+                  {formatMoney(collectedAmount, sym)}
                 </AppText>
               </View>
               <View style={styles.progressStatDivider} />
               <View style={styles.progressStatItem}>
                 <AppText style={styles.progressStatLabel}>Still Pending</AppText>
                 <AppText style={[styles.progressStatValue, { color: pendingAmount > 0 ? expenseColors.accentRed : expenseColors.textMuted }]}>
-                  {sym}{pendingAmount.toLocaleString('en-IN')}
+                  {formatMoney(pendingAmount, sym)}
                 </AppText>
               </View>
             </View>
@@ -346,7 +375,7 @@ export const SplitDetailsModal: React.FC<SplitDetailsModalProps> = ({
                   Haptics.selectionAsync().catch(() => {});
                   setSelectedAccountId(accId);
                 }}
-                style={{ width: '100%' }}
+                style={{ alignSelf: 'stretch' }}
               >
                 <View style={styles.accountTrigger}>
                   <View style={styles.accountTriggerLeft}>
@@ -358,7 +387,7 @@ export const SplitDetailsModal: React.FC<SplitDetailsModalProps> = ({
                         {selectedAccount?.name.toUpperCase()}
                       </AppText>
                       <AppText style={styles.accountTriggerBal}>
-                        Balance: {sym}{(selectedAccount?.balance || 0).toLocaleString('en-IN')}
+                        Balance: {formatMoney(selectedAccount?.balance || 0, sym)}
                       </AppText>
                     </View>
                   </View>
@@ -428,7 +457,7 @@ export const SplitDetailsModal: React.FC<SplitDetailsModalProps> = ({
                           isSettled ? styles.participantAmountSettled : styles.participantAmountPending,
                         ]}
                       >
-                        {sym}{friend.amount.toLocaleString('en-IN')}
+                        {formatMoney(friend.amount, sym)}
                       </AppText>
 
                       {!isSettled ? (
@@ -461,7 +490,7 @@ export const SplitDetailsModal: React.FC<SplitDetailsModalProps> = ({
             >
               <CheckCircle2 size={16} color="#0D0E12" strokeWidth={2.5} />
               <AppText style={styles.settleAllBtnText}>
-                Settle All Remaining ({sym}{pendingAmount.toLocaleString('en-IN')})
+                Settle All Remaining ({formatMoney(pendingAmount, sym)})
               </AppText>
             </TouchableOpacity>
           )}

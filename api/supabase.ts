@@ -49,7 +49,7 @@ export function isSupabaseConfigured(): boolean {
 }
 
 /** Log the device into Supabase anonymously (silent, no UI). */
-async function ensureSession(): Promise<SupabaseClient | null> {
+export async function ensureSession(): Promise<SupabaseClient | null> {
   const supabase = getClient();
   if (!supabase) return null;
   if (sessionLoadPromise) return (await sessionLoadPromise) ? supabase : null;

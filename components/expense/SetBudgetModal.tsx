@@ -8,6 +8,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Keyboard,
+  StatusBar,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Target, X, Check, ArrowRight, Sparkles } from 'lucide-react-native';
@@ -15,6 +16,7 @@ import * as Haptics from 'expo-haptics';
 
 import { AppText } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
+import { useShallow } from 'zustand/react/shallow';
 import { expenseColors } from '@/constants/expenseColors';
 
 interface SetBudgetModalProps {
@@ -31,7 +33,21 @@ export const SetBudgetModal: React.FC<SetBudgetModalProps> = ({
   onSuccess,
 }) => {
   const insets = useSafeAreaInsets();
-  const { monthlyBudget, setMonthlyBudget, setStatementSetup, currencySymbol, formatAmount } = useExpenseStore();
+  const {
+  monthlyBudget,
+  setMonthlyBudget,
+  setStatementSetup,
+  currencySymbol,
+  formatAmount,
+} = useExpenseStore(
+  useShallow((s) => ({
+    monthlyBudget: s.monthlyBudget,
+    setMonthlyBudget: s.setMonthlyBudget,
+    setStatementSetup: s.setStatementSetup,
+    currencySymbol: s.currencySymbol,
+    formatAmount: s.formatAmount,
+  }))
+);
   const sym = currencySymbol || '₹';
 
   const [budgetInput, setBudgetInput] = useState<string>(
@@ -61,6 +77,8 @@ export const SetBudgetModal: React.FC<SetBudgetModalProps> = ({
     onClose();
   };
 
+  const androidTopPadding = Platform.OS === 'android' ? Math.max(insets.top, StatusBar.currentHeight || 0, 24) + 10 : 0;
+
   return (
     <Modal
       visible={visible}
@@ -72,14 +90,16 @@ export const SetBudgetModal: React.FC<SetBudgetModalProps> = ({
       }}
     >
       <KeyboardAvoidingView
-        style={styles.container}
+        style={[styles.container, { paddingTop: androidTopPadding }]}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
       >
         {/* Drag Handle */}
-        <View style={styles.dragHandleContainer}>
-          <View style={styles.dragHandle} />
-        </View>
+        {Platform.OS === 'ios' && (
+          <View style={styles.dragHandleContainer}>
+            <View style={styles.dragHandle} />
+          </View>
+        )}
 
         {/* Header */}
         <View style={styles.header}>

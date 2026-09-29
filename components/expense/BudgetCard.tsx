@@ -12,6 +12,7 @@ import { Zap } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { AppText } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
+import { useShallow } from 'zustand/react/shallow';
 import { expenseColors } from '@/constants/expenseColors';
 import { formatCompactCurrency } from './MoneyFlowCard';
 
@@ -21,35 +22,42 @@ export const formatBudgetLegendAmount = (amount: number, symbol: string = '₹')
 
 export const BudgetCard: React.FC = () => {
   const {
-    monthlyBudget,
-    currencySymbol,
-    getTotalSpent,
-    getRemainingBudget,
-    getCategoryBreakdown,
-    categoryBudgets,
-    transactions,
-    categories,
-    hasInitialAppLoaded,
-  } = useExpenseStore();
+  monthlyBudget,
+  currencySymbol,
+  getTotalSpent,
+  getRemainingBudget,
+  getCategoryBreakdown,
+  categoryBudgets,
+  transactions,
+  categories,
+} = useExpenseStore(
+  useShallow((s) => ({
+    monthlyBudget: s.monthlyBudget,
+    currencySymbol: s.currencySymbol,
+    getTotalSpent: s.getTotalSpent,
+    getRemainingBudget: s.getRemainingBudget,
+    getCategoryBreakdown: s.getCategoryBreakdown,
+    categoryBudgets: s.categoryBudgets,
+    transactions: s.transactions,
+    categories: s.categories,
+  }))
+);
 
   const sym = currencySymbol || '₹';
 
   const [selectedCatId, setSelectedCatId] = useState<string | null>(null);
-  const [sweepProgress, setSweepProgress] = useState<number>(hasInitialAppLoaded ? 1 : 0);
+  const [sweepProgress, setSweepProgress] = useState<number>(0);
 
   // Animations
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const slideAnim = useRef(new Animated.Value(0)).current;
-  const chartProgress = useRef(new Animated.Value(hasInitialAppLoaded ? 1 : 0)).current;
+  const chartProgress = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    if (hasInitialAppLoaded) {
-      setSweepProgress(1);
-      chartProgress.setValue(1);
-      return;
-    }
-
-    // Initial chart sweep draw animation on app load
+    // Initial chart sweep draw animation, once per mount. Not gated on a store
+    // flag — the persisted flag this used to read could be rewound by
+    // `persist.rehydrate()` or the iOS App Intent, leaving the chart stuck
+    // part-drawn.
     chartProgress.setValue(0);
     const listenerId = chartProgress.addListener(({ value }) => {
       setSweepProgress(value);
@@ -68,7 +76,7 @@ export const BudgetCard: React.FC = () => {
     return () => {
       chartProgress.removeListener(listenerId);
     };
-  }, [hasInitialAppLoaded]);
+  }, []);
 
   useEffect(() => {
     // Smooth transition when selection changes

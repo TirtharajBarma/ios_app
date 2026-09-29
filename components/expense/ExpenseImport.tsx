@@ -26,14 +26,16 @@ import {
   Sparkles,
   Edit3,
 } from 'lucide-react-native';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter, useFocusEffect, useScrollToTop } from 'expo-router';
+import { handleTabFocus } from '@/services/navigation/tabTracker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Haptics from 'expo-haptics';
 
 import { AppText, NativeLiquidMenu } from '@/components/ui';
-import { MenuAction } from '@expo/ui/community/menu';
+import type { MenuAction } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
+import { useShallow } from 'zustand/react/shallow';
 import { expenseColors } from '@/constants/expenseColors';
 import { parsePdfDocument, base64ToUint8Array, isPdfEncrypted } from '@/utils/pdfParser';
 import {
@@ -44,6 +46,7 @@ import {
 import { StatementReviewModal, OpeningBalancesData } from './StatementReviewModal';
 import { SetOpeningBalancesModal } from './SetOpeningBalancesModal';
 import { SetBudgetModal } from './SetBudgetModal';
+import { PdfPasswordModal } from './PdfPasswordModal';
 import { ExpenseAccount } from '@/types/expense';
 
 export const ExpenseImport: React.FC = () => {
@@ -51,19 +54,34 @@ export const ExpenseImport: React.FC = () => {
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
   const {
-    accounts,
-    categories,
-    transactions,
-    addBatchTransactions,
-    updateAccount,
-    currencySymbol,
-    monthlyBudget,
-    setMonthlyBudget,
-    learnedMerchantRules,
-    statementSetup,
-    setStatementSetup,
-    formatAmount,
-  } = useExpenseStore();
+  accounts,
+  categories,
+  transactions,
+  addBatchTransactions,
+  updateAccount,
+  currencySymbol,
+  monthlyBudget,
+  setMonthlyBudget,
+  learnedMerchantRules,
+  statementSetup,
+  setStatementSetup,
+  formatAmount,
+} = useExpenseStore(
+  useShallow((s) => ({
+    accounts: s.accounts,
+    categories: s.categories,
+    transactions: s.transactions,
+    addBatchTransactions: s.addBatchTransactions,
+    updateAccount: s.updateAccount,
+    currencySymbol: s.currencySymbol,
+    monthlyBudget: s.monthlyBudget,
+    setMonthlyBudget: s.setMonthlyBudget,
+    learnedMerchantRules: s.learnedMerchantRules,
+    statementSetup: s.statementSetup,
+    setStatementSetup: s.setStatementSetup,
+    formatAmount: s.formatAmount,
+  }))
+);
   const sym = currencySymbol || '₹';
 
   const [selectedAccount, setSelectedAccount] = useState<string>('');
@@ -78,18 +96,29 @@ export const ExpenseImport: React.FC = () => {
   const [isOpeningBalanceModalVisible, setIsOpeningBalanceModalVisible] = useState<boolean>(false);
   const [isBudgetModalVisible, setIsBudgetModalVisible] = useState<boolean>(false);
 
-  // Smooth scroll to top on focus & clean up temporary import states on blur
+  // PDF Password Unlock State
+  const [isPasswordModalVisible, setIsPasswordModalVisible] = useState(false);
+  const [pendingEncryptedPdf, setPendingEncryptedPdf] = useState<{
+    uint8Data: Uint8Array;
+    fileName: string;
+  } | null>(null);
+
+  // Standard HIG tap active tab to scroll to top
+  useScrollToTop(scrollRef);
+
+  // Smooth scroll to top ONLY when actively switching tabs from another tab
   useFocusEffect(
     useCallback(() => {
-      const rafId = requestAnimationFrame(() => {
+      handleTabFocus('import', () => {
         scrollRef.current?.scrollTo({ y: 0, animated: false });
       });
       return () => {
-        cancelAnimationFrame(rafId);
         setImportStatus('idle');
         setUploadedFileName(null);
         setParsedStatementResult(null);
         setIsReviewModalVisible(false);
+        setIsPasswordModalVisible(false);
+        setPendingEncryptedPdf(null);
       };
     }, [])
   );
@@ -97,6 +126,41 @@ export const ExpenseImport: React.FC = () => {
   const animHeader = useRef(new Animated.Value(1)).current;
   const animDropzone = useRef(new Animated.Value(1)).current;
   const animAccount = useRef(new Animated.Value(1)).current;
+
+  const handleUnlockEncryptedPdf = async (password: string) => {
+    if (!pendingEncryptedPdf) return;
+    try {
+      const parsedDoc = parsePdfDocument(pendingEncryptedPdf.uint8Data, password);
+      const normalizedResult = normalizeStatementData(
+        { pdfRows: parsedDoc.allRows, fileName: pendingEncryptedPdf.fileName },
+        accounts,
+        categories,
+        transactions,
+        learnedMerchantRules
+      );
+
+      if (normalizedResult.transactions.length === 0) {
+        Alert.alert(
+          'No Transactions Detected',
+          'Statement was unlocked, but no recognizable transaction records were found in this document.'
+        );
+        setIsPasswordModalVisible(false);
+        setPendingEncryptedPdf(null);
+        return;
+      }
+
+      setIsPasswordModalVisible(false);
+      setPendingEncryptedPdf(null);
+      setParsedStatementResult(normalizedResult);
+      setImportStatus('idle');
+      setTimeout(() => {
+        setIsReviewModalVisible(true);
+      }, 350);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Decryption failed';
+      throw new Error(msg);
+    }
+  };
 
   const handlePickDocument = async () => {
     if (accounts.length === 0) {
@@ -154,22 +218,33 @@ export const ExpenseImport: React.FC = () => {
             const uint8Data = base64ToUint8Array(base64Data);
 
             if (isPdfEncrypted(uint8Data)) {
-              setImportStatus('idle');
-              Alert.alert(
-                'Password Protected PDF',
-                'This bank statement is encrypted with a password. Please unlock the PDF or export an unencrypted statement to import.'
+              // Try unlocking with blank password first
+              try {
+                const parsedDoc = parsePdfDocument(uint8Data, '');
+                normalizedResult = normalizeStatementData(
+                  { pdfRows: parsedDoc.allRows, fileName: file.name },
+                  accounts,
+                  categories,
+                  transactions,
+                  learnedMerchantRules
+                );
+              } catch {
+                // Requires password -> open interactive password sheet!
+                setImportStatus('idle');
+                setPendingEncryptedPdf({ uint8Data, fileName: file.name });
+                setIsPasswordModalVisible(true);
+                return;
+              }
+            } else {
+              const parsedDoc = parsePdfDocument(uint8Data);
+              normalizedResult = normalizeStatementData(
+                { pdfRows: parsedDoc.allRows, fileName: file.name },
+                accounts,
+                categories,
+                transactions,
+                learnedMerchantRules
               );
-              return;
             }
-
-            const parsedDoc = parsePdfDocument(uint8Data);
-            normalizedResult = normalizeStatementData(
-              { pdfRows: parsedDoc.allRows, fileName: file.name },
-              accounts,
-              categories,
-              transactions,
-              learnedMerchantRules
-            );
           } catch (pdfErr) {
             const errMsg = pdfErr instanceof Error ? pdfErr.message : String(pdfErr);
             console.warn('PDF Parsing Error:', errMsg, pdfErr);
@@ -634,7 +709,7 @@ export const ExpenseImport: React.FC = () => {
                   Haptics.selectionAsync().catch(() => {});
                   setSelectedAccount(name);
                 }}
-                style={{ width: '100%' }}
+                style={{ alignSelf: 'stretch' }}
               >
                 <View style={styles.dropdownSelector}>
                   <AppText
@@ -674,6 +749,17 @@ export const ExpenseImport: React.FC = () => {
             setIsBudgetModalVisible(true);
           }, 350);
         }}
+      />
+
+      {/* Interactive PDF Password Unlock Modal */}
+      <PdfPasswordModal
+        visible={isPasswordModalVisible}
+        fileName={pendingEncryptedPdf?.fileName}
+        onClose={() => {
+          setIsPasswordModalVisible(false);
+          setPendingEncryptedPdf(null);
+        }}
+        onUnlock={handleUnlockEncryptedPdf}
       />
 
       {/* Interactive Set Monthly Budget Modal */}
@@ -947,6 +1033,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     marginBottom: 10,
+    alignSelf: 'stretch',
   },
   dropdownSelectedText: {
     color: expenseColors.textPrimary,

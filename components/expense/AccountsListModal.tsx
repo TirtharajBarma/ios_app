@@ -10,7 +10,9 @@ import {
   Keyboard,
   Platform,
   Alert,
+  StatusBar,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   X,
   Plus,
@@ -26,11 +28,13 @@ import {
   TrendingUp,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
-import { MenuAction } from '@expo/ui/community/menu';
 import { AppText, NativeLiquidMenu } from '@/components/ui';
+import type { MenuAction } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
+import { useShallow } from 'zustand/react/shallow';
 import { expenseColors } from '@/constants/expenseColors';
 import { ExpenseAccount, SavingsVault } from '@/types/expense';
+import { getCreditCardDueStatus } from '@/utils/creditCard';
 import { EditAccountModal } from './EditAccountModal';
 import { AccountIcon } from './AccountIcon';
 
@@ -50,30 +54,50 @@ interface AccountsListModalProps {
   visible: boolean;
   onClose: () => void;
   initialTab?: 'accounts' | 'goals';
+  onPayBill?: (account: ExpenseAccount) => void;
 }
 
 export const AccountsListModal: React.FC<AccountsListModalProps> = ({
   visible,
   onClose,
   initialTab,
+  onPayBill,
 }) => {
   const {
-    accounts,
-    transactions,
-    savingsVaults,
-    currencySymbol,
-    monthlyBudget,
-    getTotalSpent,
-    deleteAccount,
-    archiveAccount,
-    unarchiveAccount,
-    addSavingsVault,
-    deleteSavingsVault,
-    depositToVault,
-    withdrawFromVault,
-    getTotalBalance,
-    getTotalSavedInVaults,
-  } = useExpenseStore();
+  accounts,
+  transactions,
+  savingsVaults,
+  currencySymbol,
+  monthlyBudget,
+  getTotalSpent,
+  deleteAccount,
+  archiveAccount,
+  unarchiveAccount,
+  addSavingsVault,
+  deleteSavingsVault,
+  depositToVault,
+  withdrawFromVault,
+  getTotalBalance,
+  getTotalSavedInVaults,
+} = useExpenseStore(
+  useShallow((s) => ({
+    accounts: s.accounts,
+    transactions: s.transactions,
+    savingsVaults: s.savingsVaults,
+    currencySymbol: s.currencySymbol,
+    monthlyBudget: s.monthlyBudget,
+    getTotalSpent: s.getTotalSpent,
+    deleteAccount: s.deleteAccount,
+    archiveAccount: s.archiveAccount,
+    unarchiveAccount: s.unarchiveAccount,
+    addSavingsVault: s.addSavingsVault,
+    deleteSavingsVault: s.deleteSavingsVault,
+    depositToVault: s.depositToVault,
+    withdrawFromVault: s.withdrawFromVault,
+    getTotalBalance: s.getTotalBalance,
+    getTotalSavedInVaults: s.getTotalSavedInVaults,
+  }))
+);
 
   const sym = currencySymbol || '₹';
   const totalBalance = getTotalBalance();
@@ -81,7 +105,7 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
   const totalSpent = getTotalSpent();
   
   // Real liquid cash available in bank accounts (excluding credit cards)
-  const liquidAccounts = accounts.filter((a) => a.type !== 'credit' && a.statusType !== 'due' && !a.isArchived);
+  const liquidAccounts = accounts.filter((a) => a.type !== 'credit' && !a.isArchived);
   const liquidBankBalance = liquidAccounts.reduce((sum, a) => sum + a.balance, 0);
   const creditAccounts = accounts.filter((a) => a.type === 'credit' && !a.isArchived);
   const totalCreditDues = creditAccounts.reduce((sum, a) => sum + (a.dueAmount || 0), 0);
@@ -254,6 +278,9 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
     setGoalTarget('');
   };
 
+  const insets = useSafeAreaInsets();
+  const androidTopPadding = Platform.OS === 'android' ? Math.max(insets.top, StatusBar.currentHeight || 0, 24) + 10 : 0;
+
   return (
     <Modal
       visible={visible}
@@ -261,7 +288,7 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
       presentationStyle="pageSheet"
       onRequestClose={onClose}
     >
-      <View style={styles.container}>
+      <View style={[styles.container, { paddingTop: androidTopPadding }]}>
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={onClose} style={styles.headerBtn}>
@@ -337,7 +364,9 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
               <View style={styles.listStack}>
                 {activeAccounts.map((account) => {
                   const txCount = getAccountTxCount(account.id) || account.txnCountThisMonth || 0;
-                  const isDue = account.statusType === 'due' && (account.dueAmount ?? 0) > 0;
+                  const isCredit = account.type === 'credit';
+                  const isDue = isCredit && (account.dueAmount ?? 0) > 0;
+                  const dueStatus = isCredit ? getCreditCardDueStatus(account.dueDay, account.billingDay, account.dueAmount || 0) : null;
 
                   return (
                     <TouchableOpacity
@@ -347,16 +376,44 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
                       activeOpacity={0.7}
                     >
                       {/* Left Icon */}
-                      <AccountIcon type={account.type || 'savings'} size={18} containerSize={40} borderRadius={12} />
+                      <AccountIcon name={account.name} type={account.type || 'savings'} size={18} containerSize={40} borderRadius={12} />
 
                       {/* Middle Info */}
                       <View style={styles.infoCol}>
-                        <AppText style={styles.accountName}>
-                          {account.name}
-                        </AppText>
-                        {account.type === 'credit' ? (
+                        <View style={styles.nameRow}>
+                          <AppText style={styles.accountName} numberOfLines={1} ellipsizeMode="tail">
+                            {account.name}
+                          </AppText>
+                          {dueStatus?.hasDueInfo && (
+                            <View
+                              style={[
+                                styles.dueBadge,
+                                dueStatus.status === 'paid'
+                                  ? styles.dueBadgePaid
+                                  : dueStatus.isUrgent
+                                  ? styles.dueBadgeUrgent
+                                  : styles.dueBadgeUpcoming,
+                              ]}
+                            >
+                              <AppText
+                                style={[
+                                  styles.dueBadgeText,
+                                  dueStatus.status === 'paid'
+                                    ? styles.dueBadgePaidText
+                                    : dueStatus.isUrgent
+                                    ? styles.dueBadgeUrgentText
+                                    : styles.dueBadgeUpcomingText,
+                                ]}
+                              >
+                                {dueStatus.badgeLabel}
+                              </AppText>
+                            </View>
+                          )}
+                        </View>
+                        {isCredit ? (
                           <AppText style={styles.dueText}>
                             Due: {sym}{(account.dueAmount || 0).toLocaleString('en-IN')}
+                            {dueStatus?.billingCycleLabel ? ` • ${dueStatus.billingCycleLabel}` : ''}
                           </AppText>
                         ) : (
                           <AppText style={styles.balanceText}>
@@ -365,8 +422,23 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
                         )}
                       </View>
 
-                      {/* Right: Badge + Chevron */}
+                      {/* Right: Pay Bill + Badge + Chevron */}
                       <View style={styles.rightGroup}>
+                        {isDue && onPayBill && (
+                          <TouchableOpacity
+                            style={styles.payBillBtn}
+                            activeOpacity={0.8}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            onPress={(e) => {
+                              e.stopPropagation();
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                              onPayBill(account);
+                              onClose();
+                            }}
+                          >
+                            <AppText style={styles.payBillBtnText}>Pay</AppText>
+                          </TouchableOpacity>
+                        )}
                         <View style={styles.txBadge}>
                           <AppText style={styles.txBadgeText}>
                             {txCount} txns
@@ -392,9 +464,9 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
                           activeOpacity={0.75}
                           onPress={() => handleOpenEdit(account)}
                         >
-                          <AccountIcon type={account.type || 'savings'} size={18} containerSize={40} borderRadius={12} />
+                          <AccountIcon name={account.name} type={account.type || 'savings'} size={18} containerSize={40} borderRadius={12} />
                           <View style={styles.infoCol}>
-                            <AppText style={styles.accountName}>
+                            <AppText style={styles.accountName} numberOfLines={1} ellipsizeMode="tail">
                               {account.name}
                             </AppText>
                             <AppText style={styles.balanceText}>
@@ -550,7 +622,7 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
                             handleDeleteVault(vault);
                           }
                         }}
-                        style={{ width: '100%' }}
+                        style={{ alignSelf: 'stretch' }}
                       >
                         <View style={styles.goalCard}>
                           <View style={styles.goalTopRow}>
@@ -1063,14 +1135,49 @@ const styles = StyleSheet.create({
   },
   infoCol: {
     flex: 1,
+    minWidth: 0,
+    marginRight: 8,
     justifyContent: 'center',
-    gap: 4,
+    gap: 3,
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   accountName: {
     color: '#FFFFFF',
     fontSize: 15,
     lineHeight: 20,
     fontWeight: '700',
+  },
+  dueBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  dueBadgeUpcoming: {
+    backgroundColor: 'rgba(255, 157, 102, 0.15)',
+  },
+  dueBadgeUrgent: {
+    backgroundColor: 'rgba(255, 107, 107, 0.15)',
+  },
+  dueBadgePaid: {
+    backgroundColor: 'rgba(112, 214, 188, 0.12)',
+  },
+  dueBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  dueBadgeUpcomingText: {
+    color: expenseColors.accentPeach,
+  },
+  dueBadgeUrgentText: {
+    color: '#FF6B6B',
+  },
+  dueBadgePaidText: {
+    color: expenseColors.accentGreen,
   },
   balanceText: {
     color: '#8E95A5',
@@ -1080,14 +1187,27 @@ const styles = StyleSheet.create({
   },
   dueText: {
     color: expenseColors.accentRed,
-    fontSize: 13,
-    lineHeight: 17,
+    fontSize: 12,
+    lineHeight: 16,
     fontWeight: '600',
   },
   rightGroup: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
+    flexShrink: 0,
+  },
+  payBillBtn: {
+    backgroundColor: expenseColors.accentPeach,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 7,
+  },
+  payBillBtnText: {
+    color: '#0F1015',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.4,
   },
   txBadge: {
     backgroundColor: '#232633',
@@ -1465,6 +1585,8 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
+    textAlignVertical: 'center',
+    paddingVertical: 0,
   },
   colorsRow: {
     flexDirection: 'row',

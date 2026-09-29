@@ -11,7 +11,9 @@ import {
   KeyboardAvoidingView,
   Keyboard,
   Alert,
+  StatusBar,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   X,
   Calendar as CalendarIcon,
@@ -38,24 +40,33 @@ import {
   Coins,
   Shield,
   PiggyBank,
+  Building2,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
-import { MenuAction } from '@expo/ui/community/menu';
 import { AppText, NativeLiquidMenu } from '@/components/ui';
-import { useExpenseStore } from '@/store/useExpenseStore';
+import type { MenuAction } from '@/components/ui';
+import { useExpenseStore, getUserCategories } from '@/store/useExpenseStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useSubscriptionStore } from '@/store/useSubscriptionStore';
+import { createExpense } from '@/services/expense/createExpense';
 import * as db from '@/database/database';
 import { expenseColors } from '@/constants/expenseColors';
 import { CategoryIcon, getCategoryBgColor } from './CategoryIcon';
+import { AccountIcon } from './AccountIcon';
 import { DatePickerModal } from './DatePickerModal';
 import { EditAccountModal } from './EditAccountModal';
-import { format } from 'date-fns';
+import { format, isToday, isYesterday, subDays } from 'date-fns';
 import { ExpenseAccount, ExpenseCategory, ExpenseTransaction, QuickExpensePreset, SavingsVault } from '@/types/expense';
 
 interface AddTransactionModalProps {
   visible: boolean;
   onClose: () => void;
   initialTransaction?: ExpenseTransaction | null;
+  initialTab?: TabMode;
+  initialFromAccountId?: string;
+  initialToAccountId?: string;
+  initialAmount?: number;
+  initialNote?: string;
 }
 
 type TabMode = 'expense' | 'income' | 'transfer' | 'debt';
@@ -68,8 +79,6 @@ export const INCOME_CATEGORIES: ExpenseCategory[] = [
   { id: 'cat_salary', name: 'Salary', emoji: '💼', color: '#8CD9C8', iconName: 'Briefcase' },
   { id: 'cat_freelance', name: 'Freelance', emoji: '💻', color: '#9DC6EB', iconName: 'Laptop' },
   { id: 'cat_invest', name: 'Investments', emoji: '📈', color: '#F4CD89', iconName: 'TrendingUp' },
-  { id: 'cat_split_return', name: 'Split Received', emoji: '👥', color: '#70D6BC', iconName: 'Users' },
-  { id: 'cat_debt_repayment', name: 'Debt Repayment', emoji: '🤝', color: '#88C0D0', iconName: 'Coins' },
   { id: 'cat_bonus', name: 'Bonus', emoji: '🎁', color: '#F2AEC4', iconName: 'Gift' },
   { id: 'cat_rental', name: 'Rental', emoji: '🏠', color: '#C4A7E7', iconName: 'Home' },
   { id: 'cat_refund', name: 'Refund', emoji: '🔄', color: '#82D0D8', iconName: 'RefreshCw' },
@@ -181,18 +190,8 @@ const VENDOR_CATEGORY_MAP: Record<string, string> = {
   rent: 'cat_util',
 };
 
-const getAccountIcon = (name: string) => {
-  const n = (name || '').toLowerCase();
-  if (n.includes('card') || n.includes('myzone') || n.includes('neo') || n.includes('credit')) {
-    return <CreditCard size={14} color="#FFFFFF" />;
-  }
-  if (n.includes('wallet') || n.includes('pay') || n.includes('slice')) {
-    return <Wallet size={14} color="#FFFFFF" />;
-  }
-  if (n.includes('cash')) {
-    return <Banknote size={14} color="#FFFFFF" />;
-  }
-  return <Banknote size={14} color="#FFFFFF" />;
+const getAccountIcon = (name: string, type?: string) => {
+  return <AccountIcon name={name} type={type || 'savings'} size={14} containerSize={26} borderRadius={8} />;
 };
 
 const getCategorySfSymbol = (catId: string, name?: string): string => {
@@ -226,27 +225,54 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   visible,
   onClose,
   initialTransaction,
+  initialTab,
+  initialFromAccountId,
+  initialToAccountId,
+  initialAmount,
+  initialNote,
 }) => {
   const {
-    categories,
-    accounts,
-    savingsVaults,
-    eventFolders,
-    addEventFolder,
-    addTransaction,
-    updateTransaction,
-    depositToVault,
-    addSavingsVault,
-    currencySymbol,
-    quickPresets,
-    addQuickPreset,
-    deleteQuickPreset,
-    transactions,
-    learnedMerchantRules,
-    saveLearnedMerchantRule,
-  } = useExpenseStore();
+  categories,
+  accounts,
+  savingsVaults,
+  eventFolders,
+  addEventFolder,
+  addTransaction,
+  updateTransaction,
+  depositToVault,
+  addSavingsVault,
+  currencySymbol,
+  quickPresets,
+  addQuickPreset,
+  deleteQuickPreset,
+  transactions,
+  learnedMerchantRules,
+  saveLearnedMerchantRule,
+} = useExpenseStore(
+  useShallow((s) => ({
+    categories: s.categories,
+    accounts: s.accounts,
+    savingsVaults: s.savingsVaults,
+    eventFolders: s.eventFolders,
+    addEventFolder: s.addEventFolder,
+    addTransaction: s.addTransaction,
+    updateTransaction: s.updateTransaction,
+    depositToVault: s.depositToVault,
+    addSavingsVault: s.addSavingsVault,
+    currencySymbol: s.currencySymbol,
+    quickPresets: s.quickPresets,
+    addQuickPreset: s.addQuickPreset,
+    deleteQuickPreset: s.deleteQuickPreset,
+    transactions: s.transactions,
+    learnedMerchantRules: s.learnedMerchantRules,
+    saveLearnedMerchantRule: s.saveLearnedMerchantRule,
+  }))
+);
   const sym = currencySymbol || '₹';
   const { subscriptions, addSubscription, updateSubscription } = useSubscriptionStore();
+
+  const insets = useSafeAreaInsets();
+  const androidTopPadding = Platform.OS === 'android' ? Math.max(insets.top, StatusBar.currentHeight || 0, 24) + 10 : 0;
 
   const [tabMode, setTabMode] = useState<TabMode>('expense');
   const [debtType, setDebtType] = useState<DebtType>('lend');
@@ -256,9 +282,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   const [selectedGoalId, setSelectedGoalId] = useState<string>('');
   const [goalAllocationAmount, setGoalAllocationAmount] = useState<string>('');
   const [selectedFolderId, setSelectedFolderId] = useState<string>('');
-  const [toAccountId, setToAccountId] = useState<string>(
-    accounts[1]?.id || accounts[0]?.id || 'acc_slice'
-  );
+  const [toAccountId, setToAccountId] = useState<string>('');
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('');
   const [txDate, setTxDate] = useState<Date>(new Date());
   const [note, setNote] = useState<string>('');
@@ -306,7 +330,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   const [newPresetLabel, setNewPresetLabel] = useState<string>('');
   const [newPresetEmoji, setNewPresetEmoji] = useState<string>('⚡');
   const [newPresetAmount, setNewPresetAmount] = useState<string>('');
-  const [newPresetCatId, setNewPresetCatId] = useState<string>(categories[0]?.id || 'cat_shop');
+  const [newPresetCatId, setNewPresetCatId] = useState<string>(getUserCategories(categories)[0]?.id || 'cat_shop');
 
   const [showAddAccountModal, setShowAddAccountModal] = useState<boolean>(false);
 
@@ -335,9 +359,19 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
 
         const isIncomeTx = tx.type === 'income';
         setAmount(tx.amount.toString());
-        setMerchant(tx.note || '');
+        if (tx.merchant) {
+          setMerchant(tx.merchant);
+          setNote(tx.note || '');
+        } else if (tx.note && tx.note.includes(' - ')) {
+          const parts = tx.note.split(' - ');
+          setMerchant(parts[0]);
+          setNote(parts.slice(1).join(' - '));
+        } else {
+          setMerchant(tx.note || '');
+          setNote('');
+        }
         setSelectedAccountId(tx.accountId || '');
-        setToAccountId(tx.toAccountId || accounts[1]?.id || accounts[0]?.id || 'acc_slice');
+        setToAccountId(tx.toAccountId || '');
         setSelectedCategoryId(
           tx.categoryId && (isIncomeTx ? INCOME_CATEGORIES.some((c) => c.id === tx.categoryId) : categories.some((c) => c.id === tx.categoryId))
             ? tx.categoryId
@@ -377,18 +411,18 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
           setIsSubscription(false);
         }
       } else {
-        setTabMode('expense');
+        setTabMode(initialTab || 'expense');
         setDebtType('lend');
-        setAmount('');
-        setMerchant('');
-        setSelectedAccountId('');
+        setAmount(initialAmount !== undefined && initialAmount > 0 ? initialAmount.toString() : '');
+        setMerchant(initialNote || '');
+        setSelectedAccountId(initialFromAccountId || '');
         setSelectedGoalId('');
         setGoalAllocationAmount('');
         setGoalAllocations({});
         setSelectedFolderId('');
         setSelectedCategoryId('');
         setTxDate(new Date());
-        setToAccountId(accounts[1]?.id || accounts[0]?.id || 'acc_slice');
+        setToAccountId(initialToAccountId || '');
         setBillingCycle('monthly');
         const nextBill = new Date();
         nextBill.setMonth(nextBill.getMonth() + 1);
@@ -403,7 +437,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
         setIsSubscription(false);
       }
     }
-  }, [visible, initialTransaction]);
+  }, [visible, initialTransaction, initialTab, initialFromAccountId, initialToAccountId, initialAmount, initialNote]);
 
   const scrollViewRef = useRef<ScrollView>(null);
   const [keyboardHeight, setKeyboardHeight] = useState<number>(0);
@@ -449,43 +483,78 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
 
   const handleSplitRemainingEqually = () => {
     if (numAmount <= 0) return;
-    const remainingForFriends = Math.max(0, numAmount - (parseFloat(yourShare) || 0));
+    const currentMyShare = parseFloat(yourShare) || 0;
+    const remainingCents = Math.max(0, Math.round(numAmount * 100) - Math.round(currentMyShare * 100));
     const activeFriends = splitFriends.length;
     if (activeFriends === 0) return;
-    const base = Math.floor(remainingForFriends / activeFriends);
-    const remainder = remainingForFriends % activeFriends;
-    setSplitFriends(splitFriends.map((f, i) => ({ ...f, amount: (base + (i < remainder ? 1 : 0)).toString() })));
+
+    const baseCents = Math.floor(remainingCents / activeFriends);
+    const remainderCents = remainingCents % activeFriends;
+
+    setSplitFriends(
+      splitFriends.map((f, i) => {
+        const friendCents = baseCents + (i < remainderCents ? 1 : 0);
+        const friendVal = friendCents / 100;
+        return {
+          ...f,
+          amount: friendVal % 1 === 0 ? friendVal.toString() : friendVal.toFixed(2),
+        };
+      })
+    );
     Haptics.selectionAsync().catch(() => {});
   };
 
   const handleSplitAllEqually = () => {
     if (numAmount <= 0) return;
     const totalPeople = 1 + splitFriends.length;
-    const base = Math.floor(numAmount / totalPeople);
-    const remainder = numAmount % totalPeople;
-    setYourShare((base + (remainder > 0 ? 1 : 0)).toString());
-    setSplitFriends(splitFriends.map((f, i) => ({
-      ...f,
-      amount: (base + (i + 1 < remainder ? 1 : 0)).toString(),
-    })));
+    const totalCents = Math.round(numAmount * 100);
+    const baseCents = Math.floor(totalCents / totalPeople);
+    const remainderCents = totalCents % totalPeople;
+
+    const myShareCents = baseCents + (remainderCents > 0 ? 1 : 0);
+    const myShareVal = myShareCents / 100;
+    setYourShare(myShareVal % 1 === 0 ? myShareVal.toString() : myShareVal.toFixed(2));
+
+    setSplitFriends(
+      splitFriends.map((f, i) => {
+        const friendCents = baseCents + (i + 1 < remainderCents ? 1 : 0);
+        const friendVal = friendCents / 100;
+        return {
+          ...f,
+          amount: friendVal % 1 === 0 ? friendVal.toString() : friendVal.toFixed(2),
+        };
+      })
+    );
     Haptics.selectionAsync().catch(() => {});
   };
 
   const handleTheyOweAll = () => {
     if (numAmount <= 0 || splitFriends.length === 0) return;
     setYourShare('0');
-    const base = Math.floor(numAmount / splitFriends.length);
-    const remainder = numAmount % splitFriends.length;
-    setSplitFriends(splitFriends.map((f, i) => ({
-      ...f,
-      amount: (base + (i < remainder ? 1 : 0)).toString(),
-    })));
+    const totalPeople = splitFriends.length;
+    const totalCents = Math.round(numAmount * 100);
+    const baseCents = Math.floor(totalCents / totalPeople);
+    const remainderCents = totalCents % totalPeople;
+
+    setSplitFriends(
+      splitFriends.map((f, i) => {
+        const friendCents = baseCents + (i < remainderCents ? 1 : 0);
+        const friendVal = friendCents / 100;
+        return {
+          ...f,
+          amount: friendVal % 1 === 0 ? friendVal.toString() : friendVal.toFixed(2),
+        };
+      })
+    );
     Haptics.selectionAsync().catch(() => {});
   };
 
   const handleAutoBalanceMyShare = () => {
-    const friendsSum = splitFriends.reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0);
-    setYourShare(Math.max(0, numAmount - friendsSum).toString());
+    const friendsSumCents = splitFriends.reduce((sum, f) => sum + Math.round((parseFloat(f.amount) || 0) * 100), 0);
+    const totalCents = Math.round(numAmount * 100);
+    const myShareCents = Math.max(0, totalCents - friendsSumCents);
+    const myShareVal = myShareCents / 100;
+    setYourShare(myShareVal % 1 === 0 ? myShareVal.toString() : myShareVal.toFixed(2));
     Haptics.selectionAsync().catch(() => {});
   };
 
@@ -671,14 +740,21 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
       return;
     }
 
-    if (tabMode === 'transfer' && selectedAccountId === toAccountId) {
-      Alert.alert('Transfer Error', 'Please select two different accounts for the transfer.');
-      return;
+    if (tabMode === 'transfer') {
+      if (!selectedAccountId || !toAccountId) {
+        Alert.alert('Incomplete Transfer', 'Please select both source (From) and destination (To) accounts.');
+        return;
+      }
+      if (selectedAccountId === toAccountId) {
+        Alert.alert('Transfer Error', 'Please select two different accounts for the transfer.');
+        return;
+      }
     }
 
     const selectedFolderObj = eventFolders.find((f) => f.id === selectedFolderId);
     const finalTag = selectedFolderObj?.name || (customTagInput.trim() ? customTagInput.trim() : selectedTag);
-    const finalNote = merchant.trim() ? `${merchant.trim()}${note.trim() ? ` - ${note.trim()}` : ''}` : note.trim();
+    const finalMerchant = merchant.trim();
+    const finalNote = note.trim();
 
     if (tabMode === 'transfer') {
       if (initialTransaction) {
@@ -689,7 +765,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
           accountId: selectedAccountId,
           toAccountId: toAccountId,
           date: format(txDate, 'yyyy-MM-dd'),
-          note: finalNote || 'Account Transfer',
+          merchant: finalMerchant || undefined,
+          note: finalNote || (finalMerchant ? undefined : 'Account Transfer'),
           tag: finalTag || undefined,
         });
       } else {
@@ -700,7 +777,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
           accountId: selectedAccountId,
           toAccountId: toAccountId,
           date: format(txDate, 'yyyy-MM-dd'),
-          note: finalNote || 'Account Transfer',
+          merchant: finalMerchant || undefined,
+          note: finalNote || (finalMerchant ? undefined : 'Account Transfer'),
           tag: finalTag || undefined,
         });
       }
@@ -713,6 +791,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
           accountId: selectedAccountId,
           date: format(txDate, 'yyyy-MM-dd'),
           borrowerOrLender: debtPerson.trim() || undefined,
+          merchant: debtPerson.trim() || undefined,
           note: finalNote || (debtType === 'lend' ? `Lent to ${debtPerson || 'Friend'}` : `Borrowed from ${debtPerson || 'Friend'}`),
           tag: finalTag || undefined,
         });
@@ -724,6 +803,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
           accountId: selectedAccountId,
           date: format(txDate, 'yyyy-MM-dd'),
           borrowerOrLender: debtPerson.trim() || undefined,
+          merchant: debtPerson.trim() || undefined,
           note: finalNote || (debtType === 'lend' ? `Lent to ${debtPerson || 'Friend'}` : `Borrowed from ${debtPerson || 'Friend'}`),
           tag: finalTag || undefined,
         });
@@ -737,28 +817,38 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
       let linkedSubscriptionId: string | undefined = initialTransaction?.subscriptionId;
 
       if (isSubscriptionExpense) {
-        const trimmedName = merchant.trim() || selectedCatObj?.name || 'Subscription';
+        const trimmedName = finalMerchant || finalNote || selectedCatObj?.name || 'Subscription';
         const matchedSub = subscriptions.find(
-          (s) => s.name.trim().toLowerCase() === trimmedName.toLowerCase()
+          (s) =>
+            (initialTransaction?.subscriptionId && s.id === initialTransaction.subscriptionId) ||
+            s.name.trim().toLowerCase() === trimmedName.toLowerCase()
         );
+
+        const effectiveSubShare = isSplitEnabled ? numYourShare : undefined;
 
         if (matchedSub) {
           linkedSubscriptionId = matchedSub.id;
           await updateSubscription(matchedSub.id, {
+            name: trimmedName,
             price: numAmount,
             paymentMethod: fromAccObj?.name || matchedSub.paymentMethod,
             billingCycle: matchedSub.billingCycle || billingCycle,
             nextBillingDate: format(nextBillDate, 'yyyy-MM-dd'),
+            splitEnabled: isSplitEnabled,
+            splitType: isSplitEnabled ? 'share' : undefined,
+            splitValue: effectiveSubShare,
           }).catch(() => {});
 
-          await db.createTransaction({
-            id: `${matchedSub.id}-tx-${Date.now()}`,
-            subscriptionId: matchedSub.id,
-            amount: numAmount,
-            currency: matchedSub.currency || 'INR',
-            date: format(txDate, 'yyyy-MM-dd'),
-          }).catch(() => {});
-        } else if (!initialTransaction) {
+          if (!initialTransaction) {
+            await db.createTransaction({
+              id: `${matchedSub.id}-tx-${Date.now()}`,
+              subscriptionId: matchedSub.id,
+              amount: isSplitEnabled ? numYourShare : numAmount,
+              currency: matchedSub.currency || 'INR',
+              date: format(txDate, 'yyyy-MM-dd'),
+            }).catch(() => {});
+          }
+        } else {
           const cat = categories.find((c) => c.id === selectedCategoryId);
           const newSub = await addSubscription({
             name: trimmedName,
@@ -772,13 +862,16 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             reminderEnabled: false,
             reminderDays: 1,
             isTrial: false,
+            splitEnabled: isSplitEnabled,
+            splitType: isSplitEnabled ? 'share' : undefined,
+            splitValue: effectiveSubShare,
           });
           linkedSubscriptionId = newSub.id;
 
           await db.createTransaction({
             id: `${newSub.id}-tx-${Date.now()}`,
             subscriptionId: newSub.id,
-            amount: numAmount,
+            amount: isSplitEnabled ? numYourShare : numAmount,
             currency: 'INR',
             date: format(txDate, 'yyyy-MM-dd'),
           }).catch(() => {});
@@ -824,7 +917,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             folderId: selectedFolderId || undefined,
             folderName: selectedFolderObj?.name || undefined,
             date: format(txDate, 'yyyy-MM-dd'),
-            note: finalNote || `Split with ${friendNamesStr}`,
+            merchant: finalMerchant || `Split with ${friendNamesStr}`,
+            note: finalNote || undefined,
             tag: finalTag || undefined,
             split: splitData,
             subscriptionId: linkedSubscriptionId,
@@ -838,7 +932,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             folderId: selectedFolderId || undefined,
             folderName: selectedFolderObj?.name || undefined,
             date: format(txDate, 'yyyy-MM-dd'),
-            note: finalNote || `Split with ${friendNamesStr}`,
+            merchant: finalMerchant || `Split with ${friendNamesStr}`,
+            note: finalNote || undefined,
             tag: finalTag || undefined,
             split: splitData,
             subscriptionId: linkedSubscriptionId,
@@ -856,24 +951,29 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             folderId: selectedFolderId || undefined,
             folderName: selectedFolderObj?.name || undefined,
             date: format(txDate, 'yyyy-MM-dd'),
-            note: finalNote || undefined,
+            merchant: finalMerchant || undefined,
+            note: finalNote || (finalMerchant ? undefined : (selectedCatObj?.name || 'Expense')),
             tag: finalTag || undefined,
             split: undefined,
             subscriptionId: linkedSubscriptionId,
           });
         } else {
-          addTransaction({
+          const quickAddResult = createExpense({
             amount: numAmount,
-            type: 'expense',
             categoryId: selectedCategoryId,
             accountId: selectedAccountId,
             folderId: selectedFolderId || undefined,
             folderName: selectedFolderObj?.name || undefined,
             date: format(txDate, 'yyyy-MM-dd'),
-            note: finalNote || undefined,
+            merchant: finalMerchant || undefined,
+            note: finalNote || (finalMerchant ? undefined : (selectedCatObj?.name || 'Expense')),
             tag: finalTag || undefined,
             subscriptionId: linkedSubscriptionId,
           });
+          if (!quickAddResult.ok) {
+            Alert.alert('Could not save', quickAddResult.error);
+            return;
+          }
         }
       }
     } else if (tabMode === 'income') {
@@ -891,7 +991,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
           categoryId: finalIncomeCatId,
           accountId: effectiveAccId,
           date: format(txDate, 'yyyy-MM-dd'),
-          note: finalNote || 'Salary',
+          merchant: finalMerchant || undefined,
+          note: finalNote || (finalMerchant ? undefined : 'Income'),
           tag: finalTag || undefined,
         });
       } else {
@@ -901,7 +1002,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
           categoryId: finalIncomeCatId,
           accountId: effectiveAccId,
           date: format(txDate, 'yyyy-MM-dd'),
-          note: finalNote || 'Salary',
+          merchant: finalMerchant || undefined,
+          note: finalNote || (finalMerchant ? undefined : 'Income'),
           tag: finalTag || undefined,
         });
 
@@ -931,19 +1033,21 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
     onClose();
   };
 
-  const activeCategories = tabMode === 'income' ? INCOME_CATEGORIES : categories;
+  const userExpenseCategories = getUserCategories(categories);
+  const activeCategories = tabMode === 'income' ? INCOME_CATEGORIES : userExpenseCategories;
   const selectedCatObj = activeCategories.find((c) => c.id === selectedCategoryId) || null;
   const fromAccObj = accounts.find((a) => a.id === selectedAccountId) || null;
-  const toAccObj = accounts.find((a) => a.id === toAccountId) || accounts[1] || accounts[0];
+  const toAccObj = accounts.find((a) => a.id === toAccountId) || null;
   const isCreditCardPayment = toAccObj?.statusType === 'due' || toAccObj?.type === 'credit';
 
-  // Keep primary root menu compact (<= 6 items) so iOS UIKit always presents the popover DOWNWARDS
-  const topCategoryIds = ['cat_food', 'cat_shop', 'cat_trans', 'cat_cig', 'cat_subs', 'cat_util'];
-  const primaryCategories = categories.filter((c) =>
-    topCategoryIds.includes(c.id) || c.id === selectedCategoryId
-  );
-  const otherCategories = categories.filter((c) =>
-    !primaryCategories.some((p) => p.id === c.id)
+  // Keep primary root menu compact (<= 6 items) so iOS UIKit always presents the popover DOWNWARDS, preserving user's configured order
+  const primaryCategories = userExpenseCategories.slice(0, 6);
+  if (selectedCategoryId && !primaryCategories.some((c) => c.id === selectedCategoryId)) {
+    const selObj = userExpenseCategories.find((c) => c.id === selectedCategoryId);
+    if (selObj) primaryCategories.push(selObj);
+  }
+  const otherCategories = userExpenseCategories.filter(
+    (c) => !primaryCategories.some((p) => p.id === c.id)
   );
 
   const categoryActions = tabMode === 'income'
@@ -987,10 +1091,18 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
           : []),
       ];
 
+  const getAccountMenuSubtitle = (acc: ExpenseAccount) => {
+    if (acc.type === 'credit') {
+      const due = acc.dueAmount || 0;
+      return due > 0 ? `Due: ${sym}${due.toLocaleString('en-IN')}` : 'No Due';
+    }
+    return `Bal: ${sym}${acc.balance.toLocaleString('en-IN')}`;
+  };
+
   const accountActions: MenuAction[] = [
     ...accounts.map((acc) => ({
       id: acc.id,
-      title: `${acc.name} (${acc.statusType === 'due' ? `Due: ${sym}${acc.dueAmount || 0}` : `Bal: ${sym}${acc.balance}`})`,
+      title: `${acc.name} (${getAccountMenuSubtitle(acc)})`,
       image: getAccountSfSymbol(acc.name) as any,
       state: (selectedAccountId === acc.id ? 'on' : 'off') as 'on' | 'off',
     })),
@@ -1004,7 +1116,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   const fromAccountActions: MenuAction[] = [
     ...accounts.map((acc) => ({
       id: acc.id,
-      title: `${acc.name} (${acc.statusType === 'due' ? `Due: ${sym}${acc.dueAmount || 0}` : `Bal: ${sym}${acc.balance}`})`,
+      title: `${acc.name} (${getAccountMenuSubtitle(acc)})`,
       image: getAccountSfSymbol(acc.name) as any,
       state: (selectedAccountId === acc.id ? 'on' : 'off') as 'on' | 'off',
       attributes: toAccountId === acc.id ? { disabled: true } : undefined,
@@ -1019,7 +1131,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   const toAccountActions: MenuAction[] = [
     ...accounts.map((acc) => ({
       id: acc.id,
-      title: `${acc.name} (${acc.statusType === 'due' ? `Due: ${sym}${acc.dueAmount || 0}` : `Bal: ${sym}${acc.balance}`})`,
+      title: `${acc.name} (${getAccountMenuSubtitle(acc)})`,
       image: getAccountSfSymbol(acc.name) as any,
       state: (toAccountId === acc.id ? 'on' : 'off') as 'on' | 'off',
       attributes: selectedAccountId === acc.id ? { disabled: true } : undefined,
@@ -1071,12 +1183,14 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 0}
-        style={styles.container}
+        style={[styles.container, { paddingTop: androidTopPadding }]}
       >
         {/* iOS Drag Handle */}
-        <View style={styles.dragHandleContainer}>
-          <View style={styles.dragHandle} />
-        </View>
+        {Platform.OS === 'ios' && (
+          <View style={styles.dragHandleContainer}>
+            <View style={styles.dragHandle} />
+          </View>
+        )}
 
         {/* Header */}
         <View style={styles.header}>
@@ -1239,25 +1353,32 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                       setSelectedAccountId(accId);
                     }
                   }}
-                  style={{ flex: 1 }}
+                  style={{ flex: 1, minWidth: 0, alignSelf: 'stretch' }}
                 >
                   <View style={styles.transferSelectBox}>
                     <AppText style={styles.transferBoxLabel}>FROM (DEBIT)</AppText>
                     <View style={styles.transferBoxContent}>
                       <View style={styles.transferBoxIconWrap}>
-                        {getAccountIcon(fromAccObj?.name || '')}
+                        {fromAccObj ? getAccountIcon(fromAccObj.name) : <Building2 size={13} color="#7E8394" />}
                       </View>
-                      <AppText style={styles.transferBoxAccountName} numberOfLines={1}>
-                        {fromAccObj?.name.toUpperCase()}
+                      <AppText
+                        style={[
+                          styles.transferBoxAccountName,
+                          !fromAccObj && styles.transferBoxPlaceholder,
+                        ]}
+                        numberOfLines={1}
+                        ellipsizeMode="tail"
+                      >
+                        {fromAccObj ? fromAccObj.name.toUpperCase() : 'SELECT'}
                       </AppText>
-                      <ChevronDown size={14} color="#A0A5B5" />
+                      <ChevronDown size={14} color="#A0A5B5" style={{ flexShrink: 0, marginLeft: 2 }} />
                     </View>
                   </View>
                 </NativeLiquidMenu>
 
                 {/* ARROW */}
                 <View style={styles.transferArrowWrap}>
-                  <ArrowRight size={20} color="#9DC6EB" />
+                  <ArrowRight size={18} color="#9DC6EB" />
                 </View>
 
                 {/* TO ACCOUNT */}
@@ -1272,7 +1393,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                       setToAccountId(accId);
                     }
                   }}
-                  style={{ flex: 1 }}
+                  style={{ flex: 1, minWidth: 0, alignSelf: 'stretch' }}
                 >
                   <View
                     style={[
@@ -1283,12 +1404,19 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                     <AppText style={styles.transferBoxLabel}>TO (CREDIT)</AppText>
                     <View style={styles.transferBoxContent}>
                       <View style={styles.transferBoxIconWrap}>
-                        {getAccountIcon(toAccObj?.name || '')}
+                        {toAccObj ? getAccountIcon(toAccObj.name) : <Building2 size={13} color="#7E8394" />}
                       </View>
-                      <AppText style={styles.transferBoxAccountName} numberOfLines={1}>
-                        {toAccObj?.name.toUpperCase()}
+                      <AppText
+                        style={[
+                          styles.transferBoxAccountName,
+                          !toAccObj && styles.transferBoxPlaceholder,
+                        ]}
+                        numberOfLines={1}
+                        ellipsizeMode="tail"
+                      >
+                        {toAccObj ? toAccObj.name.toUpperCase() : 'SELECT'}
                       </AppText>
-                      <ChevronDown size={14} color="#A0A5B5" />
+                      <ChevronDown size={14} color="#A0A5B5" style={{ flexShrink: 0, marginLeft: 2 }} />
                     </View>
                   </View>
                 </NativeLiquidMenu>
@@ -1296,9 +1424,11 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
 
               <View style={styles.transferHeroFooter}>
                 <AppText style={styles.transferExplainText}>
-                  {isCreditCardPayment
-                    ? `💳 Pays credit card bill of ${toAccObj?.name}, reducing due balance without inflating monthly expense budget.`
-                    : `💸 Moves funds from ${fromAccObj?.name} directly into ${toAccObj?.name}.`}
+                  {fromAccObj && toAccObj
+                    ? isCreditCardPayment
+                      ? `💳 Pays credit card bill of ${toAccObj.name}, reducing due balance without inflating monthly expense budget.`
+                      : `💸 Moves funds from ${fromAccObj.name} directly into ${toAccObj.name}.`
+                    : 'Select source and destination accounts to execute an instant transfer.'}
                 </AppText>
               </View>
             </View>
@@ -1431,7 +1561,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                       setIsSubscription(isSubCat);
                     }
                   }}
-                  style={{ width: '100%' }}
+                  style={{ alignSelf: 'stretch' }}
                 >
                   <View style={styles.dropdownTrigger}>
                     <View style={styles.dropdownTriggerLeft}>
@@ -1476,7 +1606,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                       setSelectedAccountId(accId);
                     }
                   }}
-                  style={{ width: '100%' }}
+                  style={{ alignSelf: 'stretch' }}
                 >
                   <View style={styles.dropdownTrigger}>
                     <View style={styles.dropdownTriggerLeft}>
@@ -1491,7 +1621,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                         </AppText>
                         {fromAccObj && (
                           <AppText style={styles.dropdownTriggerSub} numberOfLines={1}>
-                            {fromAccObj.statusType === 'due' ? `Due:${sym}${fromAccObj.dueAmount || 0}` : `Bal:${sym}${fromAccObj.balance}`}
+                            {getAccountMenuSubtitle(fromAccObj)}
                           </AppText>
                         )}
                       </View>
@@ -1518,7 +1648,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                     setSelectedAccountId(accId);
                   }
                 }}
-                style={{ width: '100%' }}
+                style={{ alignSelf: 'stretch' }}
               >
                 <View style={styles.dropdownTrigger}>
                   <View style={styles.dropdownTriggerLeft}>
@@ -1533,7 +1663,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                       </AppText>
                       {fromAccObj && (
                         <AppText style={styles.dropdownTriggerSub} numberOfLines={1}>
-                          {fromAccObj.statusType === 'due' ? `Due: ${sym}${fromAccObj.dueAmount || 0}` : `Bal: ${sym}${fromAccObj.balance}`}
+                          {getAccountMenuSubtitle(fromAccObj)}
                         </AppText>
                       )}
                     </View>
@@ -1543,6 +1673,81 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
               </NativeLiquidMenu>
             </View>
           ) : null}
+
+          {/* ── TRANSACTION DATE SELECTOR (Today / Yesterday / Calendar Picker) ── */}
+          <View style={styles.section}>
+            <AppText style={styles.label}>TRANSACTION DATE</AppText>
+            <View style={styles.dateSelectorRow}>
+              <TouchableOpacity
+                style={[
+                  styles.dateQuickChip,
+                  isToday(txDate) && styles.dateQuickChipActive,
+                ]}
+                onPress={() => {
+                  Haptics.selectionAsync().catch(() => {});
+                  setTxDate(new Date());
+                }}
+                activeOpacity={0.7}
+              >
+                <AppText
+                  style={[
+                    styles.dateQuickChipText,
+                    isToday(txDate) && styles.dateQuickChipTextActive,
+                  ]}
+                >
+                  Today
+                </AppText>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.dateQuickChip,
+                  isYesterday(txDate) && styles.dateQuickChipActive,
+                ]}
+                onPress={() => {
+                  Haptics.selectionAsync().catch(() => {});
+                  setTxDate(subDays(new Date(), 1));
+                }}
+                activeOpacity={0.7}
+              >
+                <AppText
+                  style={[
+                    styles.dateQuickChipText,
+                    isYesterday(txDate) && styles.dateQuickChipTextActive,
+                  ]}
+                >
+                  Yesterday
+                </AppText>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.datePickerTriggerBtn,
+                  !isToday(txDate) && !isYesterday(txDate) && styles.datePickerTriggerBtnActive,
+                ]}
+                onPress={() => {
+                  Haptics.selectionAsync().catch(() => {});
+                  setShowTxDatePicker(true);
+                }}
+                activeOpacity={0.7}
+              >
+                <CalendarIcon
+                  size={14}
+                  color={!isToday(txDate) && !isYesterday(txDate) ? '#FF9D66' : '#A0A5B5'}
+                />
+                <AppText
+                  style={[
+                    styles.datePickerTriggerText,
+                    !isToday(txDate) && !isYesterday(txDate) && styles.datePickerTriggerTextActive,
+                  ]}
+                  numberOfLines={1}
+                >
+                  {format(txDate, 'dd MMM yyyy')}
+                </AppText>
+                <ChevronDown size={14} color="#7E8394" />
+              </TouchableOpacity>
+            </View>
+          </View>
 
           {/* ── EVENT / TRIP FOLDER SELECTOR (Only in Expense Mode, Hidden in Debt Mode) ── */}
           {tabMode === 'expense' && (
@@ -1559,7 +1764,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                     setSelectedFolderId(folderId);
                   }
                 }}
-                style={{ width: '100%' }}
+                style={{ alignSelf: 'stretch' }}
               >
                 <View style={styles.dropdownTrigger}>
                   <View style={styles.dropdownTriggerLeft}>
@@ -2085,7 +2290,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
 
               <AppText style={[styles.modalFieldLabel, { marginTop: 12 }]}>CATEGORY</AppText>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, marginVertical: 6 }}>
-                {categories.map((c) => (
+                {getUserCategories(categories).map((c) => (
                   <TouchableOpacity
                     key={c.id}
                     onPress={() => setNewPresetCatId(c.id)}
@@ -2809,9 +3014,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   transferHeroHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 3,
   },
   transferHeroTitle: {
     color: '#FF9D66',
@@ -2827,15 +3030,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 8,
+    gap: 6,
+    alignSelf: 'stretch',
+    width: '100%',
   },
   transferSelectBox: {
     flex: 1,
+    minWidth: 0,
     backgroundColor: '#232633',
     borderRadius: 14,
     padding: 10,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
+    justifyContent: 'center',
+    overflow: 'hidden',
   },
   creditCardSelectBox: {
     borderColor: 'rgba(231, 76, 60, 0.4)',
@@ -2851,6 +3059,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    minWidth: 0,
+    width: '100%',
   },
   transferBoxIconWrap: {
     width: 22,
@@ -2860,20 +3070,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 6,
+    flexShrink: 0,
   },
   transferBoxAccountName: {
     color: '#FFFFFF',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '800',
     flex: 1,
+    minWidth: 0,
+    flexShrink: 1,
+  },
+  transferBoxPlaceholder: {
+    color: '#7E8394',
+    fontWeight: '600',
   },
   transferArrowWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: 'rgba(255, 157, 102, 0.15)',
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
+    marginHorizontal: 2,
   },
   transferHeroFooter: {
     borderTopWidth: 1,
@@ -2889,6 +3108,7 @@ const styles = StyleSheet.create({
   // ── Sections & Inputs ──
   section: {
     gap: 8,
+    alignSelf: 'stretch',
   },
   label: {
     color: '#8E919D',
@@ -2925,6 +3145,8 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.07)',
+    textAlignVertical: 'center',
+    includeFontPadding: false,
   },
 
   // ── Native Side-by-Side Dropdown Controls (Apple Liquid UI) ──
@@ -2932,6 +3154,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 12,
+    alignSelf: 'stretch',
   },
   dropdownColumn: {
     flex: 1,
@@ -2949,6 +3172,8 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.08)',
     height: 54,
     minHeight: 54,
+    width: '100%',
+    alignSelf: 'stretch',
   },
   dropdownTriggerActive: {
     borderColor: '#FF9D66',
@@ -2980,6 +3205,61 @@ const styles = StyleSheet.create({
     fontSize: 9.5,
     fontWeight: '600',
     marginTop: 1,
+  },
+
+  // ── Transaction Date Selector Styles ──
+  dateSelectorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  dateQuickChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#1A1D23',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dateQuickChipActive: {
+    backgroundColor: 'rgba(255, 157, 102, 0.15)',
+    borderColor: '#FF9D66',
+  },
+  dateQuickChipText: {
+    color: '#A0A5B5',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  dateQuickChipTextActive: {
+    color: '#FF9D66',
+  },
+  datePickerTriggerBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#1A1D23',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    gap: 6,
+  },
+  datePickerTriggerBtnActive: {
+    backgroundColor: 'rgba(255, 157, 102, 0.15)',
+    borderColor: '#FF9D66',
+  },
+  datePickerTriggerText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+    flex: 1,
+  },
+  datePickerTriggerTextActive: {
+    color: '#FF9D66',
   },
   noAccountWarningCard: {
     flexDirection: 'row',

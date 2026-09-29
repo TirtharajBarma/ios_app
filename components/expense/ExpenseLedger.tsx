@@ -17,7 +17,8 @@ import {
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter, useFocusEffect, useScrollToTop } from 'expo-router';
+import { handleTabFocus } from '@/services/navigation/tabTracker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ArrowRightLeft,
@@ -37,12 +38,15 @@ import {
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
-import { MenuAction } from '@expo/ui/community/menu';
 import { AppText, NativeLiquidMenu } from '@/components/ui';
-import { useExpenseStore } from '@/store/useExpenseStore';
+import type { MenuAction } from '@/components/ui';
+import { useExpenseStore, compareTransactions, getUserCategories } from '@/store/useExpenseStore';
+import { useShallow } from 'zustand/react/shallow';
 import { expenseColors } from '@/constants/expenseColors';
 import { ExpenseTransaction, ExpenseCategory } from '@/types/expense';
+import { formatMoney } from '@/utils/currency';
 import { CategoryIcon } from './CategoryIcon';
+import { AccountIcon } from './AccountIcon';
 import { AddTransactionModal, INCOME_CATEGORIES } from './AddTransactionModal';
 import { SplitDetailsModal } from './SplitDetailsModal';
 import { getDeviceAiEngineInfo } from '@/services/onDeviceAi';
@@ -71,25 +75,48 @@ export const ExpenseLedger: React.FC = () => {
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
   const {
-    accounts,
-    categories,
-    transactions,
-    eventFolders,
-    activeAccountFilter,
-    smartSearchQuery,
-    selectedTransactionIds,
-    currencySymbol,
-    formatAmount,
-    setActiveAccountFilter,
-    setSmartSearchQuery,
-    getFilteredTransactions,
-    getSmartSearchResult,
-    toggleSelectTransaction,
-    clearSelectedTransactions,
-    removeTransactions,
-    updateTransactionsCategory,
-    settleTransaction,
-  } = useExpenseStore();
+  accounts,
+  categories,
+  transactions,
+  eventFolders,
+  activeAccountFilter,
+  smartSearchQuery,
+  selectedTransactionIds,
+  currencySymbol,
+  formatAmount,
+  setActiveAccountFilter,
+  setSmartSearchQuery,
+  getFilteredTransactions,
+  getSmartSearchResult,
+  toggleSelectTransaction,
+  clearSelectedTransactions,
+  deleteEventFolder,
+  removeTransactions,
+  updateTransactionsCategory,
+  settleTransaction,
+} = useExpenseStore(
+  useShallow((s) => ({
+    accounts: s.accounts,
+    categories: s.categories,
+    transactions: s.transactions,
+    eventFolders: s.eventFolders,
+    activeAccountFilter: s.activeAccountFilter,
+    smartSearchQuery: s.smartSearchQuery,
+    selectedTransactionIds: s.selectedTransactionIds,
+    currencySymbol: s.currencySymbol,
+    formatAmount: s.formatAmount,
+    setActiveAccountFilter: s.setActiveAccountFilter,
+    setSmartSearchQuery: s.setSmartSearchQuery,
+    getFilteredTransactions: s.getFilteredTransactions,
+    getSmartSearchResult: s.getSmartSearchResult,
+    toggleSelectTransaction: s.toggleSelectTransaction,
+    clearSelectedTransactions: s.clearSelectedTransactions,
+    deleteEventFolder: s.deleteEventFolder,
+    removeTransactions: s.removeTransactions,
+    updateTransactionsCategory: s.updateTransactionsCategory,
+    settleTransaction: s.settleTransaction,
+  }))
+);
 
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('All');
@@ -98,21 +125,49 @@ export const ExpenseLedger: React.FC = () => {
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const searchInputRef = useRef<TextInput>(null);
+  const accountFilterScrollRef = useRef<ScrollView>(null);
 
   const sym = currencySymbol || '₹';
+
+  const accountFilterList = useMemo(() => ['All', ...accounts.map((a) => a.name)], [accounts]);
+
+  const accountTxCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    counts['All'] = transactions.length;
+
+    accounts.forEach((acc) => {
+      const accNameLower = (acc.name || '').trim().toLowerCase();
+      const count = transactions.filter((t) => {
+        const txAccNameLower = (t.accountName || '').trim().toLowerCase();
+        const txToAccNameLower = (t.toAccountName || '').trim().toLowerCase();
+        return (
+          t.accountId === acc.id ||
+          t.toAccountId === acc.id ||
+          (accNameLower && (txAccNameLower === accNameLower || txToAccNameLower === accNameLower)) ||
+          t.accountId === acc.name
+        );
+      }).length;
+      counts[acc.name] = count;
+      counts[acc.id] = count;
+    });
+
+    return counts;
+  }, [accounts, transactions]);
 
   const animHeader = useRef(new Animated.Value(1)).current;
   const animSearch = useRef(new Animated.Value(1)).current;
   const animFilters = useRef(new Animated.Value(1)).current;
   const animList = useRef(new Animated.Value(1)).current;
 
-  // Reset scroll to top on tab focus
+  // Standard HIG tap active tab to scroll to top
+  useScrollToTop(scrollRef);
+
+  // Reset scroll to top ONLY when actively switching tabs from another tab
   useFocusEffect(
     useCallback(() => {
-      const rafId = requestAnimationFrame(() => {
+      handleTabFocus('ledger', () => {
         scrollRef.current?.scrollTo({ y: 0, animated: false });
       });
-      return () => cancelAnimationFrame(rafId);
     }, [])
   );
 
@@ -123,6 +178,20 @@ export const ExpenseLedger: React.FC = () => {
     }, 4000);
     return () => clearInterval(timer);
   }, []);
+
+  // Scroll active account filter into view when selected
+  useEffect(() => {
+    if (activeAccountFilter && activeAccountFilter !== 'All') {
+      const idx = accountFilterList.findIndex(
+        (n) => n.toLowerCase() === activeAccountFilter.toLowerCase()
+      );
+      if (idx > 0) {
+        accountFilterScrollRef.current?.scrollTo({ x: Math.max(0, (idx - 1) * 90), animated: true });
+      }
+    } else {
+      accountFilterScrollRef.current?.scrollTo({ x: 0, animated: true });
+    }
+  }, [activeAccountFilter, accountFilterList]);
 
   const handleToggleSelectMode = () => {
     Haptics.selectionAsync().catch(() => {});
@@ -137,8 +206,7 @@ export const ExpenseLedger: React.FC = () => {
 
   // Category Actions for Batch Categorization
   const categoryMenuActions: MenuAction[] = useMemo(() => {
-    return categories
-      .filter((c) => c.id !== 'cat_income')
+    return getUserCategories(categories)
       .map((c) => ({
         id: c.id,
         title: c.name,
@@ -177,14 +245,22 @@ export const ExpenseLedger: React.FC = () => {
           amount: tx.amount,
           tx,
         });
-      } else if (tx.split && !tx.split.settled && (tx.split.friendsShare || 0) > 0) {
-        list.push({
-          id: tx.id,
-          title: tx.note || 'Split Bill',
-          borrower: tx.split.friendNames || 'Friends',
-          amount: tx.split.friendsShare,
-          tx,
-        });
+      } else if (tx.split && !tx.split.settled) {
+        let pendingAmt = 0;
+        if (tx.split.friends && tx.split.friends.length > 0) {
+          pendingAmt = tx.split.friends.filter((f) => !f.settled).reduce((s, f) => s + f.amount, 0);
+        } else {
+          pendingAmt = tx.split.friendsShare || 0;
+        }
+        if (pendingAmt > 0) {
+          list.push({
+            id: tx.id,
+            title: tx.note || 'Split Bill',
+            borrower: tx.split.friendNames || 'Friends',
+            amount: pendingAmt,
+            tx,
+          });
+        }
       }
     });
     return list;
@@ -236,8 +312,7 @@ export const ExpenseLedger: React.FC = () => {
         image: 'tag.fill' as any,
         state: isAll ? 'on' : 'off',
       },
-      ...categories
-        .filter((c) => c.id !== 'cat_income')
+      ...getUserCategories(categories)
         .map((c) => ({
           id: c.id,
           title: c.name,
@@ -283,18 +358,9 @@ export const ExpenseLedger: React.FC = () => {
     );
   };
 
-  const accountFilterList = ['All', ...accounts.map((a) => a.name)];
-
-  // Sort All Transactions Strictly Reverse-Chronologically (Newest Date First)
+  // Sort All Transactions Strictly Reverse-Chronologically (Newest Date First, Newest Added First)
   const sortedFilteredTxs = useMemo(() => {
-    return [...filteredTxs].sort((a, b) => {
-      const timeA = new Date(a.date).getTime();
-      const timeB = new Date(b.date).getTime();
-      if (timeB !== timeA) {
-        return timeB - timeA;
-      }
-      return b.id.localeCompare(a.id);
-    });
+    return [...filteredTxs].sort(compareTransactions);
   }, [filteredTxs]);
 
   // Group All Transactions by Date and Folder with Guaranteed Descending Date Order
@@ -302,8 +368,13 @@ export const ExpenseLedger: React.FC = () => {
     const groupsMap = new Map<string, { dateHeading: string; items: LedgerGroupItem[] }>();
 
     sortedFilteredTxs.forEach((tx) => {
-      const dateKey = tx.date; // e.g. "2026-09-25"
-      const dateObj = new Date(tx.date);
+      const rawDate = tx.date || '';
+      const dateKey = rawDate.slice(0, 10);
+      const parts = dateKey.split('-').map(Number);
+      const dateObj = parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])
+        ? new Date(parts[0], parts[1] - 1, parts[2])
+        : new Date(rawDate);
+
       const dateHeading = dateObj
         .toLocaleDateString('en-US', {
           month: 'long',
@@ -403,6 +474,11 @@ export const ExpenseLedger: React.FC = () => {
 
     const txActions: MenuAction[] = [
       {
+        id: 'details',
+        title: 'View Details',
+        image: 'info.circle' as any,
+      },
+      {
         id: 'edit',
         title: 'Edit Transaction',
         image: 'pencil' as any,
@@ -451,7 +527,35 @@ export const ExpenseLedger: React.FC = () => {
       ? (splitIsAllSettled ? styles.rowSettledBg : styles.rowSplitBg)
       : null;
 
+    const isSplitReturn = cat.id === 'cat_split_return' || cat.name?.toLowerCase().includes('split recovery');
+    const isDebtRepayment = cat.id === 'cat_debt_repayment' || cat.name?.toLowerCase().includes('debt repayment');
+
     const { displayTitle, displayContext } = (() => {
+      // 1. Direct Debt Transactions (Lend / Borrow)
+      if (isDebtLend || isDebtBorrow) {
+        const person = (tx.merchant || tx.borrowerOrLender || 'Friend').trim();
+        const cleanNote = tx.note?.trim();
+        const isDefaultDebtNote =
+          !cleanNote ||
+          /^Lent to /i.test(cleanNote) ||
+          /^Borrowed from /i.test(cleanNote) ||
+          /^Recovered from /i.test(cleanNote) ||
+          /^Repaid to /i.test(cleanNote);
+
+        return {
+          displayTitle: (isDefaultDebtNote ? person : cleanNote).toUpperCase(),
+          displayContext: isDefaultDebtNote ? null : person.toUpperCase(),
+        };
+      }
+
+      // 2. Explicit Merchant field
+      if (tx.merchant && tx.merchant.trim()) {
+        return {
+          displayTitle: tx.merchant.trim().toUpperCase(),
+          displayContext: tx.note && tx.note.trim() ? tx.note.trim().toUpperCase() : null,
+        };
+      }
+
       if (!tx.note) {
         return {
           displayTitle: (isTransfer ? 'ACCOUNT TRANSFER' : cat.name).toUpperCase(),
@@ -460,12 +564,12 @@ export const ExpenseLedger: React.FC = () => {
       }
       const trimmed = tx.note.trim();
 
-      // Legacy verbose: "Received from Ravi (Split Share - Dinner at Barbeque Nation)"
-      const matchSplitWithReason = /^Received from (.+?)\s*\(\s*Split Share\s*-\s*(.+?)\s*\)$/i.exec(trimmed);
-      if (matchSplitWithReason) {
+      // Legacy hyphen separation: "Starbucks - Coffee with Alex"
+      if (trimmed.includes(' - ')) {
+        const parts = trimmed.split(' - ');
         return {
-          displayTitle: `FROM ${matchSplitWithReason[1].trim()}`.toUpperCase(),
-          displayContext: matchSplitWithReason[2].trim().toUpperCase(),
+          displayTitle: parts[0].trim().toUpperCase(),
+          displayContext: parts.slice(1).join(' - ').trim().toUpperCase() || null,
         };
       }
 
@@ -473,8 +577,17 @@ export const ExpenseLedger: React.FC = () => {
       const matchDotReason = /^From (.+?)\s*·\s*(.+)$/i.exec(trimmed);
       if (matchDotReason) {
         return {
-          displayTitle: `FROM ${matchDotReason[1].trim()}`.toUpperCase(),
+          displayTitle: matchDotReason[1].trim().toUpperCase(),
           displayContext: matchDotReason[2].trim().toUpperCase(),
+        };
+      }
+
+      // Legacy verbose: "Received from Ravi (Split Share - Dinner at Barbeque Nation)"
+      const matchSplitWithReason = /^Received from (.+?)\s*\(\s*Split Share\s*-\s*(.+?)\s*\)$/i.exec(trimmed);
+      if (matchSplitWithReason) {
+        return {
+          displayTitle: matchSplitWithReason[1].trim().toUpperCase(),
+          displayContext: matchSplitWithReason[2].trim().toUpperCase(),
         };
       }
 
@@ -482,16 +595,25 @@ export const ExpenseLedger: React.FC = () => {
       const matchSplitSimple = /^Received from (.+?)\s*\((?:Split Share|Settled)[^)]*\)$/i.exec(trimmed);
       if (matchSplitSimple) {
         return {
-          displayTitle: `FROM ${matchSplitSimple[1].trim()}`.toUpperCase(),
+          displayTitle: matchSplitSimple[1].trim().toUpperCase(),
           displayContext: null,
         };
       }
 
-      // Repaid: "Repaid to Ravi (Debt Cleared)"
-      const matchDebtCleared = /^Repaid to (.+?)\s*\(Debt Cleared\)$/i.exec(trimmed);
-      if (matchDebtCleared) {
+      // Repaid: "Repaid to Ravi (Debt Cleared)" or "Repaid to Ravi"
+      const matchRepaidTo = /^Repaid to (.+?)(?:\s*\(Debt Cleared\))?$/i.exec(trimmed);
+      if (matchRepaidTo) {
         return {
-          displayTitle: `REPAID TO ${matchDebtCleared[1].trim()}`.toUpperCase(),
+          displayTitle: matchRepaidTo[1].trim().toUpperCase(),
+          displayContext: null,
+        };
+      }
+
+      // "From Ravi"
+      const matchFromSimple = /^From (.+)$/i.exec(trimmed);
+      if (matchFromSimple && (isSplitReturn || isDebtRepayment || isSettled)) {
+        return {
+          displayTitle: matchFromSimple[1].trim().toUpperCase(),
           displayContext: null,
         };
       }
@@ -502,26 +624,8 @@ export const ExpenseLedger: React.FC = () => {
       };
     })();
 
-    const rowContent = (
-      <TouchableOpacity
-        style={[styles.transactionRow, !isLast && styles.rowDivider, rowBgStyle]}
-        activeOpacity={0.7}
-        onPress={() => {
-          if (isSelectMode) {
-            Haptics.selectionAsync().catch(() => {});
-            toggleSelectTransaction(tx.id);
-          } else if (isSplit) {
-            Haptics.selectionAsync().catch(() => {});
-            setSelectedSplitTx(tx);
-          }
-        }}
-        onLongPress={() => {
-          if (!isSelectMode) {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-            setEditingTx(tx);
-          }
-        }}
-      >
+    const rowInner = (
+      <>
         {/* Circular Checkbox in Select Mode (Exact reference style) */}
         {isSelectMode && (
           <TouchableOpacity
@@ -586,7 +690,7 @@ export const ExpenseLedger: React.FC = () => {
           <View style={styles.badgeRow}>
             {isTransfer ? (
               <View style={styles.transferFlowPill}>
-                <AppText style={styles.transferFlowText}>
+                <AppText style={styles.transferFlowText} numberOfLines={1} ellipsizeMode="tail">
                   {getAccountName(tx.accountId, tx.accountName).toUpperCase()} ➔ {getAccountName(tx.toAccountId, tx.toAccountName).toUpperCase()}
                 </AppText>
               </View>
@@ -602,9 +706,10 @@ export const ExpenseLedger: React.FC = () => {
                     styles.debtLentText,
                     isSettled && styles.settledPillText,
                   ]}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
                 >
-                  {isSettled ? 'RECOVERED FROM ' : 'LENT TO '}
-                  {(tx.borrowerOrLender || 'Friend').toUpperCase()}
+                  {isSettled ? 'LENT · SETTLED' : 'LENT'}
                 </AppText>
               </View>
             ) : isDebtBorrow ? (
@@ -619,14 +724,35 @@ export const ExpenseLedger: React.FC = () => {
                     styles.debtBorrowText,
                     isSettled && styles.settledPillText,
                   ]}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
                 >
-                  {isSettled ? 'REPAID TO ' : 'BORROWED FROM '}
-                  {(tx.borrowerOrLender || 'Friend').toUpperCase()}
+                  {isSettled ? 'BORROWED · SETTLED' : 'BORROWED'}
+                </AppText>
+              </View>
+            ) : isSplitReturn ? (
+              <View style={styles.splitReturnPill}>
+                <AppText style={styles.splitReturnPillText} numberOfLines={1} ellipsizeMode="tail">
+                  SPLIT RECOVERY
+                </AppText>
+              </View>
+            ) : isDebtRepayment ? (
+              <View style={tx.type === 'expense' ? styles.debtRepaidPill : styles.debtRecoveredPill}>
+                <AppText
+                  style={tx.type === 'expense' ? styles.debtRepaidPillText : styles.debtRecoveredPillText}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                >
+                  {tx.type === 'expense' ? 'DEBT REPAID' : 'DEBT RECOVERED'}
                 </AppText>
               </View>
             ) : (
               <View style={styles.categoryPill}>
-                <AppText style={[styles.categoryPillText, { color: cat.color || expenseColors.accentPeach }]}>
+                <AppText
+                  style={[styles.categoryPillText, { color: cat.color || expenseColors.accentPeach }]}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                >
                   {cat.name.toUpperCase()}
                 </AppText>
               </View>
@@ -635,22 +761,29 @@ export const ExpenseLedger: React.FC = () => {
             {/* Split Context Pill (e.g. DINNER / BARBEQUE NATION) */}
             {displayContext && (
               <View style={styles.splitContextPill}>
-                <AppText style={styles.splitContextPillText}>{displayContext}</AppText>
+                <AppText style={styles.splitContextPillText} numberOfLines={1} ellipsizeMode="tail">
+                  {displayContext}
+                </AppText>
               </View>
             )}
 
             {/* Event / Trip Tag Badge */}
             {tx.tag && (
               <View style={styles.tripTagBadge}>
-                <AppText style={styles.tripTagBadgeText}>{tx.tag.toUpperCase()}</AppText>
+                <AppText style={styles.tripTagBadgeText} numberOfLines={1} ellipsizeMode="tail">
+                  {tx.tag.toUpperCase()}
+                </AppText>
               </View>
             )}
 
             {/* Split Bill Badge */}
             {isSplit && (
               <View style={[styles.splitPill, splitIsAllSettled && styles.splitSettledPill]}>
-                <AppText style={[styles.splitPillText, splitIsAllSettled && styles.splitSettledPillText]}>
-                  {splitIsAllSettled ? 'SPLIT · SETTLED' : `SPLIT (${splitFriendsCount})`}
+                <AppText
+                  style={[styles.splitPillText, splitIsAllSettled && styles.splitSettledPillText]}
+                  numberOfLines={1}
+                >
+                  {splitIsAllSettled ? 'SPLIT · SETTLED' : 'SPLIT'}
                 </AppText>
               </View>
             )}
@@ -658,11 +791,11 @@ export const ExpenseLedger: React.FC = () => {
             {/* Statistical Anomaly / Outlier Badge */}
             {isOutlier && (
               <View style={styles.outlierBadge}>
-                <AppText style={styles.outlierBadgeText}>⚠️ HIGH</AppText>
+                <AppText style={styles.outlierBadgeText} numberOfLines={1}>
+                  ⚠️ HIGH
+                </AppText>
               </View>
             )}
-
-            <AppText style={styles.transactionDateText}>{formattedDate.toUpperCase()}</AppText>
           </View>
         </View>
 
@@ -677,24 +810,54 @@ export const ExpenseLedger: React.FC = () => {
               !isDebt && isIncome && styles.incomeAmount,
               isTransfer && styles.transferAmount,
             ]}
+            numberOfLines={1}
           >
             {amountDisplay}
           </AppText>
-          {isSplit && (
+          {isSplit ? (
             <View style={styles.splitSubAmtRow}>
-              <AppText style={styles.splitSubAmountText}>
-                {splitIsAllSettled ? 'All settled' : `My share: ${sym}${tx.split?.yourShare || 0}`}
+              <AppText style={styles.splitSubAmountText} numberOfLines={1} ellipsizeMode="tail">
+                {splitIsAllSettled ? 'Settled' : `Your: ${formatMoney(tx.split?.yourShare || 0, sym)}`}
               </AppText>
-              <ChevronRight size={11} color="#7E8394" />
+              <ChevronRight size={10} color="#7E8394" />
             </View>
+          ) : (
+            <AppText style={styles.accountSubText} numberOfLines={1} ellipsizeMode="tail">
+              {getAccountName(tx.accountId, tx.accountName).toUpperCase()}
+            </AppText>
           )}
         </View>
-      </TouchableOpacity>
+      </>
     );
 
     if (isSelectMode) {
-      return <React.Fragment key={tx.id}>{rowContent}</React.Fragment>;
+      return (
+        <TouchableOpacity
+          key={tx.id}
+          style={[styles.transactionRow, !isLast && styles.rowDivider, rowBgStyle]}
+          activeOpacity={0.7}
+          onPress={() => {
+            Haptics.selectionAsync().catch(() => {});
+            toggleSelectTransaction(tx.id);
+          }}
+        >
+          {rowInner}
+        </TouchableOpacity>
+      );
     }
+
+    const rowTouchable = (
+      <TouchableOpacity
+        style={[styles.transactionRow, !isLast && styles.rowDivider, rowBgStyle]}
+        activeOpacity={0.75}
+        onPress={() => {
+          Haptics.selectionAsync().catch(() => {});
+          router.push(`/transaction/${tx.id}`);
+        }}
+      >
+        {rowInner}
+      </TouchableOpacity>
+    );
 
     return (
       <NativeLiquidMenu
@@ -703,7 +866,10 @@ export const ExpenseLedger: React.FC = () => {
         actions={txActions}
         shouldOpenOnLongPress={true}
         onSelect={(actionId) => {
-          if (actionId === 'edit') {
+          if (actionId === 'details') {
+            Haptics.selectionAsync().catch(() => {});
+            router.push(`/transaction/${tx.id}`);
+          } else if (actionId === 'edit') {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
             setEditingTx(tx);
           } else if (actionId === 'copy') {
@@ -720,7 +886,7 @@ export const ExpenseLedger: React.FC = () => {
         }}
         style={{ width: '100%' }}
       >
-        {rowContent}
+        {rowTouchable}
       </NativeLiquidMenu>
     );
   };
@@ -733,23 +899,70 @@ export const ExpenseLedger: React.FC = () => {
     folderTotal: number,
     isLast: boolean
   ) => {
-    return (
-      <TouchableOpacity
-        key={folderKey}
-        style={[styles.folderRowContainer, !isLast && styles.rowDivider]}
-        activeOpacity={0.75}
-        onPress={() => {
-          Haptics.selectionAsync().catch(() => {});
-          router.push({
-            pathname: '/folder/[id]',
-            params: {
-              id: folderKey,
-              name: folderName,
-              emoji: folderEmoji,
-            },
-          });
-        }}
-      >
+    const isAllSelected = folderTxs.length > 0 && folderTxs.every((t) => selectedTransactionIds.includes(t.id));
+    const isSomeSelected = folderTxs.some((t) => selectedTransactionIds.includes(t.id));
+
+    const folderActions: MenuAction[] = [
+      {
+        id: 'details',
+        title: 'Open Folder',
+        image: 'folder.fill' as any,
+      },
+      {
+        id: 'copy',
+        title: 'Copy Summary',
+        image: 'doc.on.doc' as any,
+      },
+      {
+        id: 'select',
+        title: isAllSelected ? 'Deselect All Items' : 'Select All Items',
+        image: 'checkmark.circle' as any,
+      },
+      {
+        id: 'dissolve',
+        title: 'Dissolve Folder (Keep Items)',
+        image: 'folder.badge.minus' as any,
+      },
+      {
+        id: 'delete',
+        title: 'Delete Folder & All Items',
+        image: 'trash' as any,
+        attributes: { destructive: true },
+      },
+    ];
+
+    const folderRowInner = (
+      <>
+        {/* Selection Checkbox */}
+        {isSelectMode && (
+          <TouchableOpacity
+            style={styles.checkboxTouchTarget}
+            onPress={() => {
+              Haptics.selectionAsync().catch(() => {});
+              folderTxs.forEach((t) => {
+                if (isAllSelected) {
+                  if (selectedTransactionIds.includes(t.id)) {
+                    toggleSelectTransaction(t.id);
+                  }
+                } else {
+                  if (!selectedTransactionIds.includes(t.id)) {
+                    toggleSelectTransaction(t.id);
+                  }
+                }
+              });
+            }}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            {isAllSelected ? (
+              <View style={styles.radioSelected}>
+                <Check size={12} color="#0D0E12" strokeWidth={3.5} />
+              </View>
+            ) : (
+              <View style={styles.radioUnselected} />
+            )}
+          </TouchableOpacity>
+        )}
+
         {/* Folder Icon Circle */}
         <View style={styles.folderIconCircle}>
           <AppText style={{ fontSize: 16 }}>{folderEmoji || '📁'}</AppText>
@@ -766,7 +979,7 @@ export const ExpenseLedger: React.FC = () => {
             </View>
           </View>
           <AppText style={styles.folderSubText}>
-            {folderTxs.length} ITEM{folderTxs.length > 1 ? 'S' : ''} • TAP TO VIEW FOLDER
+            {folderTxs.length} ITEM{folderTxs.length !== 1 ? 'S' : ''} • TAP TO VIEW FOLDER
           </AppText>
         </View>
 
@@ -777,7 +990,96 @@ export const ExpenseLedger: React.FC = () => {
           </AppText>
           <ChevronRight size={15} color="#7E8394" />
         </View>
+      </>
+    );
+
+    if (isSelectMode) {
+      return (
+        <TouchableOpacity
+          key={folderKey}
+          style={[styles.folderRowContainer, !isLast && styles.rowDivider]}
+          activeOpacity={0.7}
+          onPress={() => {
+            Haptics.selectionAsync().catch(() => {});
+            folderTxs.forEach((t) => {
+              if (isAllSelected) {
+                if (selectedTransactionIds.includes(t.id)) {
+                  toggleSelectTransaction(t.id);
+                }
+              } else {
+                if (!selectedTransactionIds.includes(t.id)) {
+                  toggleSelectTransaction(t.id);
+                }
+              }
+            });
+          }}
+        >
+          {folderRowInner}
+        </TouchableOpacity>
+      );
+    }
+
+    const folderTouchable = (
+      <TouchableOpacity
+        style={[styles.folderRowContainer, !isLast && styles.rowDivider]}
+        activeOpacity={0.75}
+        onPress={() => {
+          Haptics.selectionAsync().catch(() => {});
+          router.push({
+            pathname: '/folder/[id]',
+            params: {
+              id: folderKey,
+              name: folderName,
+              emoji: folderEmoji,
+            },
+          });
+        }}
+      >
+        {folderRowInner}
       </TouchableOpacity>
+    );
+
+    return (
+      <NativeLiquidMenu
+        key={folderKey}
+        title={`${folderEmoji || '📁'} ${folderName.toUpperCase()}`}
+        actions={folderActions}
+        shouldOpenOnLongPress={true}
+        onSelect={(actionId) => {
+          if (actionId === 'details') {
+            Haptics.selectionAsync().catch(() => {});
+            router.push({
+              pathname: '/folder/[id]',
+              params: {
+                id: folderKey,
+                name: folderName,
+                emoji: folderEmoji,
+              },
+            });
+          } else if (actionId === 'copy') {
+            const copyText = `${folderEmoji || '📁'} ${folderName.toUpperCase()}: -${sym}${folderTotal.toLocaleString('en-IN')} (${folderTxs.length} items)`;
+            Clipboard.setStringAsync(copyText).catch(() => {});
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+          } else if (actionId === 'select') {
+            handleToggleSelectMode();
+            folderTxs.forEach((t) => {
+              if (!selectedTransactionIds.includes(t.id)) {
+                toggleSelectTransaction(t.id);
+              }
+            });
+          } else if (actionId === 'dissolve') {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+            deleteEventFolder(folderKey);
+          } else if (actionId === 'delete') {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+            removeTransactions(folderTxs.map((t) => t.id));
+            deleteEventFolder(folderKey);
+          }
+        }}
+        style={{ width: '100%' }}
+      >
+        {folderTouchable}
+      </NativeLiquidMenu>
     );
   };
 
@@ -948,6 +1250,7 @@ export const ExpenseLedger: React.FC = () => {
           }}
         >
           <ScrollView
+            ref={accountFilterScrollRef}
             horizontal
             showsHorizontalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
@@ -956,6 +1259,11 @@ export const ExpenseLedger: React.FC = () => {
           >
             {accountFilterList.map((filterName) => {
               const isActive = activeAccountFilter.toLowerCase() === filterName.toLowerCase();
+              const count = accountTxCounts[filterName] ?? 0;
+              const displayText = filterName === 'All'
+                ? `All (${transactions.length})`
+                : `${filterName} (${count})`;
+
               return (
                 <TouchableOpacity
                   key={filterName}
@@ -969,7 +1277,11 @@ export const ExpenseLedger: React.FC = () => {
                     setIsSearchFocused(false);
                     Haptics.selectionAsync().catch(() => {});
                     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                    setActiveAccountFilter(filterName);
+                    if (isActive && filterName !== 'All') {
+                      setActiveAccountFilter('All');
+                    } else {
+                      setActiveAccountFilter(filterName);
+                    }
                   }}
                 >
                   <AppText
@@ -978,7 +1290,7 @@ export const ExpenseLedger: React.FC = () => {
                       isActive ? styles.filterTextActive : styles.filterTextInactive,
                     ]}
                   >
-                    {filterName}
+                    {displayText}
                   </AppText>
                 </TouchableOpacity>
               );
@@ -986,90 +1298,100 @@ export const ExpenseLedger: React.FC = () => {
           </ScrollView>
         </Animated.View>
 
-        {/* Compact Category Filter Dropdown (Directly below horizontal account/card chips & above date-wise list) */}
+        {/* Compact Category Filter Dropdown & Pending Dues Shortcut */}
         <View style={styles.categoryFilterRow}>
-          <NativeLiquidMenu
-            title="Filter by Category"
-            actions={categoryFilterDropdownActions}
-            onSelect={(catId) => {
-              Haptics.selectionAsync().catch(() => {});
-              LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-              setSelectedCategoryFilter(catId);
-            }}
-          >
-            <View style={[styles.categoryFilterTrigger, selectedCategoryFilter !== 'All' && styles.categoryFilterTriggerActive]}>
-              <View style={styles.categoryFilterTriggerLeft}>
-                <Tag size={13} color={selectedCategoryFilter !== 'All' ? expenseColors.accentPeach : '#8E919D'} />
-                <AppText
-                  style={[
-                    styles.categoryFilterTriggerText,
-                    selectedCategoryFilter !== 'All' && styles.categoryFilterTriggerTextActive,
-                  ]}
-                  numberOfLines={1}
-                >
-                  {selectedCategoryFilter === 'All'
-                    ? 'All Categories'
-                    : getCategoryObj(selectedCategoryFilter)?.name || 'Category'}
-                </AppText>
-              </View>
-              <ChevronDown size={13} color={selectedCategoryFilter !== 'All' ? expenseColors.accentPeach : '#8E919D'} />
-            </View>
-          </NativeLiquidMenu>
-
-          {selectedCategoryFilter !== 'All' && (
-            <TouchableOpacity
-              style={styles.clearCategoryPill}
-              activeOpacity={0.7}
-              onPress={() => {
+          <View style={styles.categoryFilterLeftGroup}>
+            <NativeLiquidMenu
+              title="Filter by Category"
+              actions={categoryFilterDropdownActions}
+              onSelect={(catId) => {
                 Haptics.selectionAsync().catch(() => {});
                 LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                setSelectedCategoryFilter('All');
+                setSelectedCategoryFilter(catId);
+              }}
+              style={{ alignSelf: 'flex-start' }}
+            >
+              <View style={[styles.categoryFilterTrigger, selectedCategoryFilter !== 'All' && styles.categoryFilterTriggerActive]}>
+                <View style={styles.categoryFilterTriggerLeft}>
+                  <Tag size={13} color={selectedCategoryFilter !== 'All' ? expenseColors.accentPeach : '#8E919D'} />
+                  <AppText
+                    style={[
+                      styles.categoryFilterTriggerText,
+                      selectedCategoryFilter !== 'All' && styles.categoryFilterTriggerTextActive,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {selectedCategoryFilter === 'All'
+                      ? 'All Categories'
+                      : getCategoryObj(selectedCategoryFilter)?.name || 'Category'}
+                  </AppText>
+                </View>
+                <ChevronDown size={13} color={selectedCategoryFilter !== 'All' ? expenseColors.accentPeach : '#8E919D'} />
+              </View>
+            </NativeLiquidMenu>
+
+            {selectedCategoryFilter !== 'All' && (
+              <TouchableOpacity
+                style={styles.clearCategoryPill}
+                activeOpacity={0.7}
+                onPress={() => {
+                  Haptics.selectionAsync().catch(() => {});
+                  LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                  setSelectedCategoryFilter('All');
+                }}
+              >
+                <AppText style={styles.clearCategoryPillText}>Reset</AppText>
+                <X size={11} color="#FF9D66" />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Pending Dues / Debts Compact Shortcut Button on Right */}
+          {hasPendingDebts && !isSelectMode && (
+            <TouchableOpacity
+              style={styles.pendingDebtShortcutBtn}
+              activeOpacity={0.75}
+              onPress={() => {
+                Keyboard.dismiss();
+                setIsSearchFocused(false);
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                router.push('/receivables');
               }}
             >
-              <AppText style={styles.clearCategoryPillText}>Reset</AppText>
-              <X size={11} color="#FF9D66" />
+              <HandCoins size={12} color={expenseColors.accentPeach} />
+              <AppText style={styles.pendingDebtShortcutText}>
+                {pendingLentList.length + pendingBorrowList.length} Due
+              </AppText>
+              <ChevronRight size={11} color={expenseColors.accentPeach} />
             </TouchableOpacity>
           )}
         </View>
 
-        {/* Compact Debts & Receivables Summary Bar (Links to /receivables) */}
-        {hasPendingDebts && !isSelectMode && (
-          <TouchableOpacity
-            style={styles.compactLentRow}
-            activeOpacity={0.75}
-            onPress={() => {
-              Keyboard.dismiss();
-              setIsSearchFocused(false);
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-              router.push('/receivables');
-            }}
-          >
-            <View style={styles.compactLentLeft}>
-              <View style={styles.compactLentIconCircle}>
-                <HandCoins size={17} color={expenseColors.accentPeach} />
-              </View>
-              <View style={styles.compactLentTextCol}>
-                <AppText style={styles.compactLentTitle}>
-                  {totalPendingLent > 0 && totalPendingBorrow > 0
-                    ? 'DEBTS & RECEIVABLES'
-                    : totalPendingLent > 0
-                    ? 'MONEY TO COLLECT'
-                    : 'MONEY TO PAY'}
-                </AppText>
-                <AppText style={styles.compactLentSubtitle}>
-                  {totalPendingLent > 0 && totalPendingBorrow > 0
-                    ? `${pendingLentList.length} to collect · ${pendingBorrowList.length} to pay`
-                    : totalPendingLent > 0
-                    ? `${pendingLentList.length} ${pendingLentList.length === 1 ? 'person' : 'people'} · pending`
-                    : `${pendingBorrowList.length} ${pendingBorrowList.length === 1 ? 'person' : 'people'} · to pay`}
-                </AppText>
-              </View>
+        {/* Prominent Active Account Filter Banner */}
+        {activeAccountFilter !== 'All' && (
+          <View style={styles.activeAccountFilterBanner}>
+            <View style={styles.activeAccountFilterLeft}>
+              <Building2 size={13} color="#FF9D66" />
+              <AppText style={styles.activeAccountFilterText} numberOfLines={1}>
+                Filtered: <AppText style={styles.activeAccountFilterHighlight}>{activeAccountFilter}</AppText> ({filteredTxs.length} txn{filteredTxs.length !== 1 ? 's' : ''})
+              </AppText>
             </View>
-            <View style={styles.compactLentRight}>
-              <ChevronRight size={16} color="#7E8394" />
-            </View>
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.clearAccountFilterBtn}
+              activeOpacity={0.7}
+              onPress={() => {
+                Haptics.selectionAsync().catch(() => {});
+                LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                setActiveAccountFilter('All');
+              }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <AppText style={styles.clearAccountFilterBtnText}>Show All</AppText>
+              <X size={11} color="#FF9D66" />
+            </TouchableOpacity>
+          </View>
         )}
+
       </View>
 
       {/* ── INDEPENDENT SCROLLABLE TRANSACTIONS LIST ── */}
@@ -1129,6 +1451,30 @@ export const ExpenseLedger: React.FC = () => {
                   <AppText style={styles.clearSearchBtnText}>Clear Search</AppText>
                 </TouchableOpacity>
               )}
+              {activeAccountFilter !== 'All' && (
+                <TouchableOpacity
+                  style={[styles.clearSearchBtn, { marginTop: 8 }]}
+                  onPress={() => {
+                    Haptics.selectionAsync().catch(() => {});
+                    setActiveAccountFilter('All');
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <AppText style={styles.clearSearchBtnText}>Show All Accounts</AppText>
+                </TouchableOpacity>
+              )}
+              {selectedCategoryFilter !== 'All' && (
+                <TouchableOpacity
+                  style={[styles.clearSearchBtn, { marginTop: 8 }]}
+                  onPress={() => {
+                    Haptics.selectionAsync().catch(() => {});
+                    setSelectedCategoryFilter('All');
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <AppText style={styles.clearSearchBtnText}>Reset Category Filter</AppText>
+                </TouchableOpacity>
+              )}
             </View>
           ) : (
             dateGroups.map(({ dateKey, dateHeading, items }) => (
@@ -1161,9 +1507,9 @@ export const ExpenseLedger: React.FC = () => {
         </Animated.View>
       </ScrollView>
 
-      {/* ── FIXED BOTTOM ACTION BAR IN SELECTION MODE (Exact reference layout & proportions) ── */}
+      {/* ── FIXED BOTTOM ACTION BAR IN SELECTION MODE ── */}
       {isSelectMode && (
-        <View style={[styles.bottomActionBarContainer, { bottom: Math.max(insets.bottom, 12) }]}>
+        <View style={[styles.bottomActionBarContainer, { bottom: Math.max(insets.bottom, 16) + 12 }]}>
           {/* Left: Selected Count */}
           <AppText style={styles.selectedCountText}>
             {selectedTransactionIds.length} Selected
@@ -1188,7 +1534,7 @@ export const ExpenseLedger: React.FC = () => {
               }}
               activeOpacity={0.8}
             >
-              <Trash2 size={14} color="#FFFFFF" />
+              <Trash2 size={13} color="#FFFFFF" />
               <AppText style={styles.deleteActionButtonText}>Delete</AppText>
             </TouchableOpacity>
 
@@ -1196,6 +1542,7 @@ export const ExpenseLedger: React.FC = () => {
             <NativeLiquidMenu
               title="Assign Category"
               actions={categoryMenuActions}
+              style={{ alignSelf: 'flex-start' }}
               onSelect={(catId) => {
                 if (selectedTransactionIds.length > 0) {
                   updateTransactionsCategory(selectedTransactionIds, catId);
@@ -1213,6 +1560,7 @@ export const ExpenseLedger: React.FC = () => {
                   selectedTransactionIds.length === 0 && { opacity: 0.5 },
                 ]}
               >
+                <Tag size={13} color="#FFFFFF" />
                 <AppText style={styles.categoryActionButtonText}>Category</AppText>
               </View>
             </NativeLiquidMenu>
@@ -1479,13 +1827,19 @@ const styles = StyleSheet.create({
     color: '#7E8394',
   },
 
-  // ── Compact Category Filter Dropdown (Directly below horizontal account chips) ──
+  // ── Compact Category Filter Dropdown & Pending Dues Shortcut ──
   categoryFilterRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'space-between',
     paddingHorizontal: 16,
     marginBottom: 10,
+  },
+  categoryFilterLeftGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 1,
   },
   categoryFilterTrigger: {
     flexDirection: 'row',
@@ -1498,6 +1852,7 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
+    alignSelf: 'flex-start',
   },
   categoryFilterTriggerActive: {
     backgroundColor: 'rgba(255, 157, 102, 0.12)',
@@ -1533,6 +1888,68 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
   },
+  pendingDebtShortcutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(255, 157, 102, 0.1)',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 157, 102, 0.25)',
+  },
+  pendingDebtShortcutText: {
+    color: '#FF9D66',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+
+  // ── Active Account Filter Banner ──
+  activeAccountFilterBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(255, 157, 102, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 157, 102, 0.25)',
+    borderRadius: 10,
+    marginHorizontal: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    marginBottom: 8,
+  },
+  activeAccountFilterLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+    marginRight: 8,
+  },
+  activeAccountFilterText: {
+    color: '#D1D4DE',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  activeAccountFilterHighlight: {
+    color: '#FF9D66',
+    fontWeight: '700',
+  },
+  clearAccountFilterBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(255, 157, 102, 0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  clearAccountFilterBtnText: {
+    color: '#FF9D66',
+    fontSize: 11,
+    fontWeight: '700',
+  },
 
   // ── Date Group Header (Centered, matching exact reference) ──
   dateGroupContainer: {
@@ -1561,7 +1978,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingVertical: 12,
   },
   rowDebtLendBg: {
     backgroundColor: 'rgba(244, 139, 139, 0.055)',
@@ -1662,26 +2079,36 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
+    flexShrink: 0,
   },
   transactionCenter: {
     flex: 1,
+    minWidth: 0,
     justifyContent: 'center',
+    marginRight: 8,
   },
   transactionTitle: {
     color: '#FFFFFF',
     fontSize: 14,
     lineHeight: 18,
     fontWeight: '700',
-    letterSpacing: 0.4,
-    marginBottom: 4,
+    letterSpacing: 0.2,
+    marginBottom: 3,
   },
   badgeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 6,
+    flexWrap: 'nowrap',
+    gap: 5,
+    maxWidth: '100%',
+    overflow: 'hidden',
   },
   transferFlowPill: {
+    // Cap the pill so a long label cannot push the flexShrink:0 amount
+    // column off the row. Android text metrics are wider than iOS, so this
+    // overflowed on standalone Android builds.
+    maxWidth: '100%',
+    flexShrink: 1,
     backgroundColor: 'rgba(96, 165, 250, 0.15)',
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -1693,6 +2120,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   debtLentPill: {
+    // Cap the pill so a long label cannot push the flexShrink:0 amount
+    // column off the row. Android text metrics are wider than iOS, so this
+    // overflowed on standalone Android builds.
+    maxWidth: '100%',
+    flexShrink: 1,
     backgroundColor: expenseColors.accentRedBg,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -1704,6 +2136,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   debtBorrowPill: {
+    // Cap the pill so a long label cannot push the flexShrink:0 amount
+    // column off the row. Android text metrics are wider than iOS, so this
+    // overflowed on standalone Android builds.
+    maxWidth: '100%',
+    flexShrink: 1,
     backgroundColor: 'rgba(244, 205, 137, 0.12)',
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -1721,6 +2158,11 @@ const styles = StyleSheet.create({
     color: expenseColors.accentGreen,
   },
   tripTagBadge: {
+    // Cap the pill so a long label cannot push the flexShrink:0 amount
+    // column off the row. Android text metrics are wider than iOS, so this
+    // overflowed on standalone Android builds.
+    maxWidth: '100%',
+    flexShrink: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
@@ -1735,21 +2177,28 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   splitPill: {
+    maxWidth: '100%',
+    flexShrink: 0,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
     backgroundColor: 'rgba(255, 157, 102, 0.12)',
     paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingVertical: 1.5,
     borderRadius: 6,
   },
   splitPillText: {
     color: '#FF9D66',
-    fontSize: 10,
+    fontSize: 9.5,
     fontWeight: '800',
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
   },
   tripFolderPill: {
+    // Cap the pill so a long label cannot push the flexShrink:0 amount
+    // column off the row. Android text metrics are wider than iOS, so this
+    // overflowed on standalone Android builds.
+    maxWidth: '100%',
+    flexShrink: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
@@ -1770,7 +2219,51 @@ const styles = StyleSheet.create({
   splitSettledPillText: {
     color: '#70D6BC',
   },
+  splitReturnPill: {
+    maxWidth: '100%',
+    flexShrink: 1,
+    backgroundColor: 'rgba(112, 214, 188, 0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  splitReturnPillText: {
+    color: '#70D6BC',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  debtRepaidPill: {
+    maxWidth: '100%',
+    flexShrink: 1,
+    backgroundColor: 'rgba(96, 165, 250, 0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  debtRepaidPillText: {
+    color: '#9DC6EB',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  debtRecoveredPill: {
+    maxWidth: '100%',
+    flexShrink: 1,
+    backgroundColor: expenseColors.accentGreenBg,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  debtRecoveredPillText: {
+    color: expenseColors.accentGreen,
+    fontSize: 11,
+    fontWeight: '700',
+  },
   splitContextPill: {
+    // Cap the pill so a long label cannot push the flexShrink:0 amount
+    // column off the row. Android text metrics are wider than iOS, so this
+    // overflowed on standalone Android builds.
+    maxWidth: '100%',
+    flexShrink: 1,
     backgroundColor: 'rgba(255, 255, 255, 0.07)',
     paddingHorizontal: 7,
     paddingVertical: 2,
@@ -1785,6 +2278,11 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   splitPeoplePill: {
+    // Cap the pill so a long label cannot push the flexShrink:0 amount
+    // column off the row. Android text metrics are wider than iOS, so this
+    // overflowed on standalone Android builds.
+    maxWidth: '100%',
+    flexShrink: 1,
     backgroundColor: 'rgba(255, 255, 255, 0.06)',
     paddingHorizontal: 6,
     paddingVertical: 2,
@@ -1796,6 +2294,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   splitStatusPill: {
+    // Cap the pill so a long label cannot push the flexShrink:0 amount
+    // column off the row. Android text metrics are wider than iOS, so this
+    // overflowed on standalone Android builds.
+    maxWidth: '100%',
+    flexShrink: 1,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 6,
@@ -1819,24 +2322,39 @@ const styles = StyleSheet.create({
   splitSubAmtRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'flex-end',
     gap: 2,
     marginTop: 2,
+    maxWidth: 105,
   },
   splitSubAmountText: {
     color: '#7E8394',
     fontSize: 10,
     fontWeight: '500',
+    textAlign: 'right',
+    flexShrink: 1,
+  },
+  accountSubText: {
+    color: '#7E8394',
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: 0.2,
+    marginTop: 2,
+    textAlign: 'right',
+    maxWidth: 105,
   },
   categoryPill: {
+    maxWidth: 110,
+    flexShrink: 0,
     backgroundColor: '#232633',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 6,
   },
   categoryPillText: {
-    fontSize: 11,
-    lineHeight: 15,
-    fontWeight: '600',
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: '700',
   },
   transactionDateText: {
     color: '#7E8394',
@@ -1846,12 +2364,19 @@ const styles = StyleSheet.create({
   },
   amountCol: {
     alignItems: 'flex-end',
-    marginLeft: 10,
+    justifyContent: 'center',
+    marginLeft: 8,
+    flexShrink: 0,
   },
   transactionAmountText: {
     fontSize: 15,
     lineHeight: 19,
     fontWeight: '800',
+    textAlign: 'right',
+    letterSpacing: 0,
+    fontVariant: ['tabular-nums'],
+    flexShrink: 0,
+    paddingRight: 2,
   },
   expenseAmount: {
     color: expenseColors.accentRed,
@@ -1878,14 +2403,16 @@ const styles = StyleSheet.create({
     color: '#F4CD89',
   },
   outlierBadge: {
+    maxWidth: '100%',
+    flexShrink: 0,
     backgroundColor: 'rgba(255, 157, 102, 0.15)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
     borderRadius: 6,
   },
   outlierBadgeText: {
     color: '#FF9D66',
-    fontSize: 9,
+    fontSize: 8.5,
     fontWeight: '800',
   },
   emptyStateContainer: {
@@ -1932,95 +2459,50 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  // ── Compact Lent / Receivables Bar (Fixed above transaction feed) ──
-  compactLentRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#181A23',
-    marginHorizontal: 16,
-    marginBottom: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
-  },
-  compactLentLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    flex: 1,
-  },
-  compactLentIconCircle: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 157, 102, 0.12)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 6,
-  },
-  compactLentTextCol: {
-    justifyContent: 'center',
-  },
-  compactLentTitle: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 0.6,
-  },
-  compactLentSubtitle: {
-    color: '#7E8394',
-    fontSize: 11,
-    marginTop: 2,
-  },
-  compactLentRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingLeft: 4,
-  },
 
-  // ── FIXED BOTTOM ACTION BAR (Exact match to reference image) ──
+
+  // ── FIXED BOTTOM ACTION BAR IN SELECTION MODE ──
   bottomActionBarContainer: {
     position: 'absolute',
     left: 16,
     right: 16,
-    backgroundColor: '#12141C',
-    borderRadius: 22,
+    backgroundColor: '#161822',
+    borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 10,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: 'rgba(255, 255, 255, 0.12)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 8,
+    shadowOpacity: 0.45,
+    shadowRadius: 14,
+    elevation: 12,
     zIndex: 999,
   },
   selectedCountText: {
     color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '600',
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 0.2,
   },
   actionBarRightButtons: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
+    flexShrink: 0,
   },
   deleteActionButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
     backgroundColor: expenseColors.accentRed,
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     paddingVertical: 8,
-    borderRadius: 18,
+    borderRadius: 12,
+    flexShrink: 0,
   },
   deleteActionButtonText: {
     color: '#FFFFFF',
@@ -2028,12 +2510,15 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   categoryActionButton: {
-    backgroundColor: '#FF9D66',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 18,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 5,
+    backgroundColor: '#FF9D66',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 12,
+    flexShrink: 0,
   },
   categoryActionButtonText: {
     color: '#FFFFFF',
@@ -2043,5 +2528,7 @@ const styles = StyleSheet.create({
   closeActionButton: {
     padding: 6,
     marginLeft: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

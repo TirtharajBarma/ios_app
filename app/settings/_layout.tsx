@@ -72,6 +72,24 @@ export default function SettingsLayout() {
           gestureEnabled: true,
         }}
       />
+      <Stack.Screen
+        name="logs"
+        options={{
+          gestureEnabled: true,
+        }}
+      />
+      <Stack.Screen
+        name="updates"
+        options={{
+          gestureEnabled: true,
+        }}
+      />
+      <Stack.Screen
+        name="shortcut-setup"
+        options={{
+          gestureEnabled: true,
+        }}
+      />
     </Stack>
   );
 }

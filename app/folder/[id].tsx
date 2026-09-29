@@ -14,10 +14,14 @@ import {
   ArrowRightLeft,
   Users,
   HandCoins,
+  MoreHorizontal,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
-import { AppText } from '@/components/ui';
+import * as Clipboard from 'expo-clipboard';
+import { AppText, NativeLiquidMenu } from '@/components/ui';
+import type { MenuAction } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
+import { useShallow } from 'zustand/react/shallow';
 import { expenseColors } from '@/constants/expenseColors';
 import { ExpenseTransaction, ExpenseCategory } from '@/types/expense';
 import { CategoryIcon } from '@/components/expense/CategoryIcon';
@@ -30,7 +34,27 @@ export default function FolderDetailScreen() {
   }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { eventFolders, transactions, categories, accounts, currencySymbol } = useExpenseStore();
+  const {
+    eventFolders,
+    transactions,
+    categories,
+    accounts,
+    currencySymbol,
+    removeTransactions,
+    updateTransaction,
+    deleteEventFolder,
+  } = useExpenseStore(
+    useShallow((s) => ({
+      eventFolders: s.eventFolders,
+      transactions: s.transactions,
+      categories: s.categories,
+      accounts: s.accounts,
+      currencySymbol: s.currencySymbol,
+      removeTransactions: s.removeTransactions,
+      updateTransaction: s.updateTransaction,
+      deleteEventFolder: s.deleteEventFolder,
+    }))
+  );
 
   const sym = currencySymbol || '₹';
 
@@ -166,7 +190,53 @@ export default function FolderDetailScreen() {
           {folder.emoji || '🌴'} {folder.name}
         </AppText>
 
-        <View style={{ width: 60 }} />
+        {/* Folder Header Actions Menu */}
+        <NativeLiquidMenu
+          title={`${folder.emoji || '🌴'} ${folder.name.toUpperCase()}`}
+          actions={[
+            {
+              id: 'copy',
+              title: 'Copy Breakdown',
+              image: 'doc.on.doc' as any,
+            },
+            {
+              id: 'dissolve',
+              title: 'Dissolve Folder (Keep Items)',
+              image: 'folder.badge.minus' as any,
+            },
+            {
+              id: 'delete',
+              title: 'Delete Folder & All Items',
+              image: 'trash' as any,
+              attributes: { destructive: true },
+            },
+          ]}
+          onSelect={(actionId) => {
+            if (actionId === 'copy') {
+              const copyText = `${folder.emoji || '🌴'} ${folder.name.toUpperCase()}\nTotal Spent: ${sym}${totalSpent.toLocaleString('en-IN')}\nItems: ${folderTxs.length}\n\n${folderTxs.map((t) => `• ${(t.note || 'Item').toUpperCase()}: ${sym}${t.amount.toLocaleString('en-IN')}`).join('\n')}`;
+              Clipboard.setStringAsync(copyText).catch(() => {});
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+            } else if (actionId === 'dissolve') {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+              deleteEventFolder(folder.id || id);
+              router.back();
+            } else if (actionId === 'delete') {
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+              removeTransactions(folderTxs.map((t) => t.id));
+              deleteEventFolder(folder.id || id);
+              router.back();
+            }
+          }}
+          style={styles.headerActionBtn}
+        >
+          <TouchableOpacity
+            style={styles.headerMoreBtn}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            activeOpacity={0.7}
+          >
+            <MoreHorizontal size={20} color={expenseColors.accentPeach} />
+          </TouchableOpacity>
+        </NativeLiquidMenu>
       </View>
 
       <ScrollView
@@ -246,11 +316,32 @@ export default function FolderDetailScreen() {
                   else if (isIncome) amountDisplay = `+${sym}${tx.amount.toLocaleString('en-IN')}`;
                   else if (isTransfer) amountDisplay = `⇄ ${sym}${tx.amount.toLocaleString('en-IN')}`;
 
-                  return (
-                    <View
-                      key={tx.id}
-                      style={[styles.transactionRow, !isLast && styles.rowDivider]}
-                    >
+                  const txMenuActions: MenuAction[] = [
+                    {
+                      id: 'details',
+                      title: 'View Details',
+                      image: 'doc.text.magnifyingglass' as any,
+                    },
+                    {
+                      id: 'copy',
+                      title: 'Copy Details',
+                      image: 'doc.on.doc' as any,
+                    },
+                    {
+                      id: 'unlink',
+                      title: 'Remove from Folder',
+                      image: 'folder.badge.minus' as any,
+                    },
+                    {
+                      id: 'delete',
+                      title: 'Delete Transaction',
+                      image: 'trash' as any,
+                      attributes: { destructive: true },
+                    },
+                  ];
+
+                  const rowContent = (
+                    <View style={styles.transactionRowInner}>
                       {/* Left Squircle */}
                       <View
                         style={[
@@ -323,6 +414,43 @@ export default function FolderDetailScreen() {
                       </View>
                     </View>
                   );
+
+                  return (
+                    <NativeLiquidMenu
+                      key={tx.id}
+                      title={(tx.note || cat.name).toUpperCase()}
+                      actions={txMenuActions}
+                      shouldOpenOnLongPress={true}
+                      onSelect={(actionId) => {
+                        if (actionId === 'details') {
+                          Haptics.selectionAsync().catch(() => {});
+                          router.push(`/transaction/${tx.id}`);
+                        } else if (actionId === 'copy') {
+                          const copyText = `${(tx.note || cat.name).toUpperCase()}: ${amountDisplay}`;
+                          Clipboard.setStringAsync(copyText).catch(() => {});
+                          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+                        } else if (actionId === 'unlink') {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                          updateTransaction(tx.id, { folderId: undefined, folderName: undefined });
+                        } else if (actionId === 'delete') {
+                          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+                          removeTransactions([tx.id]);
+                        }
+                      }}
+                      style={{ width: '100%' }}
+                    >
+                      <TouchableOpacity
+                        style={[styles.transactionRow, !isLast && styles.rowDivider]}
+                        activeOpacity={0.75}
+                        onPress={() => {
+                          Haptics.selectionAsync().catch(() => {});
+                          router.push(`/transaction/${tx.id}`);
+                        }}
+                      >
+                        {rowContent}
+                      </TouchableOpacity>
+                    </NativeLiquidMenu>
+                  );
                 })}
               </View>
             </View>
@@ -351,7 +479,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 2,
-    minWidth: 60,
+    minWidth: 80,
   },
   backBtnText: {
     color: expenseColors.accentPeach,
@@ -544,5 +672,20 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: 'center',
     lineHeight: 18,
+  },
+  headerActionBtn: {
+    minWidth: 80,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  headerMoreBtn: {
+    padding: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  transactionRowInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
   },
 });

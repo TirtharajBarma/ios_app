@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -10,7 +10,9 @@ import {
   KeyboardAvoidingView,
   Platform,
   Keyboard,
+  StatusBar,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   X,
   Landmark,
@@ -21,12 +23,22 @@ import {
   Archive,
   Trash2,
   ChevronRight,
+  Calculator,
+  Sparkles,
+  CheckCircle2,
+  Calendar,
+  Clock,
 } from 'lucide-react-native';
 import { SymbolView } from 'expo-symbols';
+import * as Haptics from 'expo-haptics';
 import { AppText } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
+import { useShallow } from 'zustand/react/shallow';
 import { expenseColors } from '@/constants/expenseColors';
 import { ExpenseAccount } from '@/types/expense';
+import { roundMoney } from '@/utils/currency';
+import { logAction } from '@/utils/auditLog';
+import { getCreditCardDueStatus } from '@/utils/creditCard';
 import { AccountIcon } from './AccountIcon';
 
 interface EditAccountModalProps {
@@ -42,13 +54,35 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
   account,
   onClose,
 }) => {
-  const { addAccount, updateAccount, deleteAccount, archiveAccount, unarchiveAccount, transactions, currencySymbol } = useExpenseStore();
+  const {
+  addAccount,
+  updateAccount,
+  deleteAccount,
+  archiveAccount,
+  unarchiveAccount,
+  transactions,
+  currencySymbol,
+} = useExpenseStore(
+  useShallow((s) => ({
+    addAccount: s.addAccount,
+    updateAccount: s.updateAccount,
+    deleteAccount: s.deleteAccount,
+    archiveAccount: s.archiveAccount,
+    unarchiveAccount: s.unarchiveAccount,
+    transactions: s.transactions,
+    currencySymbol: s.currencySymbol,
+  }))
+);
   const sym = currencySymbol || '₹';
 
   const [name, setName] = useState<string>('');
   const [type, setType] = useState<AccountType>('savings');
   const [openingBalance, setOpeningBalance] = useState<string>('0');
   const [showBalanceInput, setShowBalanceInput] = useState<boolean>(false);
+  const [balanceMode, setBalanceMode] = useState<'historical' | 'reconcile'>('historical');
+  const [currentBalanceInput, setCurrentBalanceInput] = useState<string>('0');
+  const [dueDayInput, setDueDayInput] = useState<string>('');
+  const [billingDayInput, setBillingDayInput] = useState<string>('');
 
   const isEditMode = account !== null;
 
@@ -57,24 +91,95 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
       setName(account.name);
       setType(account.type || 'savings');
       setOpeningBalance((account.openingBalance ?? 0).toString());
+      const currentVal = (account.type === 'credit' ? account.dueAmount || 0 : account.balance) || 0;
+      setCurrentBalanceInput(currentVal.toString());
+      setBalanceMode('historical');
+      setDueDayInput(account.dueDay ? account.dueDay.toString() : '');
+      setBillingDayInput(account.billingDay ? account.billingDay.toString() : '');
     } else {
       setName('');
       setType('savings');
       setOpeningBalance('0');
+      setCurrentBalanceInput('0');
+      setBalanceMode('historical');
+      setDueDayInput('');
+      setBillingDayInput('');
     }
     setShowBalanceInput(false);
   }, [account, visible]);
 
-  // Number of transactions linked to this account
-  const linkedTxCount = account
-    ? transactions.filter(
-        (t) =>
-          t.accountId === account.id ||
-          t.toAccountId === account.id ||
-          (t.accountName && account.name && t.accountName.trim().toLowerCase() === account.name.trim().toLowerCase()) ||
-          (t.toAccountName && account.name && t.toAccountName.trim().toLowerCase() === account.name.trim().toLowerCase())
-      ).length
-    : 0;
+  // Number of transactions linked to this account & calculate net transactional flow
+  const netTxEffect = useMemo(() => {
+    if (!account) return { incomeSum: 0, expenseSum: 0, netBalanceEffect: 0, netDueEffect: 0, count: 0 };
+    const accNameLower = (account.name || '').trim().toLowerCase();
+    let incomeSum = 0;
+    let expenseSum = 0;
+    let count = 0;
+
+    for (const t of transactions) {
+      const isFrom =
+        t.accountId === account.id ||
+        (t.accountName && accNameLower && t.accountName.trim().toLowerCase() === accNameLower);
+      const isTo =
+        t.toAccountId === account.id ||
+        (t.toAccountName && accNameLower && t.toAccountName.trim().toLowerCase() === accNameLower);
+
+      if (!isFrom && !isTo) continue;
+      count += 1;
+
+      if (t.type === 'expense' && isFrom) {
+        expenseSum += t.amount;
+      } else if (t.type === 'income' && isFrom) {
+        incomeSum += t.amount;
+      } else if (t.type === 'transfer') {
+        if (isFrom) expenseSum += t.amount;
+        if (isTo) incomeSum += t.amount;
+      } else if (t.type === 'debt_lend' && isFrom) {
+        expenseSum += t.amount;
+      } else if (t.type === 'debt_borrow' && isFrom) {
+        incomeSum += t.amount;
+      } else if (t.type === 'vault_deposit' && isFrom) {
+        expenseSum += t.amount;
+      } else if (t.type === 'vault_withdraw' && isFrom) {
+        incomeSum += t.amount;
+      }
+    }
+
+    return {
+      incomeSum: roundMoney(incomeSum),
+      expenseSum: roundMoney(expenseSum),
+      netBalanceEffect: roundMoney(incomeSum - expenseSum),
+      netDueEffect: roundMoney(expenseSum - incomeSum),
+      count,
+    };
+  }, [account, transactions]);
+
+  const linkedTxCount = netTxEffect.count;
+
+  // Calculate required opening balance from known current balance:
+  // For Bank/Savings: Known Current = Opening + (Income - Expense) => Opening = Known Current - (Income - Expense)
+  // For Credit: Known Due = Opening Due + (Expense - Income) => Opening Due = Known Due - (Expense - Income)
+  const calculatedOpeningFromReconciliation = useMemo(() => {
+    if (!account) return 0;
+    const clean = currentBalanceInput.trim().replace(/,/g, '');
+    const entered = clean === '' ? 0 : parseFloat(clean);
+    if (isNaN(entered)) return 0;
+
+    const isCreditType = type === 'credit';
+    if (isCreditType) {
+      return roundMoney(Math.max(0, entered - netTxEffect.netDueEffect));
+    } else {
+      return roundMoney(entered - netTxEffect.netBalanceEffect);
+    }
+  }, [account, currentBalanceInput, type, netTxEffect]);
+
+  const creditDuePreview = useMemo(() => {
+    if (type !== 'credit') return null;
+    const parsedDue = dueDayInput.trim() ? parseInt(dueDayInput.trim(), 10) : undefined;
+    const parsedBill = billingDayInput.trim() ? parseInt(billingDayInput.trim(), 10) : undefined;
+    const dueAmt = account?.dueAmount || parseFloat(openingBalance || '0') || 0;
+    return getCreditCardDueStatus(parsedDue, parsedBill, dueAmt);
+  }, [type, dueDayInput, billingDayInput, account, openingBalance]);
 
   const handleSave = () => {
     if (!name.trim()) {
@@ -83,13 +188,29 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
     }
 
     const isCreditType = type === 'credit';
-    const numOpening = parseFloat(openingBalance.trim().replace(/,/g, '')) || 0;
+    let numOpening = parseFloat(openingBalance.trim().replace(/,/g, '')) || 0;
+    const parsedDueDay = isCreditType && dueDayInput.trim() ? Math.min(31, Math.max(1, parseInt(dueDayInput.trim(), 10))) : undefined;
+    const parsedBillingDay = isCreditType && billingDayInput.trim() ? Math.min(31, Math.max(1, parseInt(billingDayInput.trim(), 10))) : undefined;
 
     if (isEditMode && account) {
+      if (balanceMode === 'reconcile') {
+        numOpening = calculatedOpeningFromReconciliation;
+        const enteredClean = parseFloat(currentBalanceInput.trim().replace(/,/g, '')) || 0;
+        logAction('account', `Reconciled account "${name.trim()}" to actual ${isCreditType ? 'due' : 'balance'} ${sym}${enteredClean}`, {
+          accountId: account.id,
+          accountName: name.trim(),
+          enteredTarget: enteredClean,
+          calculatedOpening: numOpening,
+          netEffect: isCreditType ? netTxEffect.netDueEffect : netTxEffect.netBalanceEffect,
+        });
+      }
+
       updateAccount(account.id, {
         name: name.trim(),
         type,
         openingBalance: numOpening,
+        dueDay: parsedDueDay,
+        billingDay: parsedBillingDay,
       });
     } else {
       addAccount({
@@ -99,9 +220,12 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
         balance: isCreditType ? 0 : numOpening,
         dueAmount: isCreditType && numOpening > 0 ? numOpening : undefined,
         statusType: isCreditType && numOpening > 0 ? 'due' : 'positive',
+        dueDay: parsedDueDay,
+        billingDay: parsedBillingDay,
       });
     }
 
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     onClose();
   };
 
@@ -148,6 +272,9 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
     );
   };
 
+  const insets = useSafeAreaInsets();
+  const androidTopPadding = Platform.OS === 'android' ? Math.max(insets.top, StatusBar.currentHeight || 0, 24) + 10 : 0;
+
   return (
     <Modal
       visible={visible}
@@ -156,7 +283,7 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
       onRequestClose={onClose}
     >
       <KeyboardAvoidingView
-        style={styles.container}
+        style={[styles.container, { paddingTop: androidTopPadding }]}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
       >
@@ -308,6 +435,122 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
             </AppText>
           </View>
 
+          {/* CREDIT CARD STATEMENT & DUE TRACKING */}
+          {type === 'credit' && (
+            <View style={styles.creditCardSettingsBox}>
+              <View style={styles.creditCardSettingsHeader}>
+                <Calendar size={14} color={expenseColors.accentPeach} />
+                <AppText style={styles.creditCardSettingsTitle}>STATEMENT & DUE DATES</AppText>
+              </View>
+              <AppText style={styles.inputHelpText}>
+                Set your monthly billing cycle to track due dates and settle bills easily.
+              </AppText>
+
+              <View style={styles.cycleInputsRow}>
+                <View style={styles.cycleInputCol}>
+                  <AppText style={styles.cycleInputLabel}>PAYMENT DUE DAY</AppText>
+                  <View style={styles.cycleInputWrapper}>
+                    <TextInput
+                      style={styles.cycleDayInput}
+                      placeholder="e.g. 5"
+                      placeholderTextColor="#555866"
+                      keyboardType="number-pad"
+                      maxLength={2}
+                      value={dueDayInput}
+                      onChangeText={(val) => {
+                        const clean = val.replace(/[^0-9]/g, '');
+                        if (!clean) {
+                          setDueDayInput('');
+                          return;
+                        }
+                        const num = parseInt(clean, 10);
+                        setDueDayInput(Math.min(31, Math.max(1, num)).toString());
+                      }}
+                      returnKeyType="done"
+                      onSubmitEditing={() => Keyboard.dismiss()}
+                    />
+                    <AppText style={styles.cycleDaySuffix}>of month</AppText>
+                  </View>
+                </View>
+
+                <View style={styles.cycleInputCol}>
+                  <AppText style={styles.cycleInputLabel}>BILL GENERATION</AppText>
+                  <View style={styles.cycleInputWrapper}>
+                    <TextInput
+                      style={styles.cycleDayInput}
+                      placeholder="e.g. 18"
+                      placeholderTextColor="#555866"
+                      keyboardType="number-pad"
+                      maxLength={2}
+                      value={billingDayInput}
+                      onChangeText={(val) => {
+                        const clean = val.replace(/[^0-9]/g, '');
+                        if (!clean) {
+                          setBillingDayInput('');
+                          return;
+                        }
+                        const num = parseInt(clean, 10);
+                        setBillingDayInput(Math.min(31, Math.max(1, num)).toString());
+                      }}
+                      returnKeyType="done"
+                      onSubmitEditing={() => Keyboard.dismiss()}
+                    />
+                    <AppText style={styles.cycleDaySuffix}>of month</AppText>
+                  </View>
+                </View>
+              </View>
+
+              {/* Cycle presets chips */}
+              <View style={styles.cyclePresetsRow}>
+                <TouchableOpacity
+                  style={styles.cyclePresetChip}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    Haptics.selectionAsync().catch(() => {});
+                    setDueDayInput('5');
+                    setBillingDayInput('18');
+                  }}
+                >
+                  <AppText style={styles.cyclePresetChipText}>Bill 18th • Due 5th</AppText>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.cyclePresetChip}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    Haptics.selectionAsync().catch(() => {});
+                    setDueDayInput('15');
+                    setBillingDayInput('25');
+                  }}
+                >
+                  <AppText style={styles.cyclePresetChipText}>Bill 25th • Due 15th</AppText>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.cyclePresetChip}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    Haptics.selectionAsync().catch(() => {});
+                    setDueDayInput('20');
+                    setBillingDayInput('1');
+                  }}
+                >
+                  <AppText style={styles.cyclePresetChipText}>Bill 1st • Due 20th</AppText>
+                </TouchableOpacity>
+              </View>
+
+              {/* Live Preview of Due Status */}
+              {creditDuePreview?.hasDueInfo && (
+                <View style={styles.duePreviewBadge}>
+                  <Clock size={12} color={creditDuePreview.isUrgent ? '#FF6B6B' : expenseColors.accentPeach} />
+                  <AppText style={[styles.duePreviewText, creditDuePreview.isUrgent && styles.duePreviewUrgentText]}>
+                    Status: {creditDuePreview.badgeLabel} {creditDuePreview.dueDateFormatted ? `(${creditDuePreview.dueDateFormatted})` : ''}
+                  </AppText>
+                </View>
+              )}
+            </View>
+          )}
+
           {/* ADJUST OPENING BALANCE CARD */}
           <TouchableOpacity
             style={styles.balanceCard}
@@ -322,13 +565,13 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
             </View>
             <View style={{ flex: 1 }}>
               <AppText style={styles.balanceCardTitle}>
-                {type === 'credit' ? 'Opening Card Due' : 'Opening Balance'}
+                {type === 'credit' ? 'Opening Card Due / Balance' : 'Opening Balance'}
               </AppText>
               <AppText style={styles.balanceCardSub}>
                 {isEditMode && account
                   ? type === 'credit'
-                    ? `Current Due: ${sym}${(account.dueAmount || 0).toLocaleString('en-IN')} • Base: ${sym}${parseFloat(openingBalance || '0').toLocaleString('en-IN')}`
-                    : `Current: ${sym}${account.balance.toLocaleString('en-IN')} • Base: ${sym}${parseFloat(openingBalance || '0').toLocaleString('en-IN')}`
+                    ? `Current Due: ${sym}${(account.dueAmount || 0).toLocaleString('en-IN')} • Base Opening: ${sym}${parseFloat(openingBalance || '0').toLocaleString('en-IN')}`
+                    : `Current: ${sym}${account.balance.toLocaleString('en-IN')} • Base Opening: ${sym}${parseFloat(openingBalance || '0').toLocaleString('en-IN')}`
                   : `Base Opening: ${sym}${parseFloat(openingBalance || '0').toLocaleString('en-IN')}`}
               </AppText>
             </View>
@@ -338,21 +581,151 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
           {/* Balance / Due Input Fields when expanded */}
           {showBalanceInput && (
             <View style={styles.balanceInputBlock}>
-              <View style={styles.section}>
-                <AppText style={styles.label}>
-                  {type === 'credit' ? `STARTING OPENING DUE (${sym})` : `STARTING OPENING BALANCE (${sym})`}
-                </AppText>
-                <TextInput
-                  style={styles.textInput}
-                  placeholder="0"
-                  placeholderTextColor="#555866"
-                  keyboardType="numeric"
-                  value={openingBalance}
-                  onChangeText={setOpeningBalance}
-                  returnKeyType="done"
-                  onSubmitEditing={() => Keyboard.dismiss()}
-                />
-              </View>
+              {isEditMode && account && (
+                <View style={styles.balanceModeToggleRow}>
+                  <TouchableOpacity
+                    style={[
+                      styles.balanceModeTab,
+                      balanceMode === 'historical' && styles.balanceModeTabActive,
+                    ]}
+                    onPress={() => {
+                      Keyboard.dismiss();
+                      Haptics.selectionAsync().catch(() => {});
+                      setBalanceMode('historical');
+                    }}
+                  >
+                    <Edit3 size={12} color={balanceMode === 'historical' ? '#0F1015' : '#8E919D'} />
+                    <AppText
+                      style={[
+                        styles.balanceModeTabText,
+                        balanceMode === 'historical' && styles.balanceModeTabTextActive,
+                      ]}
+                    >
+                      HISTORICAL OPENING
+                    </AppText>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.balanceModeTab,
+                      balanceMode === 'reconcile' && styles.balanceModeTabActive,
+                    ]}
+                    onPress={() => {
+                      Keyboard.dismiss();
+                      Haptics.selectionAsync().catch(() => {});
+                      setBalanceMode('reconcile');
+                    }}
+                  >
+                    <Calculator size={12} color={balanceMode === 'reconcile' ? '#0F1015' : '#8E919D'} />
+                    <AppText
+                      style={[
+                        styles.balanceModeTabText,
+                        balanceMode === 'reconcile' && styles.balanceModeTabTextActive,
+                      ]}
+                    >
+                      RECONCILE TO ACTUAL
+                    </AppText>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {balanceMode === 'historical' || !isEditMode ? (
+                <View style={styles.section}>
+                  <AppText style={styles.label}>
+                    {type === 'credit' ? `STARTING OPENING DUE (${sym})` : `STARTING OPENING BALANCE (${sym})`}
+                  </AppText>
+                  <AppText style={styles.inputHelpText}>
+                    Enter the starting balance before historical transactions were imported.
+                  </AppText>
+                  <TextInput
+                    style={styles.textInput}
+                    placeholder="0"
+                    placeholderTextColor="#555866"
+                    keyboardType="numeric"
+                    value={openingBalance}
+                    onChangeText={setOpeningBalance}
+                    returnKeyType="done"
+                    onSubmitEditing={() => Keyboard.dismiss()}
+                  />
+                </View>
+              ) : (
+                <View style={styles.reconcileContainer}>
+                  <View style={styles.section}>
+                    <AppText style={styles.label}>
+                      {type === 'credit' ? `KNOWN ACTUAL CURRENT DUE (${sym})` : `KNOWN ACTUAL CURRENT BALANCE (${sym})`}
+                    </AppText>
+                    <AppText style={styles.inputHelpText}>
+                      Enter what your actual bank app shows right now. The ledger will calculate the required historical opening balance.
+                    </AppText>
+                    <TextInput
+                      style={styles.textInput}
+                      placeholder="e.g. 400"
+                      placeholderTextColor="#555866"
+                      keyboardType="numeric"
+                      value={currentBalanceInput}
+                      onChangeText={setCurrentBalanceInput}
+                      returnKeyType="done"
+                      onSubmitEditing={() => Keyboard.dismiss()}
+                    />
+                  </View>
+
+                  {/* Live Reconciliation Breakdown Card */}
+                  <View style={styles.reconcileResultCard}>
+                    <View style={styles.reconcileResultHeader}>
+                      <Sparkles size={14} color={expenseColors.accentPeach} />
+                      <AppText style={styles.reconcileResultTitle}>AUTOMATIC RECONCILIATION</AppText>
+                    </View>
+
+                    <View style={styles.reconcileRow}>
+                      <AppText style={styles.reconcileRowLabel}>
+                        {type === 'credit' ? 'Known Current Due:' : 'Known Current Balance:'}
+                      </AppText>
+                      <AppText style={styles.reconcileRowValue}>
+                        {sym}{parseFloat(currentBalanceInput || '0').toLocaleString('en-IN')}
+                      </AppText>
+                    </View>
+
+                    <View style={styles.reconcileRow}>
+                      <AppText style={styles.reconcileRowLabel}>
+                        {type === 'credit' ? 'Net Card Spending:' : 'Net Transactions Effect:'}
+                      </AppText>
+                      <AppText
+                        style={[
+                          styles.reconcileRowValue,
+                          {
+                            color:
+                              (type === 'credit' ? netTxEffect.netDueEffect : netTxEffect.netBalanceEffect) >= 0
+                                ? expenseColors.accentGreen
+                                : '#FF6B6B',
+                          },
+                        ]}
+                      >
+                        {(type === 'credit' ? netTxEffect.netDueEffect : netTxEffect.netBalanceEffect) >= 0 ? '+' : ''}
+                        {sym}
+                        {Math.abs(type === 'credit' ? netTxEffect.netDueEffect : netTxEffect.netBalanceEffect).toLocaleString('en-IN')}
+                      </AppText>
+                    </View>
+
+                    <View style={styles.reconcileDivider} />
+
+                    <View style={styles.reconcileRow}>
+                      <AppText style={styles.reconcileFinalLabel}>Calculated Historical Opening:</AppText>
+                      <AppText style={styles.reconcileFinalValue}>
+                        {sym}{calculatedOpeningFromReconciliation.toLocaleString('en-IN')}
+                      </AppText>
+                    </View>
+
+                    <AppText style={styles.reconcileFormulaText}>
+                      Formula: {sym}{calculatedOpeningFromReconciliation.toLocaleString('en-IN')} (Opening) +{' '}
+                      {(type === 'credit' ? netTxEffect.netDueEffect : netTxEffect.netBalanceEffect) >= 0 ? '' : '-'}
+                      {sym}
+                      {Math.abs(type === 'credit' ? netTxEffect.netDueEffect : netTxEffect.netBalanceEffect).toLocaleString('en-IN')}{' '}
+                      (Transactions) = {sym}
+                      {parseFloat(currentBalanceInput || '0').toLocaleString('en-IN')} (Target)
+                    </AppText>
+                  </View>
+                </View>
+              )}
             </View>
           )}
 
@@ -450,6 +823,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.8,
   },
+  inputHelpText: {
+    color: '#8E919D',
+    fontSize: 11,
+    lineHeight: 15,
+    marginBottom: 4,
+  },
   textInput: {
     backgroundColor: '#1A1D23',
     borderRadius: 14,
@@ -457,6 +836,8 @@ const styles = StyleSheet.create({
     height: 52,
     color: '#FFFFFF',
     fontSize: 15,
+    textAlignVertical: 'center',
+    paddingVertical: 0,
   },
   typeRow: {
     flexDirection: 'row',
@@ -533,6 +914,95 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.06)',
   },
+  balanceModeToggleRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginBottom: 6,
+  },
+  balanceModeTab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#101114',
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  balanceModeTabActive: {
+    backgroundColor: expenseColors.accentPeach,
+    borderColor: expenseColors.accentPeach,
+  },
+  balanceModeTabText: {
+    color: '#8E919D',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  balanceModeTabTextActive: {
+    color: '#0F1015',
+    fontWeight: '800',
+  },
+  reconcileContainer: {
+    gap: 12,
+  },
+  reconcileResultCard: {
+    backgroundColor: '#101114',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 157, 102, 0.25)',
+    gap: 6,
+  },
+  reconcileResultHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  reconcileResultTitle: {
+    color: expenseColors.accentPeach,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  reconcileRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  reconcileRowLabel: {
+    color: '#8E919D',
+    fontSize: 11,
+  },
+  reconcileRowValue: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  reconcileDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    marginVertical: 4,
+  },
+  reconcileFinalLabel: {
+    color: expenseColors.accentPeach,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  reconcileFinalValue: {
+    color: expenseColors.accentPeach,
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  reconcileFormulaText: {
+    color: '#696C75',
+    fontSize: 10,
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
   actionButtonsStack: {
     gap: 10,
     marginTop: 8,
@@ -580,5 +1050,98 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
     letterSpacing: 0.5,
+  },
+  creditCardSettingsBox: {
+    backgroundColor: '#1A1D23',
+    borderRadius: 14,
+    padding: 14,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 157, 102, 0.2)',
+  },
+  creditCardSettingsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  creditCardSettingsTitle: {
+    color: expenseColors.accentPeach,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  cycleInputsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  cycleInputCol: {
+    flex: 1,
+    gap: 4,
+  },
+  cycleInputLabel: {
+    color: expenseColors.textSubtle,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  cycleInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#101114',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    height: 44,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  cycleDayInput: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+    padding: 0,
+  },
+  cycleDaySuffix: {
+    color: '#696C75',
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  cyclePresetsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 2,
+  },
+  cyclePresetChip: {
+    backgroundColor: '#101114',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  cyclePresetChipText: {
+    color: '#A0A5B5',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  duePreviewBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255, 157, 102, 0.1)',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    alignSelf: 'flex-start',
+    marginTop: 2,
+  },
+  duePreviewText: {
+    color: expenseColors.accentPeach,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  duePreviewUrgentText: {
+    color: '#FF6B6B',
   },
 });

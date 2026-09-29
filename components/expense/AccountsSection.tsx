@@ -3,8 +3,11 @@ import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { ChevronRight } from 'lucide-react-native';
 import { AppText } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
+import { useShallow } from 'zustand/react/shallow';
 import { ExpenseAccount } from '@/types/expense';
 import { expenseColors } from '@/constants/expenseColors';
+import { getCreditCardDueStatus } from '@/utils/creditCard';
+import * as Haptics from 'expo-haptics';
 import { AccountIcon } from './AccountIcon';
 
 interface AccountsSectionProps {
@@ -12,7 +15,9 @@ interface AccountsSectionProps {
 }
 
 export const AccountsSection: React.FC<AccountsSectionProps> = ({ onAccountPress }) => {
-  const { accounts, currencySymbol, formatAmount } = useExpenseStore();
+  const { accounts, currencySymbol, formatAmount } = useExpenseStore(
+  useShallow((s) => ({ accounts: s.accounts, currencySymbol: s.currencySymbol, formatAmount: s.formatAmount }))
+);
   const sym = currencySymbol || '₹';
 
   const getAccountTypeLabel = (acc: ExpenseAccount) => {
@@ -35,6 +40,7 @@ export const AccountsSection: React.FC<AccountsSectionProps> = ({ onAccountPress
           const hasDue = isCredit && (acc.dueAmount || 0) > 0;
           const typeLabel = getAccountTypeLabel(acc);
           const txLabel = `${acc.txnCountThisMonth} txn${acc.txnCountThisMonth !== 1 ? 's' : ''}`;
+          const dueStatus = isCredit ? getCreditCardDueStatus(acc.dueDay, acc.billingDay, acc.dueAmount || 0) : null;
 
           return (
             <TouchableOpacity
@@ -45,11 +51,38 @@ export const AccountsSection: React.FC<AccountsSectionProps> = ({ onAccountPress
             >
               {/* Left side icon & info */}
               <View style={styles.leftContent}>
-                <AccountIcon type={acc.type || 'savings'} size={17} containerSize={38} borderRadius={12} />
+                <AccountIcon name={acc.name} type={acc.type || 'savings'} size={17} containerSize={38} borderRadius={12} />
                 <View style={styles.textContainer}>
-                  <AppText style={styles.accountName} numberOfLines={1}>
-                    {acc.name.toUpperCase()}
-                  </AppText>
+                  <View style={styles.nameRow}>
+                    <AppText style={styles.accountName} numberOfLines={1}>
+                      {acc.name.toUpperCase()}
+                    </AppText>
+                    {dueStatus?.hasDueInfo && (
+                      <View
+                        style={[
+                          styles.dueBadge,
+                          dueStatus.status === 'paid'
+                            ? styles.dueBadgePaid
+                            : dueStatus.isUrgent
+                            ? styles.dueBadgeUrgent
+                            : styles.dueBadgeUpcoming,
+                        ]}
+                      >
+                        <AppText
+                          style={[
+                            styles.dueBadgeText,
+                            dueStatus.status === 'paid'
+                              ? styles.dueBadgePaidText
+                              : dueStatus.isUrgent
+                              ? styles.dueBadgeUrgentText
+                              : styles.dueBadgeUpcomingText,
+                          ]}
+                        >
+                          {dueStatus.badgeLabel}
+                        </AppText>
+                      </View>
+                    )}
+                  </View>
                   <AppText style={styles.txnSubtitle} numberOfLines={1}>
                     {typeLabel} • {txLabel}
                   </AppText>
@@ -58,21 +91,24 @@ export const AccountsSection: React.FC<AccountsSectionProps> = ({ onAccountPress
 
               {/* Right side clean balance */}
               <View style={styles.rightContent}>
-                {isCredit ? (
-                  hasDue ? (
-                    <AppText style={styles.dueBalanceText}>
-                      Due: {formatAmount(acc.dueAmount || 0)}
-                    </AppText>
+                <View style={styles.balanceCol}>
+                  {isCredit ? (
+                    hasDue ? (
+                      <AppText style={styles.dueBalanceText}>
+                        Due: {formatAmount(acc.dueAmount || 0)}
+                      </AppText>
+                    ) : (
+                      <AppText style={styles.noDueText}>
+                        No Due
+                      </AppText>
+                    )
                   ) : (
-                    <AppText style={styles.noDueText}>
-                      No Due
+                    <AppText style={styles.positiveBalanceText}>
+                      {formatAmount(acc.balance)}
                     </AppText>
-                  )
-                ) : (
-                  <AppText style={styles.positiveBalanceText}>
-                    {formatAmount(acc.balance)}
-                  </AppText>
-                )}
+                  )}
+                </View>
+
                 <ChevronRight size={15} color={expenseColors.textMuted} style={styles.chevron} />
               </View>
             </TouchableOpacity>
@@ -115,6 +151,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     flex: 1,
+    minWidth: 0,
+    marginRight: 10,
   },
   iconBox: {
     width: 38,
@@ -123,10 +161,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#1E2028',
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   textContainer: {
     justifyContent: 'center',
     flex: 1,
+    minWidth: 0,
   },
   accountName: {
     color: expenseColors.textPrimary,
@@ -134,7 +174,40 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     fontWeight: '700',
     letterSpacing: 0.4,
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     marginBottom: 2,
+  },
+  dueBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  dueBadgeUpcoming: {
+    backgroundColor: 'rgba(255, 157, 102, 0.15)',
+  },
+  dueBadgeUrgent: {
+    backgroundColor: 'rgba(255, 107, 107, 0.15)',
+  },
+  dueBadgePaid: {
+    backgroundColor: 'rgba(112, 214, 188, 0.12)',
+  },
+  dueBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  dueBadgeUpcomingText: {
+    color: expenseColors.accentPeach,
+  },
+  dueBadgeUrgentText: {
+    color: '#FF6B6B',
+  },
+  dueBadgePaidText: {
+    color: expenseColors.accentGreen,
   },
   txnSubtitle: {
     color: expenseColors.textMuted,
@@ -145,7 +218,11 @@ const styles = StyleSheet.create({
   rightContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
+    flexShrink: 0,
+  },
+  balanceCol: {
+    alignItems: 'flex-end',
   },
   positiveBalanceText: {
     color: expenseColors.textPrimary,
@@ -166,7 +243,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   chevron: {
-    marginLeft: 2,
+    marginLeft: 0,
     opacity: 0.6,
   },
 });

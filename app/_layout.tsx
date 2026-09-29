@@ -14,17 +14,30 @@ import { useSettingsStore } from "@/store/useSettingsStore";
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
 import { isSupabaseConfigured, fetchShareGroups, updateMyName } from "@/api/supabase";
 import { initSharedRealtimeSync } from "@/utils/sync";
+import { drainPendingQuickAdds } from "@/services/expense/quickAddNative";
+import { checkAndAutoApplyUpdates } from "@/services/updates/updateManager";
+import { trackDeviceTelemetry } from "@/services/telemetry/deviceTracker";
 import { colors, radius } from "@/constants";
 import { AppText } from "@/components/ui";
 import { authState } from "@/utils/auth";
-
-const ONBOARDING_KEY = "@onboarding_complete";
 
 /** Debounced fire-and-forget pull of shared subscriptions (no-op when not configured). */
 function triggerSharedSync() {
   const { shareGroups } = useSettingsStore.getState();
   if (!shareGroups.length || !isSupabaseConfigured()) return;
   useSubscriptionStore.getState().syncGroup().catch(() => {});
+}
+
+/**
+ * Reconciles expenses the iOS App Intent saved while the app was terminated.
+ *
+ * The intent writes the persisted state itself, then leaves a durable outbox
+ * entry. Draining it here re-reads the ledger from disk and replays anything
+ * that went missing, so a save the user already saw confirmed in Shortcuts can
+ * never be dropped by a stale in-memory snapshot.
+ */
+function drainQuickAdds() {
+  drainPendingQuickAdds().catch(() => {});
 }
 
 export default function RootLayout() {
@@ -35,7 +48,7 @@ export default function RootLayout() {
   const [biometricLabel, setBiometricLabel] = useState("Unlock");
   const appState = useRef(AppState.currentState);
 
-  // Initial setup: load db, check onboarding, and lock the app on start if faceId is enabled in storage
+  // Initial setup: load db and lock the app on start if faceId is enabled in storage
   useEffect(() => {
     async function initialize() {
       try {
@@ -59,13 +72,6 @@ export default function RootLayout() {
           updateMyName(persistedName).catch((err) =>
             console.warn("Startup: could not push display name to groups:", err)
           );
-        }
-
-        const onboardingDone = await AsyncStorage.getItem(ONBOARDING_KEY);
-        if (!onboardingDone) {
-          router.replace("/onboarding");
-          setIsReady(true);
-          return;
         }
 
         // Always re-fetch groups from Supabase on startup so membership
@@ -102,9 +108,17 @@ export default function RootLayout() {
           triggerSharedSync();
         }
 
+        // A cold start after an App Intent run has no AppState transition, so
+        // drain the native outbox here too.
+        drainQuickAdds();
+
+        // Non-blocking background check for OTA updates and 2-day auto-apply
+        checkAndAutoApplyUpdates().catch(() => {});
+        trackDeviceTelemetry().catch(() => {});
+
         let settingsStr = await AsyncStorage.getItem("@expense_settings_v3");
         if (!settingsStr) {
-          settingsStr = await AsyncStorage.getItem("@subo_settings_v3");
+          settingsStr = await AsyncStorage.getItem("@legacy_settings_v3");
         }
         if (settingsStr) {
           const parsed = JSON.parse(settingsStr);
@@ -184,6 +198,7 @@ export default function RootLayout() {
         }
 
         triggerSharedSync();
+        drainQuickAdds();
       }
       appState.current = nextAppState;
     });
@@ -200,8 +215,15 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <Stack>
-        <Stack.Screen name="onboarding" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen
+          name="quick-add-expense"
+          options={{
+            presentation: "modal",
+            headerShown: false,
+            animation: "slide_from_bottom",
+          }}
+        />
         <Stack.Screen
           name="add/search"
           options={{
@@ -261,7 +283,16 @@ export default function RootLayout() {
           }}
         />
         <Stack.Screen
-          name="settings/logs"
+          name="account/[id]"
+          options={{
+            headerShown: false,
+            animation: "slide_from_right",
+            gestureEnabled: true,
+            fullScreenGestureEnabled: true,
+          }}
+        />
+        <Stack.Screen
+          name="transaction/[id]"
           options={{
             headerShown: false,
             animation: "slide_from_right",

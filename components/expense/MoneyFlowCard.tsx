@@ -5,6 +5,7 @@ import { ArrowDownLeft, ArrowUpRight, TrendingUp, Sparkles, Flame, X } from 'luc
 import * as Haptics from 'expo-haptics';
 import { AppText } from '@/components/ui';
 import { useExpenseStore, isInMonth, monthKeyToYearMonth } from '@/store/useExpenseStore';
+import { useShallow } from 'zustand/react/shallow';
 import { expenseColors } from '@/constants/expenseColors';
 
 export const formatCompactCurrency = (amount: number, symbol: string = '₹'): string => {
@@ -40,13 +41,22 @@ const pastelColors = {
 
 export const MoneyFlowCard: React.FC = () => {
   const {
-    currencySymbol,
-    transactions,
-    selectedMonth,
-    monthlyBudget,
-    getTotalIncome,
-    getTotalSpent,
-  } = useExpenseStore();
+  currencySymbol,
+  transactions,
+  selectedMonth,
+  monthlyBudget,
+  getTotalIncome,
+  getTotalSpent,
+} = useExpenseStore(
+  useShallow((s) => ({
+    currencySymbol: s.currencySymbol,
+    transactions: s.transactions,
+    selectedMonth: s.selectedMonth,
+    monthlyBudget: s.monthlyBudget,
+    getTotalIncome: s.getTotalIncome,
+    getTotalSpent: s.getTotalSpent,
+  }))
+);
 
   const sym = currencySymbol || '₹';
 

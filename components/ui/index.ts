@@ -92,6 +92,10 @@ export { LiquidPopoverMenu } from "./LiquidPopoverMenu";
 export type { LiquidPopoverMenuProps, LiquidPopoverItem } from "./LiquidPopoverMenu";
 
 export { default as NativeLiquidMenu } from "./NativeLiquidMenu";
-export type { NativeLiquidMenuProps } from "./NativeLiquidMenu";
+export type {
+  NativeLiquidMenuProps,
+  MenuAction,
+  MenuActionAttributes,
+} from "./NativeLiquidMenu";
 
 export { ProfileAvatar } from "./ProfileAvatar";

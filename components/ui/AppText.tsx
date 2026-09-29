@@ -10,7 +10,7 @@
  *   <AppText variant="body" color="textSecondary">Subtitle here</AppText>
  */
 import React, { memo, forwardRef } from "react";
-import { Text, type TextProps, type TextStyle } from "react-native";
+import { Text, Platform, type TextProps, type TextStyle } from "react-native";
 import { typography, colors } from "@/constants";
 
 export type AppTextVariant =
@@ -51,13 +51,18 @@ const AppText = forwardRef<Text, AppTextProps>(function AppText(
   const textColor = colorOverride ?? colors.textPrimary;
 
   const resolvedStyle: TextStyle = {
-    fontFamily: token.fontFamily,
+    // No fontFamily override: the tokens used to hardcode "System", which is not
+    // a real family on either platform. Letting React Native pick its default
+    // gives San Francisco on iOS and Roboto on Android, so the two builds match.
     fontSize: token.fontSize,
     lineHeight: token.lineHeight,
     fontWeight: weight ?? token.fontWeight,
     letterSpacing: token.letterSpacing,
     color: textColor,
     textAlign: align,
+    // Fix Android text vertical centering: includeFontPadding adds extra space
+    // above/below glyphs on Android, making text appear off-center in native builds
+    ...(Platform.OS === 'android' && { includeFontPadding: false }),
   };
 
   return (
@@ -73,3 +78,4 @@ const AppText = forwardRef<Text, AppTextProps>(function AppText(
 });
 
 export default memo(AppText);
+

@@ -2,7 +2,7 @@ import AsyncStorage from "@/utils/storage";
 import { CURRENCIES, getCurrencySymbol } from "@/constants";
 
 const STORAGE_KEY = "@expense_exchange_rates_v2";
-const LEGACY_STORAGE_KEY = "@subo_exchange_rates_v2";
+const LEGACY_STORAGE_KEY = "@legacy_exchange_rates_v2";
 const API_URL = "https://open.er-api.com/v6/latest/USD";
 
 // Fallback rates pegged to USD (guaranteed offline accuracy)
@@ -166,23 +166,70 @@ export function formatConvertedCurrency(
   const isZeroDecimal = ZERO_DECIMAL_CURRENCIES.has(targetCode);
   const isINR = targetCode === "INR";
 
-  let formattedNumber: string;
+  return formatMoney(converted, sym, {
+    locale: isINR ? "en-IN" : "en-US",
+    forceDecimals: false,
+  });
+}
 
-  if (isINR) {
-    // Indian Rupee formatting (e.g. 1,00,000)
-    formattedNumber = Math.round(converted).toLocaleString("en-IN");
-  } else if (isZeroDecimal) {
-    formattedNumber = Math.round(converted).toLocaleString("en-US");
+/**
+ * Production-grade money formatting and rounding utilities.
+ */
+export interface FormatMoneyOptions {
+  signed?: boolean;
+  forceDecimals?: boolean;
+  showCurrency?: boolean;
+  locale?: string;
+}
+
+/**
+ * Robust, production-grade money formatter.
+ * Formats numbers up to 2 decimal places with proper locale grouping (e.g. en-IN for ₹, en-US for $).
+ * Whole integers do not display trailing .00 unless `forceDecimals` is true.
+ * Fractions are rounded to max 2 decimals (e.g. 1234.5 -> 1,234.50, 1234.5678 -> 1,234.57).
+ */
+export function formatMoney(
+  amount: number | null | undefined,
+  symbol: string = "₹",
+  options?: FormatMoneyOptions
+): string {
+  if (amount === null || amount === undefined || isNaN(amount) || !isFinite(amount)) {
+    return options?.showCurrency !== false ? `${symbol}0` : "0";
+  }
+
+  const isNegative = amount < 0;
+  const absAmount = Math.abs(amount);
+  const rounded = Math.round((absAmount + Number.EPSILON) * 100) / 100;
+
+  const isWhole = rounded % 1 === 0;
+  const locale = options?.locale || (symbol === "₹" || symbol === "INR" ? "en-IN" : "en-US");
+
+  let formattedNum: string;
+  if (isWhole && !options?.forceDecimals) {
+    formattedNum = rounded.toLocaleString(locale, { maximumFractionDigits: 0 });
   } else {
-    // Standard currency formatting (2 decimals if has fraction, or standard)
-    const rounded = Number(converted.toFixed(2));
-    formattedNumber = rounded.toLocaleString("en-US", {
-      minimumFractionDigits: rounded % 1 === 0 ? 0 : 2,
+    formattedNum = rounded.toLocaleString(locale, {
+      minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     });
   }
 
-  return `${sym}${formattedNumber}`;
+  const symPrefix = options?.showCurrency !== false ? symbol : "";
+  if (options?.signed) {
+    if (isNegative) return `-${symPrefix}${formattedNum}`;
+    return `+${symPrefix}${formattedNum}`;
+  }
+
+  if (isNegative) {
+    return `-${symPrefix}${formattedNum}`;
+  }
+
+  return `${symPrefix}${formattedNum}`;
+}
+
+export function roundMoney(amount: number | null | undefined): number {
+  if (!amount || isNaN(amount) || !isFinite(amount)) return 0;
+  return Math.round((amount + Number.EPSILON) * 100) / 100;
 }
 
 /**
@@ -204,3 +251,4 @@ export function getRatesLastUpdatedFormatted(timestamp: number): string {
   if (diffDays === 1) return "Updated yesterday";
   return `Updated ${new Date(timestamp).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
 }
+

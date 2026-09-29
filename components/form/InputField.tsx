@@ -75,7 +75,6 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     color: colors.white,
-    fontFamily: "System",
     fontSize: 17,
   },
   inputRightAligned: {

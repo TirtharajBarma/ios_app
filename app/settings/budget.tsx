@@ -33,7 +33,8 @@ import * as Haptics from 'expo-haptics';
 
 import { AppText } from '@/components/ui';
 import { expenseColors } from '@/constants/expenseColors';
-import { useExpenseStore } from '@/store/useExpenseStore';
+import { useExpenseStore, getUserCategories } from '@/store/useExpenseStore';
+import { useShallow } from 'zustand/react/shallow';
 import { CategoryIcon, getCategoryBgColor } from '@/components/expense/CategoryIcon';
 import { formatCompactCurrency } from '@/components/expense/MoneyFlowCard';
 
@@ -41,13 +42,22 @@ export default function MonthlyBudgetScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const {
-    monthlyBudget,
-    currencySymbol,
-    categories,
-    categoryBudgets,
-    setMonthlyBudget,
-    setAllCategoryBudgets,
-  } = useExpenseStore();
+  monthlyBudget,
+  currencySymbol,
+  categories,
+  categoryBudgets,
+  setMonthlyBudget,
+  setAllCategoryBudgets,
+} = useExpenseStore(
+  useShallow((s) => ({
+    monthlyBudget: s.monthlyBudget,
+    currencySymbol: s.currencySymbol,
+    categories: s.categories,
+    categoryBudgets: s.categoryBudgets,
+    setMonthlyBudget: s.setMonthlyBudget,
+    setAllCategoryBudgets: s.setAllCategoryBudgets,
+  }))
+);
 
   const [activeTab, setActiveTab] = useState<'overall' | 'category'>('overall');
   const [budgetInput, setBudgetInput] = useState(monthlyBudget.toString());
@@ -55,11 +65,11 @@ export default function MonthlyBudgetScreen() {
 
   // Local state for category budgets so user can edit and save
   const [localCategoryBudgets, setLocalCategoryBudgets] = useState<Record<string, number>>(
-    categoryBudgets || { cat_cig: 3000 }
+    categoryBudgets || {}
   );
 
   const expenseCategories = useMemo(() => {
-    return categories.filter((c) => c.id !== 'cat_income');
+    return getUserCategories(categories);
   }, [categories]);
 
   const allocatedAmount = useMemo(() => {

@@ -21,6 +21,7 @@ export interface LiquidDropdownOption<T = string> {
   icon?: React.ReactNode;
   color?: string;
   badge?: string;
+  disabled?: boolean;
 }
 
 export interface LiquidDropdownModalProps<T = string> {
@@ -49,6 +50,7 @@ export function LiquidDropdownModal<T = string>({
   footerAction,
 }: LiquidDropdownModalProps<T>) {
   const handleSelect = (opt: LiquidDropdownOption<T>) => {
+    if (opt.disabled) return;
     Haptics.selectionAsync().catch(() => {});
     onSelect(opt);
     onClose();
@@ -96,8 +98,10 @@ export function LiquidDropdownModal<T = string>({
                     style={[
                       styles.optionItem,
                       isSelected && styles.optionItemSelected,
+                      opt.disabled && styles.optionItemDisabled,
                     ]}
-                    activeOpacity={0.75}
+                    activeOpacity={opt.disabled ? 1 : 0.75}
+                    disabled={opt.disabled}
                     onPress={() => handleSelect(opt)}
                   >
                     <View style={styles.optionLeft}>
@@ -111,6 +115,7 @@ export function LiquidDropdownModal<T = string>({
                           style={[
                             styles.optionLabel,
                             isSelected && styles.optionLabelSelected,
+                            opt.color ? { color: opt.color } : null,
                           ]}
                           numberOfLines={1}
                         >
@@ -245,6 +250,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.10)',
     borderWidth: 0.5,
     borderColor: 'rgba(255, 255, 255, 0.18)',
+  },
+  optionItemDisabled: {
+    opacity: 0.35,
   },
   optionLeft: {
     flexDirection: 'row',

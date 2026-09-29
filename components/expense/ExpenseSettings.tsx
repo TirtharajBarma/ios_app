@@ -16,7 +16,8 @@ import {
   UIManager,
   Keyboard,
 } from 'react-native';
-import { useRouter, useNavigation, useFocusEffect } from 'expo-router';
+import { useRouter, useNavigation, useFocusEffect, useScrollToTop } from 'expo-router';
+import { handleTabFocus } from '@/services/navigation/tabTracker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ChevronRight,
@@ -59,19 +60,22 @@ import {
   Smartphone,
   PiggyBank,
   Trash2,
-  Cigarette,
   Repeat,
+  RefreshCw,
+  Bell,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
 import { AppText, ProfileAvatar } from '@/components/ui';
-import { useExpenseStore } from '@/store/useExpenseStore';
+import { useExpenseStore, isSystemCategory, getUserCategories } from '@/store/useExpenseStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useSettingsStore } from '@/store/useSettingsStore';
 import { useSubscriptionStore } from '@/store/useSubscriptionStore';
+import { useAppUpdateManager } from '@/services/updates/updateManager';
 import { FixedBottomNav } from './FixedBottomNav';
 import { expenseColors } from '@/constants/expenseColors';
-import { CURRENCIES } from '@/constants';
+import { CURRENCIES, CURRENT_RELEASE_VERSION, AUTHOR_CREDIT } from '@/constants';
 import { ExpenseCategory } from '@/types/expense';
 import { CategoryIcon, getCategoryBgColor } from './CategoryIcon';
 import { AppWalkthroughModal } from './AppWalkthroughModal';
@@ -106,9 +110,8 @@ const customSpringLayout = {
   },
 };
 
-// Rich collection of icons for categories
+// Rich collection of icons for categories (30 icons = 5 full rows of 6)
 const AVAILABLE_ICONS = [
-  { name: 'Cigarette', component: Cigarette },
   { name: 'ShoppingBag', component: ShoppingBag },
   { name: 'Tv', component: Tv },
   { name: 'Repeat', component: Repeat },
@@ -135,9 +138,13 @@ const AVAILABLE_ICONS = [
   { name: 'Leaf', component: Leaf },
   { name: 'Tag', component: Tag },
   { name: 'Sparkles', component: Sparkles },
+  { name: 'Smartphone', component: Smartphone },
+  { name: 'Smile', component: Smile },
+  { name: 'Activity', component: Activity },
+  { name: 'Wifi', component: Wifi },
 ];
 
-// Rich warm pastel palette for custom categories
+// Rich warm pastel palette for custom categories (18 colors = 3 full rows of 6)
 const AVAILABLE_COLORS = [
   '#F8A888', // Warm Peach
   '#F39C94', // Warm Coral
@@ -150,9 +157,13 @@ const AVAILABLE_COLORS = [
   '#82D0D8', // Seafoam Teal
   '#8CD9C8', // Warm Mint
   '#A3D6B2', // Sage Celadon
+  '#70D6BC', // Emerald Mint
   '#F4CD89', // Warm Buttercream
+  '#F4A261', // Warm Amber
   '#E5B299', // Warm Sand
+  '#D4A373', // Warm Ochre
   '#A2AEBB', // Warm Slate
+  '#7E8394', // Graphite
 ];
 
 export const ExpenseSettings: React.FC = () => {
@@ -162,23 +173,40 @@ export const ExpenseSettings: React.FC = () => {
   const { height: screenHeight, width: screenWidth } = useWindowDimensions();
 
   const {
-    monthlyBudget,
-    currencySymbol,
-    currencyCode,
-    categories,
-    transactions,
-    categoryBudgets,
-    setCurrency,
-    convertAllCurrencies: convertExpenseCurrencies,
-    addCategory,
-    updateCategory,
-    deleteCategory,
-    reorderCategories,
-    resetAllData,
-  } = useExpenseStore();
+  monthlyBudget,
+  currencySymbol,
+  currencyCode,
+  categories,
+  transactions,
+  categoryBudgets,
+  setCurrency,
+  convertExpenseCurrencies,
+  addCategory,
+  updateCategory,
+  deleteCategory,
+  reorderCategories,
+  resetAllData,
+} = useExpenseStore(
+  useShallow((s) => ({
+    monthlyBudget: s.monthlyBudget,
+    currencySymbol: s.currencySymbol,
+    currencyCode: s.currencyCode,
+    categories: s.categories,
+    transactions: s.transactions,
+    categoryBudgets: s.categoryBudgets,
+    setCurrency: s.setCurrency,
+    convertExpenseCurrencies: s.convertAllCurrencies,
+    addCategory: s.addCategory,
+    updateCategory: s.updateCategory,
+    deleteCategory: s.deleteCategory,
+    reorderCategories: s.reorderCategories,
+    resetAllData: s.resetAllData,
+  }))
+);
 
-  const { userName, userEmail, userAvatarId, setCurrencyCode } = useSettingsStore();
+  const { userName, userEmail, userAvatarId, setCurrencyCode, shortcutSaved } = useSettingsStore();
   const { convertAllCurrencies } = useSubscriptionStore();
+  const updateInfo = useAppUpdateManager();
 
   const scrollRef = useRef<ScrollView>(null);
 
@@ -187,13 +215,24 @@ export const ExpenseSettings: React.FC = () => {
   const baseWidth = gridMeasuredWidth > 0 ? gridMeasuredWidth : screenWidth - 60;
   const tileWidth = Math.floor((baseWidth - 2 * TILE_GAP) / 3);
 
+  // Category Modal: exactly 6 columns filling 100% of sheet width evenly
+  const modalAvailableWidth = Math.max(screenWidth - 40, 280);
+  const modalIconTileSize = Math.floor((modalAvailableWidth - 5 * 8) / 6);
+  const modalColorCircleSize = Math.floor((modalAvailableWidth - 5 * 10) / 6);
+
   // Category Edit / Add State
   const [isEditingCategories, setIsEditingCategories] = useState(false);
   const [isDraggingAnyTile, setIsDraggingAnyTile] = useState(false);
 
-  // Exit category edit mode when switching tabs or unfocusing
+  // Standard HIG tap active tab to scroll to top
+  useScrollToTop(scrollRef);
+
+  // Reset scroll to top ONLY when actively switching tabs from another tab
   useFocusEffect(
     useCallback(() => {
+      handleTabFocus('settings', () => {
+        scrollRef.current?.scrollTo({ y: 0, animated: false });
+      });
       return () => {
         setIsEditingCategories(false);
         setIsDraggingAnyTile(false);
@@ -260,6 +299,10 @@ export const ExpenseSettings: React.FC = () => {
   const customBudgetCount = useMemo(() => {
     return Object.values(categoryBudgets || {}).filter((v) => v > 0).length;
   }, [categoryBudgets]);
+
+  const displayCategories = useMemo(() => {
+    return getUserCategories(categories);
+  }, [categories]);
 
   const filteredCurrencies = useMemo(() => {
     const q = currencySearch.trim().toLowerCase();
@@ -486,25 +529,14 @@ export const ExpenseSettings: React.FC = () => {
   };
 
   const handleSmoothReorder = (fromIdx: number, toIdx: number) => {
-    reorderCategories(fromIdx, toIdx);
-  };
-
-  const handleEraseAllData = () => {
-    Alert.alert(
-      'Erase All Expense Data',
-      'This permanently removes every transaction, account, category, budget and vault. The audit log is intentionally kept. This cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Erase Everything',
-          style: 'destructive',
-          onPress: () => {
-            resetAllData();
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          },
-        },
-      ]
-    );
+    const fromCat = displayCategories[fromIdx];
+    const toCat = displayCategories[toIdx];
+    if (!fromCat || !toCat) return;
+    const actualFromIdx = categories.findIndex((c) => c.id === fromCat.id);
+    const actualToIdx = categories.findIndex((c) => c.id === toCat.id);
+    if (actualFromIdx !== -1 && actualToIdx !== -1) {
+      reorderCategories(actualFromIdx, actualToIdx);
+    }
   };
 
   const getTileBgColor = (color: string) => {
@@ -562,10 +594,84 @@ export const ExpenseSettings: React.FC = () => {
           <AppText style={styles.headerTitle}>SETTINGS</AppText>
         </Animated.View>
 
-        {/* 2. Currency Card */}
+        {/* 1. Hero Profile Card (Top Focal Point) */}
+        <Animated.View
+          style={[
+            styles.profileCardContainer,
+            {
+              opacity: animProfile,
+              transform: [
+                {
+                  translateY: animProfile.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [14, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
+          <TouchableOpacity
+            style={styles.profileCardPressable}
+            activeOpacity={0.78}
+            onPress={() => {
+              Haptics.selectionAsync().catch(() => {});
+              router.push('/settings/personalization');
+            }}
+          >
+            {/* Avatar Focal Point with Frosted Glow Border */}
+            <View style={styles.avatarFocalWrapper}>
+              <ProfileAvatar
+                avatarId={userAvatarId}
+                name={userName}
+                size={52}
+                showBorder={true}
+              />
+              <View style={styles.avatarPrivateBadge}>
+                <ShieldCheck size={10} color="#70D6BC" strokeWidth={2.5} />
+              </View>
+            </View>
+
+            {/* Profile Hierarchy Info */}
+            <View style={styles.profileMetaCol}>
+              <View style={styles.profileHeaderLine}>
+                <AppText style={styles.profileNamePrimary} numberOfLines={1}>
+                  {userName.trim() || 'Personal Vault'}
+                </AppText>
+                {/* <View style={styles.profileTypeBadge}>
+                  <AppText style={styles.profileTypeBadgeText}>LOCAL · PRIVATE</AppText>
+                </View> */}
+              </View>
+
+              <AppText style={styles.profileEmailSub} numberOfLines={1}>
+                {userEmail.trim() || '100% on-device encrypted'}
+              </AppText>
+
+              <View style={styles.profileActionPromptRow}>
+                <Sparkles size={11} color={expenseColors.accentPeach} />
+                <AppText style={styles.profileActionPromptText}>
+                  Personalization & Avatar
+                </AppText>
+              </View>
+            </View>
+
+            {/* Subtle Chevron Action Affordance */}
+            <View style={styles.profileChevronCircle}>
+              <ChevronRight size={15} color="#A2AEBB" strokeWidth={2.4} />
+            </View>
+          </TouchableOpacity>
+        </Animated.View>
+
+        {/* ══════════════════════════════════════════════
+            SECTION 1: FINANCIAL PREFERENCES
+        ══════════════════════════════════════════════ */}
+        <View style={styles.sectionHeaderWrap}>
+          <AppText style={styles.sectionCategoryHeader}>FINANCIAL PREFERENCES</AppText>
+        </View>
+
+        {/* Currency Card */}
         <Animated.View
           style={{
-            marginTop: 16,
             opacity: animCurrency,
             transform: [
               {
@@ -583,13 +689,13 @@ export const ExpenseSettings: React.FC = () => {
             onPress={openCurrencyModal}
           >
             <View style={styles.cardRowBetween}>
-              <View>
-                <AppText style={styles.cardTitle}>CURRENCY</AppText>
+              <View style={{ flex: 1 }}>
+                <AppText style={styles.cardTitle}>BASE CURRENCY</AppText>
                 <AppText style={styles.settingMainValue}>
                   {currentCurrency.symbol} {currentCurrency.code} — {currentCurrency.name}
                 </AppText>
                 <AppText style={styles.settingSubValue}>
-                  Preview: {currentCurrency.symbol}12,345
+                  Live conversion enabled ({currentCurrency.flag})
                 </AppText>
               </View>
               <ChevronRight size={18} color={expenseColors.textSubtle} />
@@ -597,7 +703,7 @@ export const ExpenseSettings: React.FC = () => {
           </TouchableOpacity>
         </Animated.View>
 
-        {/* 3. Compact Categories Card (Reduced Height, Compact Spacing, Hold & Drag) */}
+        {/* Compact Categories Card */}
         <Animated.View
           style={[
             styles.categoriesCard,
@@ -616,7 +722,7 @@ export const ExpenseSettings: React.FC = () => {
         >
           <View style={styles.categoriesCardHeader}>
             <View>
-              <AppText style={styles.cardTitleCompact}>CATEGORIES</AppText>
+              <AppText style={styles.cardTitleCompact}>EXPENSE CATEGORIES</AppText>
               {isEditingCategories && (
                 <AppText style={styles.reorderHint}>Hold & drag to re-order</AppText>
               )}
@@ -649,7 +755,7 @@ export const ExpenseSettings: React.FC = () => {
             }}
           >
             <DraggableCategoriesGrid
-              categories={categories}
+              categories={displayCategories}
               tileWidth={tileWidth}
               isEditing={isEditingCategories}
               getTileBgColor={getTileBgColor}
@@ -663,7 +769,7 @@ export const ExpenseSettings: React.FC = () => {
           </View>
         </Animated.View>
 
-        {/* 4. Monthly Budget Card */}
+        {/* Monthly Budget Card */}
         <Animated.View
           style={{
             opacity: animBudget,
@@ -683,7 +789,7 @@ export const ExpenseSettings: React.FC = () => {
             onPress={() => router.push('/settings/budget')}
           >
             <View style={styles.cardRowBetween}>
-              <View>
+              <View style={{ flex: 1 }}>
                 <AppText style={styles.cardTitle}>MONTHLY BUDGET</AppText>
                 <AppText style={styles.settingMainValue}>
                   {`${currentCurrency.symbol}${monthlyBudget.toLocaleString('en-IN')}`}
@@ -697,108 +803,186 @@ export const ExpenseSettings: React.FC = () => {
           </TouchableOpacity>
         </Animated.View>
 
+        {/* ══════════════════════════════════════════════
+            SECTION 2: SYSTEM & AUTOMATION
+        ══════════════════════════════════════════════ */}
+        <View style={styles.sectionHeaderWrap}>
+          <AppText style={styles.sectionCategoryHeader}>SYSTEM & AUTOMATION</AppText>
+        </View>
 
-        <Animated.View
-          style={{
-            opacity: animData,
-            transform: [
-              {
-                translateY: animData.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [16, 0],
-                }),
-              },
-            ],
-          }}
-        >
-          <TouchableOpacity
-            style={styles.cardContainer}
-            activeOpacity={0.7}
-            onPress={() => router.push('/settings/data')}
-          >
-            <View style={styles.cardRowBetween}>
-              <View style={styles.iconRowLeft}>
-                <View style={styles.orangeIconCircle}>
-                  <Lock size={16} color={expenseColors.accentPeach} />
-                </View>
-                <View>
-                  <AppText style={styles.cardTitle}>YOUR DATA</AppText>
-                  <AppText style={styles.settingSubValue}>
-                    How your data is stored and secured
-                  </AppText>
-                </View>
-              </View>
-              <ChevronRight size={18} color={expenseColors.textSubtle} />
-            </View>
-          </TouchableOpacity>
-        </Animated.View>
-
-        {/* 7. Redesigned Premium Profile Card */}
         <Animated.View
           style={[
-            styles.profileCardContainer,
+            styles.groupedInsetCard,
             {
-              opacity: animProfile,
+              opacity: animData,
               transform: [
                 {
-                  translateY: animProfile.interpolate({
+                  translateY: animData.interpolate({
                     inputRange: [0, 1],
-                    outputRange: [18, 0],
+                    outputRange: [16, 0],
                   }),
                 },
               ],
             },
           ]}
         >
+          {/* Notifications */}
           <TouchableOpacity
-            style={styles.profileCardPressable}
-            activeOpacity={0.78}
+            style={styles.groupedRowItem}
+            activeOpacity={0.7}
             onPress={() => {
-              Haptics.selectionAsync().catch(() => {});
-              router.push('/settings/personalization');
+              Haptics.selectionAsync();
+              router.push('/settings/notifications');
             }}
           >
-            {/* Avatar Focal Point with Frosted Glow Border */}
-            <View style={styles.avatarFocalWrapper}>
-              <ProfileAvatar
-                avatarId={userAvatarId}
-                name={userName}
-                size={54}
-                showBorder={true}
-              />
-              <View style={styles.avatarPrivateBadge}>
-                <ShieldCheck size={10} color="#70D6BC" strokeWidth={2.5} />
+            <View style={styles.iconRowLeft}>
+              <View style={styles.orangeIconCircle}>
+                <Bell size={16} color={expenseColors.accentPeach} />
               </View>
-            </View>
-
-            {/* Profile Hierarchy Info */}
-            <View style={styles.profileMetaCol}>
-              <View style={styles.profileHeaderLine}>
-                <AppText style={styles.profileNamePrimary} numberOfLines={1}>
-                  {userName.trim() || 'Personal Vault'}
-                </AppText>
-                <View style={styles.profileTypeBadge}>
-                  <AppText style={styles.profileTypeBadgeText}>LOCAL</AppText>
-                </View>
-              </View>
-
-              <AppText style={styles.profileEmailSub} numberOfLines={1}>
-                {userEmail.trim() || '100% on-device & private'}
-              </AppText>
-
-              <View style={styles.profileActionPromptRow}>
-                <AppText style={styles.profileActionPromptText}>
-                  Personalization & Avatar
+              <View style={{ flex: 1 }}>
+                <AppText style={styles.groupedRowTitle}>NOTIFICATIONS</AppText>
+                <AppText style={styles.settingSubValue} numberOfLines={1}>
+                  Daily logging reminders & bill due alerts
                 </AppText>
               </View>
             </View>
+            <ChevronRight size={18} color={expenseColors.textSubtle} />
+          </TouchableOpacity>
 
-            {/* Subtle Chevron Action Affordance */}
-            <View style={styles.profileChevronCircle}>
-              <ChevronRight size={15} color="#A2AEBB" strokeWidth={2.4} />
+          <View style={styles.groupedRowDivider} />
+
+          {/* Quick Add Shortcut */}
+          <TouchableOpacity
+            style={styles.groupedRowItem}
+            activeOpacity={0.7}
+            onPress={() => {
+              Haptics.selectionAsync();
+              router.push('/settings/shortcut-setup');
+            }}
+          >
+            <View style={styles.iconRowLeft}>
+              <View style={styles.orangeIconCircle}>
+                <Zap size={16} color={expenseColors.accentPeach} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <AppText style={styles.groupedRowTitle}>QUICK ADD SHORTCUT</AppText>
+                <AppText style={styles.settingSubValue} numberOfLines={1}>
+                  {shortcutSaved
+                    ? 'Saved to Shortcuts — ready for Back Tap'
+                    : 'Log expense by double tapping back of phone'}
+                </AppText>
+              </View>
             </View>
+            <ChevronRight size={18} color={expenseColors.textSubtle} />
+          </TouchableOpacity>
+
+          <View style={styles.groupedRowDivider} />
+
+          {/* Data & Privacy */}
+          <TouchableOpacity
+            style={styles.groupedRowItem}
+            activeOpacity={0.7}
+            onPress={() => {
+              Haptics.selectionAsync();
+              router.push('/settings/data');
+            }}
+          >
+            <View style={styles.iconRowLeft}>
+              <View style={styles.orangeIconCircle}>
+                <Lock size={16} color={expenseColors.accentPeach} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <AppText style={styles.groupedRowTitle}>DATA & PRIVACY</AppText>
+                <AppText style={styles.settingSubValue} numberOfLines={1}>
+                  On-device vault, audit logs & CSV export
+                </AppText>
+              </View>
+            </View>
+            <ChevronRight size={18} color={expenseColors.textSubtle} />
           </TouchableOpacity>
         </Animated.View>
+
+        {/* ══════════════════════════════════════════════
+            SECTION 3: ABOUT & DIAGNOSTICS
+        ══════════════════════════════════════════════ */}
+        <View style={styles.sectionHeaderWrap}>
+          <AppText style={styles.sectionCategoryHeader}>ABOUT & DIAGNOSTICS</AppText>
+        </View>
+
+        <View style={styles.groupedInsetCard}>
+          {/* App Updates Row */}
+          <TouchableOpacity
+            style={styles.groupedRowItem}
+            activeOpacity={0.7}
+            onPress={() => {
+              Haptics.selectionAsync();
+              router.push('/settings/updates');
+            }}
+          >
+            <View style={styles.iconRowLeft}>
+              <View style={styles.iconCircleSlate}>
+                <RefreshCw size={16} color="#A2AEBB" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <AppText style={styles.groupedRowTitle}>APP UPDATES</AppText>
+                <AppText style={styles.settingSubValue} numberOfLines={1}>
+                  {updateInfo.isUpdatePending
+                    ? 'Update downloaded · Restart required'
+                    : updateInfo.isUpdateAvailable
+                    ? 'New version available for download'
+                    : 'Over-the-air releases & auto updates'}
+                </AppText>
+              </View>
+            </View>
+
+            {updateInfo.isUpdatePending ? (
+              <View style={styles.updateBadgeReady}>
+                <View style={styles.updateBadgeDotGreen} />
+                <AppText style={styles.updateBadgeTextGreen}>READY</AppText>
+              </View>
+            ) : updateInfo.isUpdateAvailable ? (
+              <View style={styles.updateBadgeAvail}>
+                <AppText style={styles.updateBadgeTextPeach}>NEW</AppText>
+              </View>
+            ) : (
+              <ChevronRight size={18} color={expenseColors.textSubtle} />
+            )}
+          </TouchableOpacity>
+
+          <View style={styles.groupedRowDivider} />
+
+          {/* App Version Row */}
+          <View style={styles.groupedRowItemStatic}>
+            <View style={styles.iconRowLeft}>
+              <View style={styles.iconCircleSlate}>
+                <Smartphone size={16} color="#A2AEBB" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <AppText style={styles.groupedRowTitle}>APP VERSION</AppText>
+                <AppText style={styles.settingSubValue}>
+                  {updateInfo.activeVersion || CURRENT_RELEASE_VERSION} {updateInfo.isEmbeddedLaunch ? '(Base)' : '(OTA)'} · Channel {updateInfo.channel || 'preview'}
+                </AppText>
+              </View>
+            </View>
+            {updateInfo.updateId ? (
+              <View style={styles.otaHashBadge}>
+                <AppText style={styles.otaHashText}>
+                  #{updateInfo.updateId.substring(0, 8)}
+                </AppText>
+              </View>
+            ) : null}
+          </View>
+        </View>
+
+        {/* Footer Credit & Version */}
+        <View style={styles.footerCreditWrap}>
+          <AppText style={styles.footerVersionText}>
+            Version {updateInfo.activeVersion || CURRENT_RELEASE_VERSION} {updateInfo.isEmbeddedLaunch ? '· Base' : '· OTA'}
+          </AppText>
+          <AppText style={styles.footerAuthorText}>
+            {AUTHOR_CREDIT}
+          </AppText>
+        </View>
       </ScrollView>
 
       {/* ══════════════════════════════════════════════
@@ -868,7 +1052,7 @@ export const ExpenseSettings: React.FC = () => {
             {/* Icon Picker Section */}
             <AppText style={styles.sectionHeading}>ICON</AppText>
             <View style={styles.iconGrid}>
-              {AVAILABLE_ICONS.slice(0, 12).map((iconItem) => {
+              {AVAILABLE_ICONS.map((iconItem) => {
                 const isSelected = selectedIcon === iconItem.name;
                 const IconComp = iconItem.component;
                 return (
@@ -876,6 +1060,7 @@ export const ExpenseSettings: React.FC = () => {
                     key={iconItem.name}
                     style={[
                       styles.iconSelectBox,
+                      { width: modalIconTileSize, height: modalIconTileSize },
                       isSelected && styles.iconSelectBoxActive,
                     ]}
                     activeOpacity={0.7}
@@ -883,8 +1068,8 @@ export const ExpenseSettings: React.FC = () => {
                   >
                     <IconComp
                       size={20}
-                      color="#FFFFFF"
-                      fill={iconItem.name === 'Star' && isSelected ? '#FFFFFF' : 'none'}
+                      color={isSelected ? expenseColors.accentPeach : '#A2AEBB'}
+                      fill={iconItem.name === 'Star' && isSelected ? expenseColors.accentPeach : 'none'}
                     />
                   </TouchableOpacity>
                 );
@@ -899,12 +1084,21 @@ export const ExpenseSettings: React.FC = () => {
                 return (
                   <TouchableOpacity
                     key={col}
-                    style={[styles.colorCircle, { backgroundColor: col }]}
+                    style={[
+                      styles.colorCircle,
+                      {
+                        width: modalColorCircleSize,
+                        height: modalColorCircleSize,
+                        borderRadius: Math.floor(modalColorCircleSize / 2),
+                        backgroundColor: col,
+                      },
+                      isSelected && styles.colorCircleActive,
+                    ]}
                     activeOpacity={0.8}
                     onPress={() => setSelectedColor(col)}
                   >
                     {isSelected && (
-                      <Check size={16} color="#FFFFFF" strokeWidth={3} />
+                      <Check size={16} color="#16171E" strokeWidth={3} />
                     )}
                   </TouchableOpacity>
                 );
@@ -1512,52 +1706,125 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
   },
-  themeGrid: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 4,
-  },
-  themeTileCol: {
-    alignItems: 'center',
-    width: '22%',
-  },
-  themeTile: {
-    width: '100%',
-    height: 60,
-    borderRadius: 14,
-    padding: 12,
-    justifyContent: 'center',
-    gap: 6,
+  sectionHeaderWrap: {
+    paddingHorizontal: 18,
+    marginTop: 18,
     marginBottom: 8,
   },
-  themePreviewLine1: {
-    height: 4,
-    width: '60%',
-    backgroundColor: 'rgba(0,0,0,0.2)',
-    borderRadius: 2,
+  sectionCategoryHeader: {
+    color: '#6F7485',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.2,
   },
-  themePreviewLine2: {
-    height: 4,
-    width: '40%',
-    backgroundColor: 'rgba(0,0,0,0.2)',
-    borderRadius: 2,
+  groupedInsetCard: {
+    backgroundColor: expenseColors.bgCard,
+    borderRadius: 20,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: expenseColors.borderCard,
+    overflow: 'hidden',
   },
-  themeLabel: {
-    color: expenseColors.textMuted,
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-    marginBottom: 4,
+  groupedRowItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
   },
-  themeSelectedDot: {
+  groupedRowItemStatic: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
+  groupedRowDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    marginLeft: 56,
+  },
+  groupedRowTitle: {
+    color: expenseColors.textPrimary,
+    fontSize: 13,
+    lineHeight: 16,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+    marginBottom: 3,
+  },
+  destructiveRowTitle: {
+    color: expenseColors.accentRed,
+    fontSize: 13,
+    lineHeight: 16,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+    marginBottom: 3,
+  },
+  iconCircleSlate: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  destructiveIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(244, 139, 139, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  updateBadgeReady: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    backgroundColor: 'rgba(112, 214, 188, 0.15)',
+    borderWidth: 0.8,
+    borderColor: 'rgba(112, 214, 188, 0.3)',
+  },
+  updateBadgeDotGreen: {
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: expenseColors.accentPeach,
+    backgroundColor: '#70D6BC',
   },
-  dotPlaceholder: {
-    width: 6,
-    height: 6,
+  updateBadgeTextGreen: {
+    color: '#70D6BC',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  updateBadgeAvail: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 157, 102, 0.15)',
+    borderWidth: 0.8,
+    borderColor: 'rgba(255, 157, 102, 0.3)',
+  },
+  updateBadgeTextPeach: {
+    color: expenseColors.accentPeach,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  otaHashBadge: {
+    paddingHorizontal: 7,
+    paddingVertical: 2.5,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  otaHashText: {
+    color: '#8E919D',
+    fontSize: 11,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   editActionText: {
     color: expenseColors.textSubtle,
@@ -1857,34 +2124,42 @@ const styles = StyleSheet.create({
   iconGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
     gap: 8,
-    marginBottom: 8,
+    marginBottom: 12,
   },
   iconSelectBox: {
     width: 44,
     height: 44,
-    borderRadius: 10,
+    borderRadius: 12,
     backgroundColor: '#232633',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.05)',
   },
   iconSelectBoxActive: {
-    backgroundColor: '#353948',
+    backgroundColor: 'rgba(255, 157, 102, 0.15)',
+    borderColor: expenseColors.accentPeach,
   },
   colorPalette: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 16,
-    marginBottom: 12,
+    justifyContent: 'flex-start',
+    gap: 10,
+    marginBottom: 14,
     marginTop: 4,
   },
   colorCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  colorCircleActive: {
+    borderWidth: 2.5,
+    borderColor: '#FFFFFF',
   },
   submitBtn: {
     height: 52,
@@ -1967,5 +2242,23 @@ const styles = StyleSheet.create({
   currencyCodeSub: {
     color: expenseColors.textMuted,
     fontSize: 12,
+  },
+  footerCreditWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 24,
+    marginBottom: 20,
+    gap: 4,
+  },
+  footerVersionText: {
+    color: 'rgba(255, 255, 255, 0.55)',
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 0.3,
+  },
+  footerAuthorText: {
+    color: 'rgba(255, 255, 255, 0.35)',
+    fontSize: 11,
+    fontWeight: '500',
   },
 });

@@ -76,8 +76,21 @@ export function normalizeDateToISO(dateStr: string): string {
   const now = new Date();
   const todayISO = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
-  // 1. "DD MMM YYYY" e.g. "13 Sep 2026", "21-Sept-2026", "21/Sep./26", "15 September 2026"
   const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+  // 1a. "MMM DD, YYYY" e.g. "Sep 29, 2026", "September 29, 2026", "Sep 29 2026"
+  const mdyWord = clean.match(/([A-Za-z]{3,9}\.?)\s+(\d{1,2}),?\s+(\d{2,4})/);
+  if (mdyWord) {
+    const wordClean = mdyWord[1].toLowerCase().replace(/[^a-z]/g, '').slice(0, 3);
+    const mIdx = months.indexOf(wordClean);
+    const month = (mIdx >= 0 ? mIdx + 1 : 1).toString().padStart(2, '0');
+    const day = mdyWord[2].padStart(2, '0');
+    let year = mdyWord[3];
+    if (year.length === 2) year = `20${year}`;
+    return `${year}-${month}-${day}`;
+  }
+
+  // 1b. "DD MMM YYYY" e.g. "13 Sep 2026", "21-Sept-2026", "21/Sep./26", "15 September 2026"
   const dmyWord = clean.match(/(\d{1,2})[\s\-/]+([A-Za-z]{3,9}\.?)[\s\-/]+(\d{2,4})/);
   if (dmyWord) {
     const day = dmyWord[1].padStart(2, '0');
@@ -117,6 +130,44 @@ export function normalizeDateToISO(dateStr: string): string {
 }
 
 /**
+ * Clean complex bank/UPI narration strings into human-readable merchant names.
+ * e.g. "UPI/DR/621350657856/Protik /SBIN/protikchak/UPI" -> "Protik"
+ * e.g. "UPI/DR/188747162216/Netflix/utib/netflix.bd/Mandat" -> "Netflix"
+ * e.g. "UPI/DR/624010681420/CRED CCBP/UTIB/credccbp.a/rema" -> "CRED CCBP"
+ */
+export function cleanUpiNarration(raw: string): string {
+  if (!raw) return '';
+  const clean = raw.trim();
+
+  // 1. UPI/DR/.../MERCHANT/BANK/... or UPI/CR/.../MERCHANT/BANK/...
+  const upiMatch = clean.match(/UPI\/(?:DR|CR)\/\d+\/([^/]+)/i);
+  if (upiMatch && upiMatch[1]) {
+    const merchant = upiMatch[1].trim();
+    if (merchant.length > 1 && !/^\d+$/.test(merchant)) {
+      return merchant;
+    }
+  }
+
+  // 2. UPI/REVERSAL/...
+  if (/^UPI\/REV/i.test(clean)) {
+    return 'UPI Reversal';
+  }
+
+  // 3. ATM CASH ...
+  if (/^ATM\s+CASH/i.test(clean)) {
+    return clean.replace(/\s+/g, ' ');
+  }
+
+  // 4. POS / CARD / ECOM
+  const posMatch = clean.match(/POS\s+\d+\s+([A-Za-z0-9\s]+)/i);
+  if (posMatch) {
+    return posMatch[1].trim();
+  }
+
+  return clean;
+}
+
+/**
  * Multi-Tier Smart Categorizer:
  * 1. Historical learned merchant rules from user's past actions
  * 2. Exact category name match in user categories
@@ -128,7 +179,8 @@ export function classifyNarration(
   categories: ExpenseCategory[],
   learnedRules: Record<string, string> = {}
 ): { categoryId: string; confidence: 'high' | 'medium' | 'low' } {
-  const text = narration.toLowerCase();
+  const cleanMerchant = cleanUpiNarration(narration).toLowerCase();
+  const text = (cleanMerchant + ' ' + narration.toLowerCase()).trim();
 
   // Tier 1: Check learned merchant memory
   const normalizedKey = text.replace(/[^a-z0-9]/g, '').slice(0, 30);
@@ -214,6 +266,58 @@ export function classifyNarration(
   };
 }
 
+export const BANK_ALIASES: Record<string, string[]> = {
+  'State Bank of India': ['sbi', 'sbin', 'state bank of india', 'state bank'],
+  'HDFC Bank': ['hdfc', 'hdfc bank', 'hdfcbank'],
+  'ICICI Bank': ['icici', 'icici bank', 'icicibank'],
+  'Axis Bank': ['axis', 'axis bank', 'axisbank', 'neo axis', 'myzone axis'],
+  'Kotak Mahindra Bank': ['kotak', 'kotak mahindra', 'kotak bank'],
+  'Slice': ['slice', 'slice card'],
+  'Amazon Pay': ['amazon pay', 'amazon pay wallet', 'amazon wallet'],
+  'Paytm': ['paytm', 'paytm wallet', 'paytm payments bank'],
+  'Bank of Baroda': ['bob', 'bank of baroda', 'baroda'],
+  'Punjab National Bank': ['pnb', 'punjab national bank'],
+  'Canara Bank': ['canara', 'canara bank'],
+  'Union Bank of India': ['union bank', 'union bank of india', 'ubi'],
+  'IndusInd Bank': ['indusind', 'indusind bank'],
+  'Yes Bank': ['yes bank'],
+  'IDFC FIRST Bank': ['idfc', 'idfc first', 'idfc bank'],
+};
+
+export function resolveAccountForBank(bankName: string, existingAccounts: ExpenseAccount[]): string {
+  if (!bankName || bankName === 'Bank Statement' || bankName === 'Financial Report' || bankName === 'Statement Export') {
+    return existingAccounts[0]?.name || 'Primary Account';
+  }
+
+  // 1. Direct match with existing accounts
+  const directMatch = existingAccounts.find(
+    (a) => a.name.toLowerCase() === bankName.toLowerCase()
+  );
+  if (directMatch) return directMatch.name;
+
+  // 2. Alias match with existing accounts
+  const bankAliases = BANK_ALIASES[bankName] || [bankName.toLowerCase()];
+  for (const acc of existingAccounts) {
+    const accNameLower = acc.name.toLowerCase();
+    for (const alias of bankAliases) {
+      if (accNameLower === alias || accNameLower.includes(alias) || alias.includes(accNameLower)) {
+        return acc.name;
+      }
+    }
+  }
+
+  // 3. Substring match
+  const subMatch = existingAccounts.find(
+    (a) =>
+      bankName.toLowerCase().includes(a.name.toLowerCase()) ||
+      a.name.toLowerCase().includes(bankName.toLowerCase())
+  );
+  if (subMatch) return subMatch.name;
+
+  // 4. Return bankName as newly discovered account name
+  return bankName;
+}
+
 /**
  * Universal Statement Normalizer Engine
  * Supports both parsed PDF spatial rows and raw CSV/Text files.
@@ -245,6 +349,17 @@ export function normalizeStatementData(
     );
     if (directMatch) return directMatch.id;
 
+    // Alias match
+    for (const [bank, aliases] of Object.entries(BANK_ALIASES)) {
+      if (accName.toLowerCase() === bank.toLowerCase() || aliases.includes(accName.toLowerCase())) {
+        const match = existingAccounts.find((a) => {
+          const aLower = a.name.toLowerCase();
+          return aLower === bank.toLowerCase() || aliases.some((al) => aLower.includes(al) || al.includes(aLower));
+        });
+        if (match) return match.id;
+      }
+    }
+
     // Partial substring match (e.g. "Slice Card" matches "Slice")
     const partialMatch = existingAccounts.find(
       (a) =>
@@ -262,19 +377,36 @@ export function normalizeStatementData(
   if (input.pdfRows && input.pdfRows.length > 0) {
     const rows = input.pdfRows;
 
+    // 1. Detect Document-Level Statement Source / Bank Name from header rows (first 35 rows)
+    const headerLines = rows.slice(0, 35).map((r) => r.items.map((x) => x.text).join(' ')).join('\n');
+    if (/financial statement|expense statement|vault/i.test(headerLines)) {
+      bankName = 'Financial Report';
+    } else if (/statement export|ledger export/i.test(headerLines)) {
+      bankName = 'Statement Export';
+    } else if (/state\s*bank|sbi\b|sbin\d|sbi\.co/i.test(headerLines)) {
+      bankName = 'State Bank of India';
+    } else if (/hdfc\s+bank|hdfcbank/i.test(headerLines)) {
+      bankName = 'HDFC Bank';
+    } else if (/icici\s+bank|icicibank/i.test(headerLines)) {
+      bankName = 'ICICI Bank';
+    } else if (/axis\s+bank|axisbank/i.test(headerLines)) {
+      bankName = 'Axis Bank';
+    } else if (/kotak/i.test(headerLines)) {
+      bankName = 'Kotak Mahindra Bank';
+    } else if (/slice/i.test(headerLines)) {
+      bankName = 'Slice';
+    } else if (/chase\s+bank/i.test(headerLines)) {
+      bankName = 'Chase Bank';
+    }
+
+    if (bankName !== 'Financial Report' && bankName !== 'Statement Export') {
+      currentAccountName = resolveAccountForBank(bankName, existingAccounts);
+      accountsDetectedSet.add(currentAccountName);
+    }
+
     for (let rIdx = 0; rIdx < rows.length; rIdx++) {
       const row = rows[rIdx];
       const lineStr = row.items.map((x) => x.text).join(' ');
-
-      // 1. Bank Name detection
-      if (/klarr/i.test(lineStr)) bankName = 'Klarr Statement';
-      else if (/hdfc/i.test(lineStr)) bankName = 'HDFC Bank';
-      else if (/state bank|sbi\b/i.test(lineStr)) bankName = 'State Bank of India';
-      else if (/icici/i.test(lineStr)) bankName = 'ICICI Bank';
-      else if (/axis/i.test(lineStr)) bankName = 'Axis Bank';
-      else if (/kotak/i.test(lineStr)) bankName = 'Kotak Mahindra Bank';
-      else if (/slice/i.test(lineStr)) bankName = 'Slice';
-      else if (/chase/i.test(lineStr)) bankName = 'Chase Bank';
 
       // 2. Account Number Masking detection (e.g. "A/c: XX1234", "Account Number: *******1234")
       const accNumMatch = lineStr.match(/(?:a\/c|account|acct|card)(?:\s+no\.?)?[:\s]+([xX*0-9\s-]{4,20})/i);
@@ -298,38 +430,49 @@ export function normalizeStatementData(
         continue;
       }
 
+      // Skip report title/distribution headers
+      if (
+        /TRANSACTION LEDGER LOG/i.test(lineStr) ||
+        (/DATE/i.test(lineStr) && /CATEGORY/i.test(lineStr) && /ACCOUNT/i.test(lineStr)) ||
+        /CATEGORY SPENDING DISTRIBUTION/i.test(lineStr) ||
+        (/TOTAL INCOME/i.test(lineStr) && /TOTAL EXPENSES/i.test(lineStr))
+      ) {
+        continue;
+      }
+
       // 5. Opening / Closing Balance detection per account
-      if (/closing\s+balance/i.test(lineStr)) {
-        let amtStr = '';
-        const isNegative = lineStr.includes('-') || lineStr.toLowerCase().includes('dr');
+      if (/closing\s+balance|your\s+closing\s+balance/i.test(lineStr)) {
         for (const it of row.items) {
-          if (it.text.includes('₹') || it.text.includes('$') || /^[0-9,.]+$/.test(it.text)) {
-            amtStr += it.text.replace(/[₹$,\s]/g, '');
-          }
-        }
-        const val = parseFloat(amtStr);
-        if (!isNaN(val)) {
-          closingBalance = val;
-          const isCreditCard = /axis|credit|card|zone/i.test(currentAccountName);
-          if (isCreditCard) {
-            accountDueAmounts[currentAccountName] = val;
-          } else if (!isNegative) {
-            accountBalances[currentAccountName] = val;
+          if (it.text === 'null' || /closing|balance|your|date|mode/i.test(it.text)) continue;
+          const clean = it.text.replace(/[₹$,Rs\s]/g, '').trim();
+          if (/^[0-9]+(?:\.[0-9]+)?$/.test(clean) && !clean.includes('-')) {
+            const val = parseFloat(clean);
+            if (!isNaN(val)) {
+              closingBalance = val;
+              const isCreditCard = /axis|credit|card|zone/i.test(currentAccountName);
+              if (isCreditCard) {
+                accountDueAmounts[currentAccountName] = val;
+              } else {
+                accountBalances[currentAccountName] = val;
+              }
+              break;
+            }
           }
         }
         continue;
       }
 
-      if (/opening\s+balance/i.test(lineStr)) {
-        let amtStr = '';
+      if (/opening\s+balance|your\s+opening\s+balance/i.test(lineStr)) {
         for (const it of row.items) {
-          if (it.text.includes('₹') || it.text.includes('$') || /^[0-9,.]+$/.test(it.text)) {
-            amtStr += it.text.replace(/[₹$,\s]/g, '');
+          if (it.text === 'null' || /opening|balance|your|date|mode/i.test(it.text)) continue;
+          const clean = it.text.replace(/[₹$,Rs\s]/g, '').trim();
+          if (/^[0-9]+(?:\.[0-9]+)?$/.test(clean) && !clean.includes('-')) {
+            const val = parseFloat(clean);
+            if (!isNaN(val)) {
+              openingBalance = val;
+              break;
+            }
           }
-        }
-        const val = parseFloat(amtStr);
-        if (!isNaN(val)) {
-          openingBalance = val;
         }
         continue;
       }
@@ -338,7 +481,7 @@ export function normalizeStatementData(
       // Check if row begins with a valid date token
       const firstTwo = row.items.slice(0, 2).map((x) => x.text).join(' ');
       const dateMatch = firstTwo.match(
-        /(\d{1,2}[\s\-/]+[A-Za-z]{3}[\s\-/]+\d{2,4}|\d{1,2}[\s\-/]+\d{1,2}[\s\-/]+\d{2,4}|\d{4}[\s\-/]+\d{2}[\s\-/]+\d{2})/
+        /(\d{1,2}[\s\-/]+[A-Za-z]{3}[\s\-/]+\d{2,4}|\d{1,2}[\s\-/]+[A-Za-z]{3,9}[\s\-/]+\d{2,4}|\d{1,2}[\s\-/]+\d{1,2}[\s\-/]+\d{2,4}|\d{4}[\s\-/]+\d{2}[\s\-/]+\d{2}|[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4})/
       );
 
       if (dateMatch) {
@@ -349,42 +492,72 @@ export function normalizeStatementData(
         const amountValues: number[] = [];
         for (let i = 0; i < row.items.length; i++) {
           const it = row.items[i];
-          if (it.text.includes('₹') || it.text.includes('$')) {
-            let numStr = it.text.replace(/[₹$,\s]/g, '').trim();
+          if (it.text.includes('₹') || it.text.includes('$') || it.text.includes('Rs')) {
+            let numStr = it.text.replace(/[₹$,Rs.\s]/g, '').trim();
             // Handle split tokens e.g. "₹1", ",", "016"
             let nextIdx = i + 1;
             while (
               nextIdx < row.items.length &&
-              (row.items[nextIdx].text === ',' || /^[0-9]+$/.test(row.items[nextIdx].text))
+              (row.items[nextIdx].text === ',' || /^[0-9]+(?:\.[0-9]+)?$/.test(row.items[nextIdx].text))
             ) {
               numStr += row.items[nextIdx].text;
               nextIdx++;
             }
             const val = parseFloat(numStr.replace(/,/g, ''));
-            if (!isNaN(val) && val > 0) amountValues.push(val);
-          } else if (/^[0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]{2})?$|^[0-9]+\.[0-9]{2}$/.test(it.text)) {
-            const val = parseFloat(it.text.replace(/,/g, ''));
-            if (!isNaN(val) && val > 0 && val < 100000000) amountValues.push(val);
+            if (!isNaN(val)) amountValues.push(val);
+          } else {
+            const cleanNum = it.text.replace(/,/g, '').trim();
+            if (/^[0-9]+(?:\.[0-9]+)?$/.test(cleanNum)) {
+              const val = parseFloat(cleanNum);
+              if (!isNaN(val) && val < 100000000) {
+                amountValues.push(val);
+              }
+            }
           }
         }
 
-        let parsedAmount = amountValues[0] || 0;
-        let parsedBalance = amountValues.length > 1 ? amountValues[amountValues.length - 1] : undefined;
+        // Determine transaction type and amount from multi-column bank layouts
+        const isExplicitCredit =
+          lineStr.includes('/CR/') ||
+          /\b(credit|cr\.|deposit|interest\s+credit|dividend|refund)\b/i.test(lineStr) ||
+          /salary|payroll|bonus|stipend/i.test(lineStr);
+        const isExplicitDebit =
+          lineStr.includes('/DR/') ||
+          /\b(debit|dr\.|atm\s+cash|pos|wdl|withdrawal)\b/i.test(lineStr);
+
+        let parsedAmount = 0;
+        let parsedBalance: number | undefined;
+        let isIncome = isExplicitCredit;
+
+        const nonZeroAmounts = amountValues.filter((v) => v > 0);
+
+        if (amountValues.length >= 3) {
+          // Format [Col1, Col2, Balance] e.g. [Credit, Debit, Balance] or [Debit, Credit, Balance]
+          parsedBalance = amountValues[amountValues.length - 1];
+          const col1 = amountValues[0];
+          const col2 = amountValues[1];
+
+          if (col1 > 0 && col2 === 0) {
+            parsedAmount = col1;
+            if (!isExplicitDebit) isIncome = isExplicitCredit || true;
+          } else if (col2 > 0 && col1 === 0) {
+            parsedAmount = col2;
+            if (!isExplicitCredit) isIncome = false;
+          } else if (col1 > 0) {
+            parsedAmount = col1;
+          }
+        } else if (amountValues.length === 2) {
+          parsedAmount = nonZeroAmounts[0] || amountValues[0];
+          parsedBalance = amountValues[1];
+        } else if (nonZeroAmounts.length > 0) {
+          parsedAmount = nonZeroAmounts[0];
+          if (nonZeroAmounts.length > 1) {
+            parsedBalance = nonZeroAmounts[nonZeroAmounts.length - 1];
+          }
+        }
 
         // Skip rows where amount is 0 (header/footer timestamps)
         if (parsedAmount <= 0) continue;
-
-        // Check if Credit (Income) or Debit (Expense)
-        const isSalaryOrIncome =
-          /salary|payroll|dividend|refund|cashback|bonus|stipend|interest credit/i.test(lineStr) ||
-          row.items.some((it) => /salary|payroll|deposit/i.test(it.text.trim()));
-
-        let isIncome =
-          isSalaryOrIncome ||
-          lineStr.toLowerCase().includes('credit') ||
-          lineStr.toLowerCase().includes('cr.') ||
-          lineStr.toLowerCase().includes('refund') ||
-          lineStr.toLowerCase().includes('deposit');
 
         // Check for Internal Self-Transfer / Card Payment / ATM
         let txnType: TransactionType = isIncome ? 'income' : 'expense';
@@ -413,22 +586,38 @@ export function normalizeStatementData(
         const cleanTokens = row.items
           .filter(
             (x) =>
-              !x.text.match(/(\d{1,2}[\s\-/]+[A-Za-z]{3}[\s\-/]+\d{2,4}|\d{1,2}[\s\-/]+\d{1,2}[\s\-/]+\d{2,4})/) &&
+              !x.text.match(/(\d{1,2}[\s\-/]+[A-Za-z]{3}[\s\-/]+\d{2,4}|\d{1,2}[\s\-/]+\d{1,2}[\s\-/]+\d{2,4}|[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4})/) &&
               !x.text.includes('₹') &&
               !x.text.includes('$') &&
-              !/^[0-9,.\s-]+$/.test(x.text) &&
-              !['DEBIT', 'CREDIT', 'DR', 'CR', 'EXPENSES', 'INCOME', '--', '-', ','].includes(x.text.toUpperCase())
+              !/^[0-9,.\s\-+]+$/.test(x.text) &&
+              !['DEBIT', 'CREDIT', 'DR', 'CR', 'EXPENSES', 'INCOME', '--', '-', '+', ',', '🚬', 'NULL'].includes(x.text.toUpperCase())
           )
           .map((x) => x.text);
 
-        let narration = cleanTokens[0] || (isSalaryOrIncome ? 'Salary' : 'Transaction');
+        let rowAccountName = currentAccountName;
+        let rawNarration = cleanTokens[0] || (isIncome ? 'Income' : 'Transaction');
         let categorySuggestion = cleanTokens.length > 1 ? cleanTokens[1] : undefined;
 
-        if (narration.toLowerCase() === 'cigarettes' && !categorySuggestion) {
+        // Check if row matches App Export Table format: [Category, Account, Note / Merchant]
+        const matchedAcc = existingAccounts.find(
+          (a) => cleanTokens.length >= 2 && a.name.toLowerCase() === cleanTokens[1].toLowerCase()
+        );
+
+        if (matchedAcc && cleanTokens.length >= 2) {
+          categorySuggestion = cleanTokens[0];
+          rowAccountName = matchedAcc.name;
+          rawNarration = cleanTokens.slice(2).join(' ') || categorySuggestion;
+        } else if (cleanTokens.length >= 2 && !categorySuggestion) {
+          categorySuggestion = cleanTokens[1];
+        }
+
+        const displayNarration = cleanUpiNarration(rawNarration) || rawNarration;
+
+        if (displayNarration.toLowerCase() === 'cigarettes' && !categorySuggestion) {
           categorySuggestion = 'Cigarettes';
         }
 
-        // Categorize
+        // Categorize using both clean merchant and raw text
         let matchedCatId = isIncome ? 'cat_salary' : (existingCategories.find((c) => c.id === 'cat_misc')?.id || 'cat_misc');
         let confidence: 'high' | 'medium' | 'low' = 'low';
 
@@ -440,36 +629,37 @@ export function normalizeStatementData(
             matchedCatId = directCat.id;
             confidence = 'high';
           } else {
-            const res = classifyNarration(narration + ' ' + categorySuggestion, existingCategories, learnedRules);
+            const res = classifyNarration(rawNarration + ' ' + categorySuggestion, existingCategories, learnedRules);
             matchedCatId = res.categoryId;
             confidence = res.confidence;
           }
         } else {
-          const res = classifyNarration(narration, existingCategories, learnedRules);
+          const res = classifyNarration(rawNarration, existingCategories, learnedRules);
           matchedCatId = res.categoryId;
           confidence = res.confidence;
         }
 
         // Deduplication signature check
-        const compositeHash = generateCompositeHash(isoDate, parsedAmount, txnType, narration);
+        const compositeHash = generateCompositeHash(isoDate, parsedAmount, txnType, rawNarration);
         const isDuplicate = existingTransactions.some((tx) => {
           const txHash = generateCompositeHash(tx.date, tx.amount, tx.type, tx.note || '');
           return txHash === compositeHash;
         });
 
-        const targetAccId = resolveAccountId(currentAccountName);
+        const targetAccId = resolveAccountId(rowAccountName);
+        accountsDetectedSet.add(rowAccountName);
 
         stagedTxs.push({
           id: `staged_${Date.now()}_${stagedTxs.length}_${Math.random().toString(36).slice(2, 6)}`,
           selected: !isDuplicate, // Pre-select only new transactions!
           date: isoDate,
           rawDate,
-          narration: narration.toUpperCase(),
+          narration: displayNarration.toUpperCase(),
           amount: parsedAmount,
           type: txnType,
           categoryId: matchedCatId,
           categoryConfidence: confidence,
-          accountName: currentAccountName,
+          accountName: rowAccountName,
           accountId: targetAccId,
           toAccountId: toAccName ? resolveAccountId(toAccName) : undefined,
           toAccountName: toAccName,

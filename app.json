@@ -6,10 +6,11 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "subscription",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "dark",
     "ios": {
       "icon": "./assets/images/icon.png",
       "bundleIdentifier": "com.tirtharajbarma.subscription",
+      "userInterfaceStyle": "dark",
       "infoPlist": {
         "NSFaceIDUsageDescription": "Authentication is required to unlock the app and access your subscription details."
       }
@@ -20,6 +21,11 @@
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      },
+      "userInterfaceStyle": "dark",
+      "navigationBar": {
+        "backgroundColor": "#12141A",
+        "barStyle": "light-content"
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.tirtharajbarma.subscription"
@@ -42,12 +48,31 @@
       "@react-native-community/datetimepicker",
       "expo-sharing",
       "./plugins/with-ios-source-react-native",
+      "./plugins/with-android-release-architectures",
+      "./plugins/with-app-intents",
+      "./plugins/with-android-app-shortcut",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableMinifyInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true
+          }
+        }
+      ],
       "expo-image",
-      "expo-web-browser"
+      "expo-web-browser",
+      "./plugins/with-ios-scene-lifecycle",
+      "./plugins/with-ios-local-no-push"
     ],
     "experiments": {
       "typedRoutes": true,
-      "reactCompiler": true
+      "reactCompiler": true,
+      "inlineModules": {
+        "watchedDirectories": [
+          "app-intents"
+        ]
+      }
     },
     "extra": {
       "router": {},
@@ -57,6 +82,15 @@
       "supabaseUrl": "https://nvsjrfzzessvynnuurcg.supabase.co",
       "supabaseAnonKey": "sb_publishable_hmdnizlu8wzE6EwOj2IJvw_0mc9qG7J"
     },
-    "owner": "tirtharaj_barma"
+    "owner": "tirtharaj_barma",
+    "runtimeVersion": "1",
+    "updates": {
+      "url": "https://u.expo.dev/382b12ce-7c53-4d52-9dd2-8206e0bdea03",
+      "requestHeaders": {
+        "expo-channel-name": "preview"
+      },
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 3000
+    }
   }
 }

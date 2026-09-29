@@ -44,6 +44,7 @@ import * as Haptics from 'expo-haptics';
 import { AppText, ProfileAvatar } from '@/components/ui';
 import { expenseColors } from '@/constants/expenseColors';
 import { useExpenseStore } from '@/store/useExpenseStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useSettingsStore } from '@/store/useSettingsStore';
 import { AVATAR_OPTIONS } from '@/constants/avatars';
 import { parsePdfDocument, base64ToUint8Array } from '@/utils/pdfParser';
@@ -62,15 +63,26 @@ export const AppWalkthroughModal: React.FC<AppWalkthroughModalProps> = ({ visibl
   const insets = useSafeAreaInsets();
   const { width: screenWidth } = useWindowDimensions();
   const {
-    accounts,
-    setMonthlyBudget,
-    setHasSeenWalkthrough,
-    currencySymbol,
-    categories,
-    transactions,
-    addBatchTransactions,
-    learnedMerchantRules,
-  } = useExpenseStore();
+  accounts,
+  setMonthlyBudget,
+  setHasSeenWalkthrough,
+  currencySymbol,
+  categories,
+  transactions,
+  addBatchTransactions,
+  learnedMerchantRules,
+} = useExpenseStore(
+  useShallow((s) => ({
+    accounts: s.accounts,
+    setMonthlyBudget: s.setMonthlyBudget,
+    setHasSeenWalkthrough: s.setHasSeenWalkthrough,
+    currencySymbol: s.currencySymbol,
+    categories: s.categories,
+    transactions: s.transactions,
+    addBatchTransactions: s.addBatchTransactions,
+    learnedMerchantRules: s.learnedMerchantRules,
+  }))
+);
 
   const { setUserName, setUserEmail, setUserAvatarId } = useSettingsStore();
 

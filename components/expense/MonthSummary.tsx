@@ -3,6 +3,7 @@ import { View, StyleSheet, TouchableOpacity, Animated, LayoutAnimation, Platform
 import * as Haptics from 'expo-haptics';
 import { AppText } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
+import { useShallow } from 'zustand/react/shallow';
 import { expenseColors } from '@/constants/expenseColors';
 import { ExpenseCategory } from '@/types/expense';
 import { CategoryIcon } from './CategoryIcon';
@@ -33,27 +34,49 @@ interface MonthSummaryProps {
 
 export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) => {
   const {
-    selectedMonth,
-    currencySymbol,
-    monthlyBudget,
-    getTotalBalance,
-    getTotalSpent,
-    getRemainingBudget,
-    getCategoryBreakdown,
-    accounts,
-    transactions,
-    hasInitialAppLoaded,
-    setHasInitialAppLoaded,
-    formatAmount,
-  } = useExpenseStore();
+  selectedMonth,
+  currencySymbol,
+  monthlyBudget,
+  getTotalBalance,
+  getTotalSpent,
+  getRemainingBudget,
+  getCategoryBreakdown,
+  accounts,
+  transactions,
+  formatAmount,
+} = useExpenseStore(
+  useShallow((s) => ({
+    selectedMonth: s.selectedMonth,
+    currencySymbol: s.currencySymbol,
+    monthlyBudget: s.monthlyBudget,
+    getTotalBalance: s.getTotalBalance,
+    getTotalSpent: s.getTotalSpent,
+    getRemainingBudget: s.getRemainingBudget,
+    getCategoryBreakdown: s.getCategoryBreakdown,
+    accounts: s.accounts,
+    transactions: s.transactions,
+    formatAmount: s.formatAmount,
+  }))
+);
 
   const sym = currencySymbol || '₹';
   const [selectedCatId, setSelectedCatId] = useState<string | null>(null);
 
-  // Animated values for left balance and right arc staggered cascade
-  const balanceAnim = useRef(new Animated.Value(hasInitialAppLoaded ? 1 : 0)).current;
-  const chipFadeAnim = useRef(new Animated.Value(hasInitialAppLoaded ? 1 : 0)).current;
-  const arcAnimValues = useRef<Animated.Value[]>([]).current;
+  // Left column entrance. Once per mount, never re-armed by a store flag.
+  const balanceAnim = useRef(new Animated.Value(0)).current;
+  const chipFadeAnim = useRef(new Animated.Value(0)).current;
+
+  // Per-category entrance values, keyed by category id.
+  //
+  // This used to be a positional array indexed by render order, while
+  // `categoriesWithSpend` is sorted by amount descending. Adding a transaction
+  // therefore reshuffled which category sat at each index, and any value created
+  // after the entrance effect had already run was left at 0 forever — invisible.
+  // Keying by id means a value belongs to its category for the component's
+  // lifetime, and the effect below can animate in exactly the ones that are new.
+  const arcAnimMap = useRef(new Map<string, Animated.Value>()).current;
+  const knownArcIds = useRef(new Set<string>());
+  const hasRunArcEntrance = useRef(false);
 
   const totalBalance = getTotalBalance();
   const totalSpent = getTotalSpent();
@@ -122,19 +145,50 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
   const currentSelectedId = currentCategoryInfo?.category.id || null;
   const totalArcCount = arcItems.length;
 
-  // Ensure arcAnimValues has enough animated values
-  while (arcAnimValues.length < totalArcCount) {
-    arcAnimValues.push(new Animated.Value(hasInitialAppLoaded ? 1 : 0));
+  // Idempotent cache fill so the very first paint already has a value bound to
+  // every arc. Mutating a ref here is safe because it is keyed by a stable id
+  // and only ever adds — unlike the positional array it replaces, it can never
+  // hand a category someone else's animation value.
+  for (const item of arcItems) {
+    if (!arcAnimMap.has(item.category.id)) {
+      arcAnimMap.set(item.category.id, new Animated.Value(0));
+    }
   }
 
   useEffect(() => {
-    if (hasInitialAppLoaded) {
-      balanceAnim.setValue(1);
-      chipFadeAnim.setValue(1);
-      arcAnimValues.forEach((anim) => anim.setValue(1));
-      return;
+    const isFirstRun = !hasRunArcEntrance.current;
+    hasRunArcEntrance.current = true;
+
+    // Animate only the arcs that are new since the previous run. On mount that
+    // is every arc (the staggered cascade); afterwards it is just a category
+    // that has newly appeared because a transaction was added to it.
+    const enteringIds = arcItems
+      .map((item) => item.category.id)
+      .filter((id) => !knownArcIds.current.has(id));
+    knownArcIds.current = new Set(arcItems.map((item) => item.category.id));
+
+    if (enteringIds.length === 0) return;
+
+    if (!isFirstRun) {
+      // A category that dropped out of the breakdown and came back is already
+      // sitting at 1, so rewind it to replay the entrance.
+      enteringIds.forEach((id) => arcAnimMap.get(id)?.setValue(0));
     }
 
+    Animated.parallel(
+      enteringIds.map((id, i) =>
+        Animated.spring(arcAnimMap.get(id) as Animated.Value, {
+          toValue: 1,
+          tension: 55,
+          friction: 7,
+          delay: isFirstRun ? i * 45 : 0,
+          useNativeDriver: true,
+        })
+      )
+    ).start();
+  }, [arcItems]);
+
+  useEffect(() => {
     // Left balance entrance on app load
     balanceAnim.setValue(0);
     chipFadeAnim.setValue(0);
@@ -152,23 +206,7 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
         useNativeDriver: true,
       }),
     ]).start();
-
-    // Staggered arc cascade animation on app load
-    arcAnimValues.forEach((anim) => anim.setValue(0));
-    const animations = arcAnimValues.slice(0, totalArcCount).map((anim, i) => {
-      return Animated.spring(anim, {
-        toValue: 1,
-        tension: 55,
-        friction: 7,
-        delay: i * 45,
-        useNativeDriver: true,
-      });
-    });
-
-    Animated.parallel(animations).start(() => {
-      setHasInitialAppLoaded(true);
-    });
-  }, [hasInitialAppLoaded, totalArcCount]);
+  }, []);
 
   // Center alignment along the smooth arc curve
   const getArcMarginRight = (index: number, total: number, isSelected: boolean) => {
@@ -225,7 +263,12 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
         <View style={styles.balanceSection}>
           <AppText style={styles.balanceTitle}>TOTAL BALANCE</AppText>
 
-          <AppText style={styles.balanceAmount} numberOfLines={1}>
+          <AppText
+            style={styles.balanceAmount}
+            numberOfLines={1}
+            adjustsFontSizeToFit={true}
+            minimumFontScale={0.7}
+          >
             {formatAmount(totalBalance)}
           </AppText>
 
@@ -293,7 +336,7 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
               item.category.iconName === 'Star' ||
               item.category.iconName === 'Heart';
 
-            const anim = arcAnimValues[index] || new Animated.Value(1);
+            const anim = arcAnimMap.get(item.category.id) as Animated.Value;
 
             return (
               <Animated.View
@@ -393,10 +436,10 @@ const styles = StyleSheet.create({
   },
   balanceAmount: {
     color: expenseColors.textPrimary,
-    fontSize: 44,
-    lineHeight: 50,
+    fontSize: 34,
+    lineHeight: 40,
     fontWeight: '800',
-    letterSpacing: -0.6,
+    letterSpacing: -0.5,
   },
   accountChipsRow: {
     flexDirection: 'row',

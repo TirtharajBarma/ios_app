@@ -6,7 +6,7 @@ import {
   Modal,
   FlatList,
   SafeAreaView,
-  Dimensions,
+  useWindowDimensions,
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
@@ -21,7 +21,6 @@ import * as Haptics from "expo-haptics";
 import { AppText } from "@/components/ui";
 import { colors, spacing, radius } from "@/constants";
 
-const { height: SCREEN_HEIGHT } = Dimensions.get("window");
 const DISMISS_THRESHOLD = 100;
 
 export interface SelectorFieldProps {
@@ -34,6 +33,9 @@ export interface SelectorFieldProps {
 function SelectorField({ label, value, options, onSelect }: SelectorFieldProps) {
   const [modalVisible, setModalVisible] = useState(false);
   const translateY = useSharedValue(0);
+  // Live window height, so the dismiss spring and backdrop fade track the actual
+  // screen rather than whatever was measured when the module was first imported.
+  const { height: screenHeight } = useWindowDimensions();
 
   const handleOpen = () => {
     Haptics.selectionAsync();
@@ -63,7 +65,7 @@ function SelectorField({ label, value, options, onSelect }: SelectorFieldProps) 
     })
     .onEnd((e) => {
       if (e.translationY > DISMISS_THRESHOLD || e.velocityY > 800) {
-        translateY.value = withSpring(SCREEN_HEIGHT, { damping: 35, stiffness: 350 }, () => {
+        translateY.value = withSpring(screenHeight, { damping: 35, stiffness: 350 }, () => {
           runOnJS(handleDismiss)();
         });
       } else {
@@ -76,7 +78,7 @@ function SelectorField({ label, value, options, onSelect }: SelectorFieldProps) 
   }));
 
   const backdropOpacity = useAnimatedStyle(() => ({
-    opacity: Math.max(0, 1 - translateY.value / (SCREEN_HEIGHT * 0.6)),
+    opacity: Math.max(0, 1 - translateY.value / (screenHeight * 0.6)),
   }));
 
   return (

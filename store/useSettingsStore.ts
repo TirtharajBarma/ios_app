@@ -31,6 +31,20 @@ interface SettingsState {
   setNotificationsEnabled: (enabled: boolean) => Promise<void>;
   notificationTiming: NotificationTiming;
   setNotificationTiming: (timing: NotificationTiming) => Promise<void>;
+  dailyExpenseReminderEnabled: boolean;
+  setDailyExpenseReminderEnabled: (enabled: boolean) => Promise<void>;
+  afternoonReminderEnabled: boolean;
+  setAfternoonReminderEnabled: (enabled: boolean) => Promise<void>;
+  afternoonReminderTime: { hour: number; minute: number };
+  setAfternoonReminderTime: (time: { hour: number; minute: number }) => Promise<void>;
+  nightReminderEnabled: boolean;
+  setNightReminderEnabled: (enabled: boolean) => Promise<void>;
+  nightReminderTime: { hour: number; minute: number };
+  setNightReminderTime: (time: { hour: number; minute: number }) => Promise<void>;
+  billDueReminderEnabled: boolean;
+  setBillDueReminderEnabled: (enabled: boolean) => Promise<void>;
+  subscriptionReminderEnabled: boolean;
+  setSubscriptionReminderEnabled: (enabled: boolean) => Promise<void>;
 
   // Privacy
   faceIdEnabled: boolean;
@@ -39,6 +53,14 @@ interface SettingsState {
   setAnalyticsEnabled: (enabled: boolean) => Promise<void>;
   crashReportsEnabled: boolean;
   setCrashReportsEnabled: (enabled: boolean) => Promise<void>;
+
+  /**
+   * True once the user has saved the "Add Expense" action as their own tile in
+   * the Shortcuts app. The Back Tap picker only lists saved tiles, so the
+   * shortcut cannot be assigned to Back Tap until this is done.
+   */
+  shortcutSaved: boolean;
+  setShortcutSaved: (saved: boolean) => Promise<void>;
 
   // Custom Categories
   customCategories: string[];
@@ -57,8 +79,8 @@ interface SettingsState {
 }
 
 const STORAGE_KEY = "@expense_settings_v3";
-const LEGACY_STORAGE_KEY_V3 = "@subo_settings_v3";
-const LEGACY_STORAGE_KEY_V2 = "@subo_settings_v2";
+const LEGACY_STORAGE_KEY_V3 = "@legacy_settings_v3";
+const LEGACY_STORAGE_KEY_V2 = "@legacy_settings_v2";
 
 async function save(patch: Record<string, unknown>) {
   try {
@@ -91,9 +113,17 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   appearance: "system",
   notificationsEnabled: true,
   notificationTiming: "1day",
+  dailyExpenseReminderEnabled: true,
+  afternoonReminderEnabled: true,
+  afternoonReminderTime: { hour: 14, minute: 0 },
+  nightReminderEnabled: true,
+  nightReminderTime: { hour: 21, minute: 30 },
+  billDueReminderEnabled: true,
+  subscriptionReminderEnabled: true,
   faceIdEnabled: false,
   analyticsEnabled: false,
   crashReportsEnabled: true,
+  shortcutSaved: false,
   customCategories: [],
   shareGroups: [],
   shareGroup: null,
@@ -106,8 +136,16 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setAppearance: async (appearance) => { set({ appearance }); await save({ appearance }); logAction('settings', `Appearance changed to ${appearance}`, { appearance }); },
   setNotificationsEnabled: async (notificationsEnabled) => { set({ notificationsEnabled }); await save({ notificationsEnabled }); logAction('settings', `Notifications ${notificationsEnabled ? 'enabled' : 'disabled'}`); },
   setNotificationTiming: async (notificationTiming) => { set({ notificationTiming }); await save({ notificationTiming }); logAction('settings', `Notification timing set to ${notificationTiming}`, { notificationTiming }); },
+  setDailyExpenseReminderEnabled: async (dailyExpenseReminderEnabled) => { set({ dailyExpenseReminderEnabled }); await save({ dailyExpenseReminderEnabled }); },
+  setAfternoonReminderEnabled: async (afternoonReminderEnabled) => { set({ afternoonReminderEnabled }); await save({ afternoonReminderEnabled }); },
+  setAfternoonReminderTime: async (afternoonReminderTime) => { set({ afternoonReminderTime }); await save({ afternoonReminderTime }); },
+  setNightReminderEnabled: async (nightReminderEnabled) => { set({ nightReminderEnabled }); await save({ nightReminderEnabled }); },
+  setNightReminderTime: async (nightReminderTime) => { set({ nightReminderTime }); await save({ nightReminderTime }); },
+  setBillDueReminderEnabled: async (billDueReminderEnabled) => { set({ billDueReminderEnabled }); await save({ billDueReminderEnabled }); },
+  setSubscriptionReminderEnabled: async (subscriptionReminderEnabled) => { set({ subscriptionReminderEnabled }); await save({ subscriptionReminderEnabled }); },
   setFaceIdEnabled: async (faceIdEnabled) => { set({ faceIdEnabled }); await save({ faceIdEnabled }); logAction('security', `Face ID lock ${faceIdEnabled ? 'enabled' : 'disabled'}`); },
   setAnalyticsEnabled: async (analyticsEnabled) => { set({ analyticsEnabled }); await save({ analyticsEnabled }); logAction('settings', `Analytics ${analyticsEnabled ? 'enabled' : 'disabled'}`); },
+  setShortcutSaved: async (shortcutSaved) => { set({ shortcutSaved }); await save({ shortcutSaved }); },
   setCrashReportsEnabled: async (crashReportsEnabled) => { set({ crashReportsEnabled }); await save({ crashReportsEnabled }); logAction('settings', `Crash reports ${crashReportsEnabled ? 'enabled' : 'disabled'}`); },
 
   addCustomCategory: async (category) => {
@@ -145,6 +183,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       appearance: "system" as AppearanceMode,
       notificationsEnabled: true,
       notificationTiming: "1day" as NotificationTiming,
+      dailyExpenseReminderEnabled: true,
+      afternoonReminderEnabled: true,
+      afternoonReminderTime: { hour: 14, minute: 0 },
+      nightReminderEnabled: true,
+      nightReminderTime: { hour: 21, minute: 30 },
+      billDueReminderEnabled: true,
+      subscriptionReminderEnabled: true,
       faceIdEnabled: false,
       analyticsEnabled: false,
       crashReportsEnabled: true,
@@ -182,6 +227,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           appearance: p.appearance ?? "system",
           notificationsEnabled: p.notificationsEnabled ?? true,
           notificationTiming: p.notificationTiming ?? "1day",
+          dailyExpenseReminderEnabled: p.dailyExpenseReminderEnabled ?? true,
+          afternoonReminderEnabled: p.afternoonReminderEnabled ?? true,
+          afternoonReminderTime: p.afternoonReminderTime ?? { hour: 14, minute: 0 },
+          nightReminderEnabled: p.nightReminderEnabled ?? true,
+          nightReminderTime: p.nightReminderTime ?? { hour: 21, minute: 30 },
+          billDueReminderEnabled: p.billDueReminderEnabled ?? true,
+          subscriptionReminderEnabled: p.subscriptionReminderEnabled ?? true,
           faceIdEnabled: p.faceIdEnabled ?? false,
           analyticsEnabled: p.analyticsEnabled ?? false,
           crashReportsEnabled: p.crashReportsEnabled ?? true,

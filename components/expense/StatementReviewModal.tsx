@@ -11,6 +11,7 @@ import {
   useWindowDimensions,
   KeyboardAvoidingView,
   Keyboard,
+  StatusBar,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -39,6 +40,7 @@ import * as Haptics from 'expo-haptics';
 
 import { AppText } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
+import { useShallow } from 'zustand/react/shallow';
 import { expenseColors } from '@/constants/expenseColors';
 import { CategoryIcon } from './CategoryIcon';
 import { AccountIcon } from './AccountIcon';
@@ -74,12 +76,20 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
   const insets = useSafeAreaInsets();
   const { width: screenWidth } = useWindowDimensions();
   const {
-    categories,
-    accounts,
-    currencySymbol,
-    saveLearnedMerchantRule,
-    monthlyBudget,
-  } = useExpenseStore();
+  categories,
+  accounts,
+  currencySymbol,
+  saveLearnedMerchantRule,
+  monthlyBudget,
+} = useExpenseStore(
+  useShallow((s) => ({
+    categories: s.categories,
+    accounts: s.accounts,
+    currencySymbol: s.currencySymbol,
+    saveLearnedMerchantRule: s.saveLearnedMerchantRule,
+    monthlyBudget: s.monthlyBudget,
+  }))
+);
   const sym = currencySymbol || '₹';
 
   // ── Step Navigation State (0: Transactions -> 1: Opening Balances -> 2: Budget) ──
@@ -112,7 +122,9 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
   const headerTitle = useMemo(() => {
     if (!result?.bankName) return 'STATEMENT IMPORT';
     const name = result.bankName.toUpperCase().trim();
-    return name.endsWith('STATEMENT') ? name : `${name} STATEMENT`;
+    return name.endsWith('STATEMENT') || name.endsWith('REPORT') || name.endsWith('EXPORT')
+      ? name
+      : `${name} STATEMENT`;
   }, [result?.bankName]);
 
   // Reset / initialize state whenever modal opens or result changes
@@ -202,14 +214,21 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
   const selectedDebits = useMemo(
     () =>
       stagedList
-        .filter((t) => t.selected && (t.type === 'expense' || t.type === 'transfer' || t.type === 'debt_lend'))
+        .filter(
+          (t) =>
+            t.selected &&
+            (t.type === 'expense' ||
+              t.type === 'transfer' ||
+              t.type === 'debt_lend' ||
+              t.type === 'vault_deposit')
+        )
         .reduce((sum, t) => sum + t.amount, 0),
     [stagedList]
   );
   const selectedCredits = useMemo(
     () =>
       stagedList
-        .filter((t) => t.selected && (t.type === 'income' || t.type === 'debt_borrow'))
+        .filter((t) => t.selected && (t.type === 'income' || t.type === 'debt_borrow' || t.type === 'vault_withdraw'))
         .reduce((sum, t) => sum + t.amount, 0),
     [stagedList]
   );
@@ -360,6 +379,8 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
     return <Banknote size={17} color={expenseColors.accentGreen} />;
   };
 
+  const androidTopPadding = Platform.OS === 'android' ? Math.max(insets.top, StatusBar.currentHeight || 0, 24) + 10 : 0;
+
   if (!result) return null;
 
   return (
@@ -370,14 +391,16 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
       onRequestClose={onClose}
     >
       <KeyboardAvoidingView
-        style={styles.modalRoot}
+        style={[styles.modalRoot, { paddingTop: androidTopPadding }]}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
       >
         {/* iOS Drag Handle */}
-        <View style={styles.dragHandleContainer}>
-          <View style={styles.dragHandle} />
-        </View>
+        {Platform.OS === 'ios' && (
+          <View style={styles.dragHandleContainer}>
+            <View style={styles.dragHandle} />
+          </View>
+        )}
 
         {/* Statement Title Row (Statement name centered, X at top right, Back at top left if step > 0) */}
         <View style={styles.headerTopRow}>
@@ -474,8 +497,13 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                   {/* Debits / Outflow */}
                   <View style={styles.metricCol}>
                     <AppText style={styles.metricLabel}>OUTFLOW</AppText>
-                    <AppText style={[styles.metricValue, { color: '#FF9D66' }]}>
-                      -{sym}{selectedDebits.toLocaleString('en-IN')}
+                    <AppText
+                      style={[styles.metricValue, { color: '#FF9D66' }]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit={true}
+                      minimumFontScale={0.7}
+                    >
+                      -{sym}{selectedDebits.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                     </AppText>
                   </View>
 
@@ -484,8 +512,13 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                   {/* Credits / Inflow */}
                   <View style={styles.metricCol}>
                     <AppText style={styles.metricLabel}>INFLOW</AppText>
-                    <AppText style={[styles.metricValue, { color: '#70D6BC' }]}>
-                      +{sym}{selectedCredits.toLocaleString('en-IN')}
+                    <AppText
+                      style={[styles.metricValue, { color: '#70D6BC' }]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit={true}
+                      minimumFontScale={0.7}
+                    >
+                      +{sym}{selectedCredits.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                     </AppText>
                   </View>
 
@@ -504,10 +537,13 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                               : '#FFFFFF',
                         },
                       ]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit={true}
+                      minimumFontScale={0.7}
                     >
                       {selectedCredits - selectedDebits >= 0 ? '+' : '-'}
                       {sym}
-                      {Math.abs(selectedCredits - selectedDebits).toLocaleString('en-IN')}
+                      {Math.abs(selectedCredits - selectedDebits).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                     </AppText>
                   </View>
                 </View>
@@ -524,15 +560,15 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                   {result.reconciliation.isReconciled ? (
                     <>
                       <ShieldCheck size={13} color="#70D6BC" strokeWidth={2.2} />
-                      <AppText style={styles.reconciledSuccessText}>
+                      <AppText style={styles.reconciledSuccessText} numberOfLines={1}>
                         Mathematical Balance Reconciled ({stagedList.length} Transactions)
                       </AppText>
                     </>
                   ) : (
                     <>
                       <AlertTriangle size={13} color="#FFB84D" strokeWidth={2.2} />
-                      <AppText style={styles.reconciledWarningText}>
-                        Balance verified ({sym}{result.reconciliation.reconciledDiff.toFixed(2)} diff)
+                      <AppText style={styles.reconciledWarningText} numberOfLines={1}>
+                        Unreconciled diff: {sym}{result.reconciliation.reconciledDiff.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                       </AppText>
                     </>
                   )}
@@ -613,60 +649,85 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
               <View style={styles.txListContainer}>
                 {filteredTxs.map((tx) => {
                   const cat = categories.find((c) => c.id === tx.categoryId) || categories[0];
-                  const isDebit = tx.type === 'expense' || tx.type === 'debt_lend';
+                  const isDebit =
+                    tx.type === 'expense' ||
+                    tx.type === 'transfer' ||
+                    tx.type === 'debt_lend' ||
+                    tx.type === 'vault_deposit';
 
                   return (
                     <View key={tx.id} style={styles.txItemWrapper}>
                       <TouchableOpacity
                         style={[
-                          styles.txItemRow,
-                          !tx.selected && styles.txItemRowDeselected,
-                          tx.isDuplicate && styles.txItemRowDuplicate,
+                          styles.txCard,
+                          !tx.selected && styles.txCardDeselected,
+                          tx.isDuplicate && styles.txCardDuplicate,
                         ]}
                         activeOpacity={0.75}
                         onPress={() => toggleSelect(tx.id)}
                       >
-                        {/* Checkbox */}
-                        <View style={styles.checkboxWrapper}>
-                          {tx.selected ? (
-                            <CheckSquare size={18} color="#FF9D66" strokeWidth={2.2} />
-                          ) : (
-                            <Square size={18} color="#696C75" strokeWidth={2} />
-                          )}
-                        </View>
-
-                        {/* Category Icon with 1-Tap Category Picker */}
-                        <TouchableOpacity
-                          style={[styles.catIconCircle, { backgroundColor: `${cat.color}20` }]}
-                          onPress={() =>
-                            setActiveCategoryPickerTxnId(
-                              activeCategoryPickerTxnId === tx.id ? null : tx.id
-                            )
-                          }
-                        >
-                          <CategoryIcon iconName={cat.iconName} size={15} color={cat.color} />
-                        </TouchableOpacity>
-
-                        {/* Middle Details */}
-                        <View style={styles.txMiddle}>
-                          <View style={styles.txNoteRow}>
-                            <AppText style={styles.txNarration} numberOfLines={1}>
-                              {tx.narration}
-                            </AppText>
-                            {tx.isDuplicate && (
-                              <View style={styles.duplicateTag}>
-                                <AppText style={styles.duplicateTagText}>DUPLICATE</AppText>
-                              </View>
+                        {/* Left Controls: Checkbox & Category Icon */}
+                        <View style={styles.txLeadingCol}>
+                          <View style={styles.checkboxWrapper}>
+                            {tx.selected ? (
+                              <CheckSquare size={18} color="#FF9D66" strokeWidth={2.2} />
+                            ) : (
+                              <Square size={18} color="#696C75" strokeWidth={2} />
                             )}
                           </View>
 
-                          <View style={styles.txSubRow}>
-                            <AppText style={styles.txDateText}>{tx.date}</AppText>
-                            <AppText style={styles.txDotText}>•</AppText>
-                            <AppText style={styles.txAccountText} numberOfLines={1}>
-                              {tx.accountName}
+                          <TouchableOpacity
+                            style={[styles.catIconCircle, { backgroundColor: `${cat.color}20` }]}
+                            onPress={() =>
+                              setActiveCategoryPickerTxnId(
+                                activeCategoryPickerTxnId === tx.id ? null : tx.id
+                              )
+                            }
+                          >
+                            <CategoryIcon iconName={cat.iconName} size={15} color={cat.color} />
+                          </TouchableOpacity>
+                        </View>
+
+                        {/* Main Content Area (2 Clean Rows) */}
+                        <View style={styles.txMainCol}>
+                          {/* Row 1: Merchant / Narration (Left) + Amount (Right) */}
+                          <View style={styles.txRowTop}>
+                            <View style={styles.txNarrationBox}>
+                              <AppText style={styles.txNarration} numberOfLines={1} ellipsizeMode="tail">
+                                {tx.narration}
+                              </AppText>
+                              {tx.isDuplicate && (
+                                <View style={styles.duplicateTag}>
+                                  <AppText style={styles.duplicateTagText}>DUPLICATE</AppText>
+                                </View>
+                              )}
+                            </View>
+
+                            <AppText
+                              style={[
+                                styles.txAmount,
+                                { color: isDebit ? '#FFFFFF' : '#70D6BC' },
+                              ]}
+                              numberOfLines={1}
+                              adjustsFontSizeToFit={true}
+                              minimumFontScale={0.75}
+                            >
+                              {isDebit ? '-' : '+'}
+                              {sym}
+                              {tx.amount.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                             </AppText>
-                            <AppText style={styles.txDotText}>•</AppText>
+                          </View>
+
+                          {/* Row 2: Date • Account (Left) + Category Badge (Right) */}
+                          <View style={styles.txRowBottom}>
+                            <View style={styles.txMetaLeft}>
+                              <AppText style={styles.txDateText}>{tx.date}</AppText>
+                              <AppText style={styles.txDotText}>•</AppText>
+                              <AppText style={styles.txAccountText} numberOfLines={1} ellipsizeMode="tail">
+                                {tx.accountName}
+                              </AppText>
+                            </View>
+
                             <TouchableOpacity
                               style={[
                                 styles.interactiveCatPill,
@@ -675,35 +736,22 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                                   borderColor: `${cat.color}35`,
                                 },
                               ]}
+                              activeOpacity={0.7}
                               onPress={() =>
                                 setActiveCategoryPickerTxnId(
                                   activeCategoryPickerTxnId === tx.id ? null : tx.id
                                 )
                               }
                             >
-                              <AppText style={[styles.interactiveCatText, { color: cat.color }]}>
+                              <CategoryIcon iconName={cat.iconName} size={10} color={cat.color} />
+                              <AppText
+                                style={[styles.interactiveCatText, { color: cat.color }]}
+                                numberOfLines={1}
+                              >
                                 {cat.name}
                               </AppText>
                             </TouchableOpacity>
                           </View>
-                        </View>
-
-                        {/* Right Amount */}
-                        <View style={styles.txRight}>
-                          <AppText
-                            style={[
-                              styles.txAmount,
-                              {
-                                color: isDebit
-                                  ? '#FFFFFF'
-                                  : '#70D6BC',
-                              },
-                            ]}
-                          >
-                            {isDebit ? '-' : '+'}
-                            {sym}
-                            {tx.amount.toLocaleString('en-IN')}
-                          </AppText>
                         </View>
                       </TouchableOpacity>
 
@@ -803,7 +851,7 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                     <View key={item.key} style={styles.accountCard}>
                       {/* Card Header */}
                       <View style={styles.accountCardTop}>
-                        <AccountIcon type={currentType} size={16} containerSize={34} borderRadius={10} />
+                        <AccountIcon name={item.name} type={currentType} size={16} containerSize={34} borderRadius={10} />
                         <View style={styles.accountTextCol}>
                           <AppText style={styles.accountName} numberOfLines={1}>
                             {item.name.toUpperCase()}
@@ -981,7 +1029,7 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                 {addedCustomAccounts.map((cAcc, idx) => (
                   <View key={idx} style={styles.accountCard}>
                     <View style={styles.accountCardTop}>
-                      <AccountIcon type={cAcc.type} size={16} containerSize={34} borderRadius={10} />
+                      <AccountIcon name={cAcc.name} type={cAcc.type} size={16} containerSize={34} borderRadius={10} />
                       <View style={styles.accountTextCol}>
                         <AppText style={styles.accountName}>{cAcc.name.toUpperCase()}</AppText>
                         <AppText style={styles.accountTypeLabel}>
@@ -1332,7 +1380,8 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
-    padding: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
     marginBottom: 14,
   },
   metricRow: {
@@ -1344,6 +1393,7 @@ const styles = StyleSheet.create({
   metricCol: {
     flex: 1,
     alignItems: 'center',
+    paddingHorizontal: 2,
   },
   metricLabel: {
     color: '#8E919D',
@@ -1353,9 +1403,10 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   metricValue: {
-    fontSize: 15.5,
+    fontSize: 14,
     fontWeight: '900',
-    letterSpacing: 0.2,
+    letterSpacing: 0.1,
+    textAlign: 'center',
   },
   metricDivider: {
     width: 1,
@@ -1459,23 +1510,29 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   txItemWrapper: {},
-  txItemRow: {
+  txCard: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#16171E',
     borderRadius: 14,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.06)',
-    padding: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
   },
-  txItemRowDeselected: {
+  txCardDeselected: {
     opacity: 0.35,
   },
-  txItemRowDuplicate: {
+  txCardDuplicate: {
     borderColor: 'rgba(255, 157, 102, 0.3)',
   },
-  checkboxWrapper: {
+  txLeadingCol: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginRight: 10,
+  },
+  checkboxWrapper: {
+    marginRight: 8,
   },
   catIconCircle: {
     width: 32,
@@ -1483,23 +1540,28 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 10,
   },
-  txMiddle: {
+  txMainCol: {
     flex: 1,
-    marginRight: 8,
+    gap: 4,
   },
-  txNoteRow: {
+  txRowTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  txNarrationBox: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginBottom: 4,
   },
   txNarration: {
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '700',
-    letterSpacing: 0.3,
+    letterSpacing: 0.2,
     flexShrink: 1,
   },
   duplicateTag: {
@@ -1513,15 +1575,27 @@ const styles = StyleSheet.create({
     fontSize: 8.5,
     fontWeight: '800',
   },
-  txSubRow: {
+  txAmount: {
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+    textAlign: 'right',
+  },
+  txRowBottom: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  txMetaLeft: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    flexWrap: 'wrap',
   },
   txDateText: {
     color: '#8E919D',
-    fontSize: 10,
+    fontSize: 10.5,
     fontWeight: '600',
   },
   txDotText: {
@@ -1530,30 +1604,23 @@ const styles = StyleSheet.create({
   },
   txAccountText: {
     color: '#8E919D',
-    fontSize: 10,
+    fontSize: 10.5,
     fontWeight: '600',
-    maxWidth: 90,
+    flexShrink: 1,
   },
   interactiveCatPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    gap: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 2.5,
     borderRadius: 6,
     borderWidth: 1,
+    flexShrink: 0,
   },
   interactiveCatText: {
-    fontSize: 9,
+    fontSize: 9.5,
     fontWeight: '800',
-  },
-  txRight: {
-    alignItems: 'flex-end',
-  },
-  txAmount: {
-    fontSize: 14,
-    fontWeight: '800',
-    letterSpacing: 0.2,
   },
   inlineCatPicker: {
     backgroundColor: '#12131A',
@@ -1993,29 +2060,34 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
-    paddingVertical: 20,
+    paddingVertical: 24,
     paddingHorizontal: 16,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 16,
+    overflow: 'visible',
   },
   budgetHeroLabel: {
     color: '#8E919D',
     fontSize: 9.5,
     fontWeight: '800',
     letterSpacing: 0.8,
-    marginBottom: 8,
+    marginBottom: 10,
   },
   budgetHeroInputRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    minHeight: 52,
+    overflow: 'visible',
   },
   budgetHeroCurrency: {
     color: '#FF9D66',
     fontSize: 32,
     fontWeight: '900',
-    marginRight: 4,
+    marginRight: 6,
+    lineHeight: Platform.OS === 'ios' ? 40 : undefined,
+    overflow: 'visible',
   },
   budgetHeroInput: {
     color: '#FFFFFF',
@@ -2024,8 +2096,9 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     textAlign: 'center',
     minWidth: 120,
-    paddingVertical: 2,
+    paddingVertical: 0,
     paddingHorizontal: 4,
+    lineHeight: Platform.OS === 'ios' ? 44 : undefined,
   },
   budgetPresetsBlock: {
     gap: 10,

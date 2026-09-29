@@ -203,6 +203,105 @@ async function refreshVault(subscriptions: Subscription[]): Promise<VaultState> 
   }
 }
 
+/**
+ * Auto-posts a recurring renewal transaction and its split details into the Expense Store.
+ * Ensures strict idempotency by checking if a transaction for this subscription and date already exists.
+ */
+function autoPostRecurringExpense(sub: Subscription, renewalDateISO: string): void {
+  try {
+    const { useExpenseStore } = require('@/store/useExpenseStore');
+    const expenseStore = useExpenseStore.getState();
+    if (!expenseStore || typeof expenseStore.addTransaction !== 'function') return;
+
+    const renewalDateStr = renewalDateISO.split('T')[0];
+
+    // 1. Strict Idempotency Check: Prevent duplicate logging for the same cycle
+    const alreadyExists = (expenseStore.transactions || []).some(
+      (t: any) => t.subscriptionId === sub.id && t.date === renewalDateStr
+    );
+    if (alreadyExists) return;
+
+    // 2. Find template / most recent previous transaction for this subscription
+    const prevTx = (expenseStore.transactions || [])
+      .filter((t: any) => t.subscriptionId === sub.id)
+      .sort((a: any, b: any) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+
+    const accountId =
+      prevTx?.accountId ||
+      (expenseStore.accounts && expenseStore.accounts.length > 0 ? expenseStore.accounts[0].id : 'acc_primary');
+    const categoryId = prevTx?.categoryId || 'cat_subs';
+
+    // 3. Build Fresh Split Details (with reset unsettled status for all friends)
+    let splitDetails = undefined;
+    if (prevTx?.split) {
+      const freshFriends =
+        prevTx.split.friends && prevTx.split.friends.length > 0
+          ? prevTx.split.friends.map((f: any, idx: number) => ({
+              id: `friend_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 7)}`,
+              name: f.name,
+              amount: f.amount,
+              settled: false,
+            }))
+          : undefined;
+
+      const yourShare =
+        prevTx.split.yourShare !== undefined
+          ? prevTx.split.yourShare
+          : getSubscriptionActivePrice(sub);
+
+      const friendsShare =
+        freshFriends && freshFriends.length > 0
+          ? freshFriends.reduce((sum: number, f: any) => sum + (f.amount || 0), 0)
+          : (prevTx.split.friendsShare || Math.max(0, sub.price - yourShare));
+
+      splitDetails = {
+        totalPaid: sub.price || prevTx.split.totalPaid,
+        yourShare,
+        friendsShare,
+        friendNames: prevTx.split.friendNames,
+        friends: freshFriends,
+        settled: false,
+      };
+    } else if (sub.splitEnabled) {
+      const activePrice = getSubscriptionActivePrice(sub);
+      if (activePrice < sub.price) {
+        splitDetails = {
+          totalPaid: sub.price,
+          yourShare: activePrice,
+          friendsShare: Math.max(0, sub.price - activePrice),
+          friendNames: 'Friends',
+          settled: false,
+        };
+      }
+    }
+
+    const noteBase = prevTx?.note ? prevTx.note.replace(/\s*\(Renewal\)$/i, '') : sub.name;
+
+    expenseStore.addTransaction({
+      amount: sub.price || prevTx?.amount || 0,
+      type: 'expense',
+      categoryId,
+      accountId,
+      date: renewalDateStr,
+      note: `${noteBase} (Renewal)`,
+      tag: prevTx?.tag,
+      folderId: prevTx?.folderId,
+      folderName: prevTx?.folderName,
+      subscriptionId: sub.id,
+      split: splitDetails,
+    });
+
+    logInfo('subscription', `Auto-posted recurring expense transaction for ${sub.name} on ${renewalDateStr}`, {
+      subId: sub.id,
+      date: renewalDateStr,
+      amount: sub.price,
+      isSplit: !!splitDetails,
+    });
+  } catch (err) {
+    console.warn('Failed to auto-post recurring expense transaction:', err);
+  }
+}
+
 let loadPromise: Promise<void> | null = null;
 
 export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
@@ -250,6 +349,8 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
             const billDate = startOfDay(parseISO(sub.nextBillingDate));
             if (billDate < today) {
               const activePrice = getSubscriptionActivePrice(sub);
+              const renewalDateISO = sub.nextBillingDate;
+
               await db.createTransaction({
                 id: generateId(),
                 subscriptionId: sub.id,
@@ -257,6 +358,9 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
                 currency: sub.currency,
                 date: sub.nextBillingDate,
               }).catch(() => {});
+
+              // Auto-post to Expense Ledger and trigger fresh split debt collection
+              autoPostRecurringExpense(sub, renewalDateISO);
 
               const anchorDate = sub.startDate ? startOfDay(parseISO(sub.startDate)) : billDate;
               const nextDate = getNextRenewalDate(
@@ -424,6 +528,27 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
 
     const changes = Object.keys(input ?? {});
     logAction('subscription', `Updated subscription: ${updatedSub?.name || id}`, { id, changes, price: updatedSub?.price });
+
+    // Bidirectional sync: update matching transactions in expense store
+    if (updatedSub && (input.name !== undefined || input.price !== undefined)) {
+      try {
+        const { useExpenseStore } = require('@/store/useExpenseStore');
+        const expenseStore = useExpenseStore.getState();
+        const hasMatching = expenseStore.transactions.some((t: any) => t.subscriptionId === id);
+        if (hasMatching) {
+          useExpenseStore.setState((state: any) => ({
+            transactions: state.transactions.map((t: any) => {
+              if (t.subscriptionId !== id) return t;
+              return {
+                ...t,
+                note: input.name !== undefined ? input.name : t.note,
+                amount: input.price !== undefined ? input.price : t.amount,
+              };
+            }),
+          }));
+        }
+      } catch (_) {}
+    }
   },
 
   removeSubscription: async (id) => {

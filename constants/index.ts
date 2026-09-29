@@ -129,3 +129,6 @@ export const CURRENCIES = [
 export function getCurrencySymbol(code: string): string {
   return CURRENCY_SYMBOLS[code] || "$";
 }
+
+export * from "./version";
+

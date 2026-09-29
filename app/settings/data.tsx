@@ -5,6 +5,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   Alert,
+  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,15 +22,21 @@ import {
   Layers,
   Printer,
   ScrollText,
+  Download,
+  Upload,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
+import * as Updates from 'expo-updates';
+
+import { exportBackup, importBackup } from '@/utils/backupFile';
 
 import { AppText } from '@/components/ui';
 import { expenseColors } from '@/constants/expenseColors';
 import { useExpenseStore } from '@/store/useExpenseStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useSubscriptionStore } from '@/store/useSubscriptionStore';
 import { useSettingsStore } from '@/store/useSettingsStore';
 import { getDeviceAiEngineInfo } from '@/services/onDeviceAi';
@@ -41,7 +48,21 @@ const EXCHANGE_RATE_CACHE_KEY = '@expense_exchange_rates';
 export default function YourDataScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { transactions, accounts, categories, resetAllData, currencySymbol } = useExpenseStore();
+  const {
+  transactions,
+  accounts,
+  categories,
+  resetAllData,
+  currencySymbol,
+} = useExpenseStore(
+  useShallow((s) => ({
+    transactions: s.transactions,
+    accounts: s.accounts,
+    categories: s.categories,
+    resetAllData: s.resetAllData,
+    currencySymbol: s.currencySymbol,
+  }))
+);
   const { clearAllSubscriptions } = useSubscriptionStore();
   const { resetSettings } = useSettingsStore();
   const aiEngineInfo = useMemo(() => getDeviceAiEngineInfo(), []);
@@ -199,6 +220,57 @@ export default function YourDataScreen() {
       logException('export', 'PDF export failed', err);
       Alert.alert('Export Failed', 'Could not generate PDF report.');
     }
+  };
+
+  const handleExportBackup = async () => {
+    Haptics.selectionAsync();
+    try {
+      const summary = await exportBackup();
+      logAction('export', 'Exported portable JSON backup', summary as unknown as Record<string, unknown>);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert(
+        'Backup Ready',
+        `${summary.subscriptions} subscriptions, ${summary.transactions} transactions and ${summary.settings} settings saved. Keep the file somewhere safe — it is the only copy outside this app.`
+      );
+    } catch (err) {
+      console.warn('Backup export error:', err);
+      logException('export', 'JSON backup export failed', err);
+      Alert.alert('Export Failed', 'Could not create the backup file.');
+    }
+  };
+
+  const handleImportBackup = () => {
+    Haptics.selectionAsync();
+    Alert.alert(
+      'Restore From Backup',
+      'This replaces everything currently in the app with the contents of the backup file. Anything added since that backup was taken will be lost.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Choose File',
+          onPress: async () => {
+            try {
+              const summary = await importBackup();
+              logAction('import', 'Restored from portable JSON backup', summary as unknown as Record<string, unknown>);
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+              Alert.alert(
+                'Backup Restored',
+                `Loaded ${summary.subscriptions} subscriptions and ${summary.transactions} transactions. The app will reload now.`,
+                [{ text: 'OK', onPress: () => Updates.reloadAsync().catch(() => {}) }]
+              );
+            } catch (err) {
+              if (err instanceof Error && err.message === 'cancelled') return;
+              console.warn('Backup import error:', err);
+              logException('import', 'JSON backup restore failed', err);
+              Alert.alert(
+                'Restore Failed',
+                err instanceof Error ? err.message : 'Could not read that backup file.'
+              );
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleClearCache = () => {
@@ -403,6 +475,20 @@ export default function YourDataScreen() {
                 </AppText>
               </View>
             </View>
+
+            <View style={styles.divider} />
+
+            <View style={styles.featureRow}>
+              <View style={[styles.iconBox, { backgroundColor: 'rgba(112, 214, 188, 0.15)' }]}>
+                <ShieldCheck size={18} color="#70D6BC" />
+              </View>
+              <View style={styles.featureTextCol}>
+                <AppText style={styles.featureTitle}>Device Diagnostics & Strict Privacy</AppText>
+                <AppText style={styles.featureSub}>
+                  Anonymous device telemetry (device model, OS version, and release version) is collected purely for stability, bug fixes, and compatibility. Your financial ledger, transactions, accounts, and budgets are strictly 100% on-device and never leave your phone. Your privacy is our topmost priority.
+                </AppText>
+              </View>
+            </View>
           </View>
         </View>
 
@@ -472,22 +558,61 @@ export default function YourDataScreen() {
         <View style={styles.sectionContainer}>
           <AppText style={styles.sectionTitle}>DATA CONTROLS</AppText>
           <View style={styles.card}>
-            {/* Activity / Audit Log */}
+            {/* Activity / Audit Log (Shown only on iPhone) */}
+            {Platform.OS === 'ios' && (
+              <>
+                <TouchableOpacity
+                  style={styles.actionRow}
+                  activeOpacity={0.7}
+                  onPress={() => router.push('/settings/logs')}
+                >
+                  <View style={styles.actionLeft}>
+                    <View style={[styles.logsIconBox]}>
+                      <ScrollText size={18} color="#9DC6EB" />
+                    </View>
+                    <View>
+                      <AppText style={styles.actionTitle}>View Activity Logs</AppText>
+                      <AppText style={styles.actionSub}>Hidden on-device audit trail of every action</AppText>
+                    </View>
+                  </View>
+                  <AppText style={[styles.actionBtnText, { color: '#9DC6EB' }]}>View</AppText>
+                </TouchableOpacity>
+
+                <View style={styles.divider} />
+              </>
+            )}
+
+            {/* Portable JSON backup */}
             <TouchableOpacity
               style={styles.actionRow}
               activeOpacity={0.7}
-              onPress={() => router.push('/settings/logs')}
+              onPress={handleExportBackup}
             >
               <View style={styles.actionLeft}>
-                <View style={[styles.logsIconBox]}>
-                  <ScrollText size={18} color="#9DC6EB" />
-                </View>
+                <Download size={18} color="#9DC6EB" />
                 <View>
-                  <AppText style={styles.actionTitle}>View Activity Logs</AppText>
-                  <AppText style={styles.actionSub}>Hidden on-device audit trail of every action</AppText>
+                  <AppText style={styles.actionTitle}>Backup All Data (JSON)</AppText>
+                  <AppText style={styles.actionSub}>Survives reinstalling the app — save it anywhere</AppText>
                 </View>
               </View>
-              <AppText style={[styles.actionBtnText, { color: '#9DC6EB' }]}>View</AppText>
+              <AppText style={[styles.actionBtnText, { color: '#9DC6EB' }]}>Export</AppText>
+            </TouchableOpacity>
+
+            <View style={styles.divider} />
+
+            <TouchableOpacity
+              style={styles.actionRow}
+              activeOpacity={0.7}
+              onPress={handleImportBackup}
+            >
+              <View style={styles.actionLeft}>
+                <Upload size={18} color="#9DC6EB" />
+                <View>
+                  <AppText style={styles.actionTitle}>Restore From Backup</AppText>
+                  <AppText style={styles.actionSub}>Replaces current data with a saved JSON file</AppText>
+                </View>
+              </View>
+              <AppText style={[styles.actionBtnText, { color: '#9DC6EB' }]}>Import</AppText>
             </TouchableOpacity>
 
             <View style={styles.divider} />

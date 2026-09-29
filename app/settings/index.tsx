@@ -17,12 +17,14 @@ import {
   Grid3X3,
   ShieldCheck,
   Users,
+  RefreshCw,
+  Zap,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
-
-import { colors, spacing, radius, getCurrencySymbol } from "@/constants";
+import { colors, spacing, radius, getCurrencySymbol, AUTHOR_CREDIT } from "@/constants";
 import { AppText } from "@/components/ui";
 import { useSettingsStore } from "@/store/useSettingsStore";
+import { useAppUpdateManager } from "@/services/updates/updateManager";
 
 function IconBox({ bg, children }: { bg: string; children: React.ReactNode }) {
   return (
@@ -84,8 +86,10 @@ export default function SettingsIndex() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { currencyCode, userName } = useSettingsStore();
+  const { isUpdateAvailable, isUpdatePending, activeVersion, isEmbeddedLaunch } = useAppUpdateManager();
 
   const currencySymbol = getCurrencySymbol(currencyCode);
+  const updateBadge = isUpdatePending ? "Ready" : isUpdateAvailable ? "Update" : undefined;
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -153,33 +157,51 @@ export default function SettingsIndex() {
           </SectionCard>
         </View>
 
-        {/* Section 2 — Organize */}
+        {/* Section 2 — System & Automation */}
         <View>
           <SectionCard>
             <Row
-              iconBg="#F8A888"
-              icon={<Grid3X3 size={18} color="#fff" />}
-              label="Organize Subscriptions"
-              onPress={() => router.push("/subscriptions")}
+              iconBg="#F8B195"
+              icon={<Bell size={18} color="#fff" />}
+              label="Notifications"
+              onPress={() => router.push("/settings/notifications")}
             />
-          </SectionCard>
-        </View>
-
-        {/* Section 3 — Privacy */}
-        <View>
-          <SectionCard>
+            <Divider />
+            <Row
+              iconBg="#30D158"
+              icon={<Zap size={18} color="#fff" />}
+              label="Quick Add Shortcut"
+              onPress={() => router.push("/settings/shortcut-setup")}
+            />
+            <Divider />
             <Row
               iconBg="#8E8E93"
               icon={<ShieldCheck size={18} color="#fff" />}
-              label="Privacy & Security"
-              onPress={() => router.push("/settings/privacy")}
+              label="Data & Privacy"
+              onPress={() => router.push("/settings/data")}
             />
           </SectionCard>
         </View>
 
-        <View style={{ alignItems: "center", marginTop: spacing[32], marginBottom: spacing[16] }}>
-          <AppText variant="footnote" color="rgba(255, 255, 255, 0.5)">
-            Built with ❤️ by Mamata Ray
+        {/* Section 3 — About & Diagnostics */}
+        <View>
+          <SectionCard>
+            <Row
+              iconBg="#0A84FF"
+              icon={<RefreshCw size={18} color="#fff" />}
+              label="App Updates"
+              badge={updateBadge}
+              onPress={() => router.push("/settings/updates")}
+            />
+          </SectionCard>
+        </View>
+
+        <View style={{ alignItems: "center", marginTop: spacing[28], marginBottom: spacing[16], gap: 4 }}>
+          <AppText variant="footnote" weight="600" color="rgba(255, 255, 255, 0.6)">
+            Version {activeVersion} {isEmbeddedLaunch ? "· Base" : "· OTA"}
+          </AppText>
+          <AppText variant="caption1" color="rgba(255, 255, 255, 0.35)">
+            {AUTHOR_CREDIT}
           </AppText>
         </View>
       </ScrollView>

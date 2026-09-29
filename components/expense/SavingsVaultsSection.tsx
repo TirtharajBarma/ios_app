@@ -14,6 +14,7 @@ import { Sparkles, Plus, ChevronRight, X, ArrowUpRight, ArrowDownLeft, Shield } 
 import * as Haptics from 'expo-haptics';
 import { AppText } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
+import { useShallow } from 'zustand/react/shallow';
 import { SavingsVault } from '@/types/expense';
 import { expenseColors } from '@/constants/expenseColors';
 import { formatCompactCurrency } from './MoneyFlowCard';
@@ -24,13 +25,22 @@ interface SavingsVaultsSectionProps {
 
 export const SavingsVaultsSection: React.FC<SavingsVaultsSectionProps> = ({ onOpenGoalsModal }) => {
   const {
-    savingsVaults,
-    currencySymbol,
-    depositToVault,
-    withdrawFromVault,
-    addSavingsVault,
-    accounts,
-  } = useExpenseStore();
+  savingsVaults,
+  currencySymbol,
+  depositToVault,
+  withdrawFromVault,
+  addSavingsVault,
+  accounts,
+} = useExpenseStore(
+  useShallow((s) => ({
+    savingsVaults: s.savingsVaults,
+    currencySymbol: s.currencySymbol,
+    depositToVault: s.depositToVault,
+    withdrawFromVault: s.withdrawFromVault,
+    addSavingsVault: s.addSavingsVault,
+    accounts: s.accounts,
+  }))
+);
 
   const sym = currencySymbol || '₹';
 
@@ -736,22 +746,26 @@ const styles = StyleSheet.create({
     backgroundColor: '#101114',
     borderRadius: 14,
     paddingHorizontal: 12,
-    paddingVertical: 12,
+    height: 48,
     color: '#FFFFFF',
     fontSize: 18,
     textAlign: 'center',
+    textAlignVertical: 'center',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.06)',
+    paddingVertical: 0,
   },
   sheetTextInput: {
     backgroundColor: '#101114',
     borderRadius: 14,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    height: 48,
     color: '#FFFFFF',
     fontSize: 13,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.06)',
+    textAlignVertical: 'center',
+    paddingVertical: 0,
   },
   saveGoalBtn: {
     flexDirection: 'row',

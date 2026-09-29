@@ -7,14 +7,12 @@ import {
   ScrollView,
   StyleSheet,
   Platform,
-  Dimensions,
+  useWindowDimensions,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Check, Plus } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import AppText from './AppText';
-
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 export interface LiquidPopoverItem {
   id: string;
@@ -44,12 +42,16 @@ export const LiquidPopoverMenu: React.FC<LiquidPopoverMenuProps> = ({
   footerAction,
   onClose,
 }) => {
+  // Read live: the clamping below is what keeps the menu on screen, so a width
+  // frozen at import time let it hang off the edge after a rotation.
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+
   if (!visible || !anchorRect) return null;
 
   const MENU_WIDTH = Math.max(anchorRect.width, 210);
   let left = anchorRect.x;
-  if (left + MENU_WIDTH > SCREEN_WIDTH - 16) {
-    left = SCREEN_WIDTH - MENU_WIDTH - 16;
+  if (left + MENU_WIDTH > screenWidth - 16) {
+    left = screenWidth - MENU_WIDTH - 16;
   }
   if (left < 16) {
     left = 16;
@@ -57,7 +59,7 @@ export const LiquidPopoverMenu: React.FC<LiquidPopoverMenuProps> = ({
 
   const estimatedHeight = Math.min(items.length * 48 + (footerAction ? 44 : 0), 280);
   let top = anchorRect.y + anchorRect.height + 6;
-  if (top + estimatedHeight > SCREEN_HEIGHT - 40 && anchorRect.y - estimatedHeight - 6 > 40) {
+  if (top + estimatedHeight > screenHeight - 40 && anchorRect.y - estimatedHeight - 6 > 40) {
     top = anchorRect.y - estimatedHeight - 6;
   }
 

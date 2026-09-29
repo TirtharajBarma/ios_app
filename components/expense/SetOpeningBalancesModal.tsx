@@ -9,7 +9,9 @@ import {
   KeyboardAvoidingView,
   Platform,
   Keyboard,
+  StatusBar,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   X,
   Wallet,
@@ -23,6 +25,7 @@ import * as Haptics from 'expo-haptics';
 
 import { AppText } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
+import { useShallow } from 'zustand/react/shallow';
 import { expenseColors } from '@/constants/expenseColors';
 import { ExpenseAccount } from '@/types/expense';
 import { AccountIcon } from './AccountIcon';
@@ -38,7 +41,21 @@ export const SetOpeningBalancesModal: React.FC<SetOpeningBalancesModalProps> = (
   onClose,
   onSaveSuccess,
 }) => {
-  const { accounts, updateAccount, addAccount, setStatementSetup, currencySymbol } = useExpenseStore();
+  const {
+  accounts,
+  updateAccount,
+  addAccount,
+  setStatementSetup,
+  currencySymbol,
+} = useExpenseStore(
+  useShallow((s) => ({
+    accounts: s.accounts,
+    updateAccount: s.updateAccount,
+    addAccount: s.addAccount,
+    setStatementSetup: s.setStatementSetup,
+    currencySymbol: s.currencySymbol,
+  }))
+);
   const sym = currencySymbol || '₹';
 
   // Map of account ID -> input string for balance
@@ -160,6 +177,9 @@ export const SetOpeningBalancesModal: React.FC<SetOpeningBalancesModalProps> = (
     return <Banknote size={18} color={expenseColors.accentGreen} />;
   };
 
+  const insets = useSafeAreaInsets();
+  const androidTopPadding = Platform.OS === 'android' ? Math.max(insets.top, StatusBar.currentHeight || 0, 24) + 10 : 0;
+
   return (
     <Modal
       visible={visible}
@@ -171,14 +191,16 @@ export const SetOpeningBalancesModal: React.FC<SetOpeningBalancesModalProps> = (
       }}
     >
       <KeyboardAvoidingView
-        style={styles.container}
+        style={[styles.container, { paddingTop: androidTopPadding }]}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
       >
         {/* iOS Drag Handle */}
-        <View style={styles.dragHandleContainer}>
-          <View style={styles.dragHandle} />
-        </View>
+        {Platform.OS === 'ios' && (
+          <View style={styles.dragHandleContainer}>
+            <View style={styles.dragHandle} />
+          </View>
+        )}
 
         {/* Header Bar */}
         <View style={styles.header}>
@@ -226,7 +248,7 @@ export const SetOpeningBalancesModal: React.FC<SetOpeningBalancesModalProps> = (
               return (
                 <View key={acc.id} style={styles.accountCard}>
                   <View style={styles.accountCardTop}>
-                    <AccountIcon type={currentType} size={16} containerSize={34} borderRadius={10} />
+                    <AccountIcon name={acc.name} type={currentType} size={16} containerSize={34} borderRadius={10} />
                     <View style={styles.accountTextCol}>
                       <AppText style={styles.accountName} numberOfLines={1}>
                         {acc.name.toUpperCase()}
@@ -607,6 +629,8 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.06)',
+    textAlignVertical: 'center',
+    paddingVertical: 0,
   },
   newAccountActionsRow: {
     flexDirection: 'row',

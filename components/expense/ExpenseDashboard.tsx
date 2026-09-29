@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, StyleSheet, ScrollView, StatusBar, TouchableOpacity, Animated } from 'react-native';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter, useFocusEffect, useScrollToTop } from 'expo-router';
+import { handleTabFocus } from '@/services/navigation/tabTracker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Sparkles,
@@ -16,6 +17,7 @@ import {
 import * as Haptics from 'expo-haptics';
 import { AppText } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
+import { useShallow } from 'zustand/react/shallow';
 import { expenseColors } from '@/constants/expenseColors';
 import { ExpenseHeader } from './ExpenseHeader';
 import { MonthSummary } from './MonthSummary';
@@ -39,10 +41,20 @@ export const ExpenseDashboard: React.FC = () => {
     accounts,
     monthlyBudget,
     currencySymbol,
-    hasInitialAppLoaded,
     hasSeenWalkthrough,
     setHasSeenWalkthrough,
-  } = useExpenseStore();
+    _hasHydrated,
+  } = useExpenseStore(
+    useShallow((s) => ({
+      transactions: s.transactions,
+      accounts: s.accounts,
+      monthlyBudget: s.monthlyBudget,
+      currencySymbol: s.currencySymbol,
+      hasSeenWalkthrough: s.hasSeenWalkthrough,
+      setHasSeenWalkthrough: s.setHasSeenWalkthrough,
+      _hasHydrated: s._hasHydrated,
+    }))
+  );
   const [dismissOnboarding, setDismissOnboarding] = useState<boolean>(false);
   const [showWalkthroughModal, setShowWalkthroughModal] = useState<boolean>(false);
 
@@ -52,30 +64,36 @@ export const ExpenseDashboard: React.FC = () => {
   const [selectedAccountForEdit, setSelectedAccountForEdit] = useState<ExpenseAccount | null>(null);
   const [showEditAccountModal, setShowEditAccountModal] = useState<boolean>(false);
 
-  // Reset scroll to top on tab switch
+  // Standard HIG tap active tab to scroll to top
+  useScrollToTop(scrollRef);
+
+  // Reset scroll to top ONLY when actively switching tabs from another tab
   useFocusEffect(
     useCallback(() => {
-      const rafId = requestAnimationFrame(() => {
+      handleTabFocus('index', () => {
         scrollRef.current?.scrollTo({ y: 0, animated: false });
       });
-      return () => cancelAnimationFrame(rafId);
     }, [])
   );
 
-  // Staggered load animation values
-  const headerAnim = useRef(new Animated.Value(hasInitialAppLoaded ? 1 : 0)).current;
-  const flowAnim = useRef(new Animated.Value(hasInitialAppLoaded ? 1 : 0)).current;
-  const budgetAnim = useRef(new Animated.Value(hasInitialAppLoaded ? 1 : 0)).current;
-  const accountsAnim = useRef(new Animated.Value(hasInitialAppLoaded ? 1 : 0)).current;
+  // Staggered load animation values.
+  //
+  // These start at 0 and are driven once per mount, by the effect below. They
+  // are deliberately NOT seeded from, or gated on, any store flag: the flag
+  // used for this (`hasInitialAppLoaded`) was persisted, so `persist.rehydrate()`
+  // and the iOS App Intent's read-modify-write of the same AsyncStorage file
+  // could both reset it after the header had already animated in, which blanked
+  // the whole top section. Nothing outside this component can reach these
+  // values now.
+  const headerAnim = useRef(new Animated.Value(0)).current;
+  const flowAnim = useRef(new Animated.Value(0)).current;
+  const budgetAnim = useRef(new Animated.Value(0)).current;
+  const accountsAnim = useRef(new Animated.Value(0)).current;
+  const hasRunEntranceAnim = useRef(false);
 
   useEffect(() => {
-    if (hasInitialAppLoaded) {
-      headerAnim.setValue(1);
-      flowAnim.setValue(1);
-      budgetAnim.setValue(1);
-      accountsAnim.setValue(1);
-      return;
-    }
+    if (hasRunEntranceAnim.current) return;
+    hasRunEntranceAnim.current = true;
 
     headerAnim.setValue(0);
     flowAnim.setValue(0);
@@ -108,9 +126,34 @@ export const ExpenseDashboard: React.FC = () => {
         useNativeDriver: true,
       }),
     ]).start();
-  }, [hasInitialAppLoaded]);
+  }, []);
+
+  const [txModalPrefill, setTxModalPrefill] = useState<{
+    tab?: 'expense' | 'income' | 'transfer' | 'debt';
+    fromAccountId?: string;
+    toAccountId?: string;
+    amount?: number;
+    note?: string;
+  }>({});
 
   const handleAddPress = () => {
+    setTxModalPrefill({});
+    setShowAddTxModal(true);
+  };
+
+  const handlePayBill = (cardAccount: ExpenseAccount) => {
+    const primaryBank =
+      accounts.find((a) => a.type !== 'credit' && !a.isArchived && a.balance > 0) ||
+      accounts.find((a) => a.type !== 'credit' && !a.isArchived) ||
+      accounts[0];
+
+    setTxModalPrefill({
+      tab: 'transfer',
+      fromAccountId: primaryBank?.id || '',
+      toAccountId: cardAccount.id,
+      amount: cardAccount.dueAmount || 0,
+      note: `Pay Bill - ${cardAccount.name}`,
+    });
     setShowAddTxModal(true);
   };
 
@@ -120,8 +163,8 @@ export const ExpenseDashboard: React.FC = () => {
   };
 
   const handleAccountPress = (acc: ExpenseAccount) => {
-    setSelectedAccountForEdit(acc);
-    setShowEditAccountModal(true);
+    Haptics.selectionAsync().catch(() => {});
+    router.push(`/account/${acc.id}`);
   };
 
   const handleCategorySelect = (_catId: string) => {
@@ -373,13 +416,22 @@ export const ExpenseDashboard: React.FC = () => {
       {/* Add Transaction Modal */}
       <AddTransactionModal
         visible={showAddTxModal}
-        onClose={() => setShowAddTxModal(false)}
+        onClose={() => {
+          setShowAddTxModal(false);
+          setTxModalPrefill({});
+        }}
+        initialTab={txModalPrefill.tab}
+        initialFromAccountId={txModalPrefill.fromAccountId}
+        initialToAccountId={txModalPrefill.toAccountId}
+        initialAmount={txModalPrefill.amount}
+        initialNote={txModalPrefill.note}
       />
 
       {/* Accounts Listing Modal */}
       <AccountsListModal
         visible={showAccountsModal}
         initialTab={accountsModalTab}
+        onPayBill={handlePayBill}
         onClose={() => setShowAccountsModal(false)}
       />
 
@@ -392,7 +444,7 @@ export const ExpenseDashboard: React.FC = () => {
 
       {/* Interactive App Walkthrough & Feature Guide Modal */}
       <AppWalkthroughModal
-        visible={!hasSeenWalkthrough || showWalkthroughModal}
+        visible={(_hasHydrated && !hasSeenWalkthrough) || showWalkthroughModal}
         onClose={() => {
           setShowWalkthroughModal(false);
           setHasSeenWalkthrough(true);

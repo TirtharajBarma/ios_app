@@ -27,7 +27,6 @@ export const typography = {
     lineHeight: 41,
     fontWeight: "700" as const,
     letterSpacing: 0.37,
-    fontFamily: "System",
   },
 
   /** Title 1 — 28pt Bold, section headers. */
@@ -36,7 +35,6 @@ export const typography = {
     lineHeight: 34,
     fontWeight: "700" as const,
     letterSpacing: 0.36,
-    fontFamily: "System",
   },
 
   /** Title 2 — 22pt Bold, navigation bars. */
@@ -45,7 +43,6 @@ export const typography = {
     lineHeight: 28,
     fontWeight: "700" as const,
     letterSpacing: 0.35,
-    fontFamily: "System",
   },
 
   /** Title 3 — 20pt Semibold, smaller section titles. */
@@ -54,7 +51,6 @@ export const typography = {
     lineHeight: 25,
     fontWeight: "600" as const,
     letterSpacing: 0.38,
-    fontFamily: "System",
   },
 
   /** Headline — 17pt Semibold, emphasized body text. */
@@ -63,7 +59,6 @@ export const typography = {
     lineHeight: 22,
     fontWeight: "600" as const,
     letterSpacing: -0.41,
-    fontFamily: "System",
   },
 
   /** Body — 17pt Regular, standard paragraph text. */
@@ -72,7 +67,6 @@ export const typography = {
     lineHeight: 22,
     fontWeight: "400" as const,
     letterSpacing: -0.41,
-    fontFamily: "System",
   },
 
   /** Callout — 16pt Regular, supplementary text. */
@@ -81,7 +75,6 @@ export const typography = {
     lineHeight: 21,
     fontWeight: "400" as const,
     letterSpacing: -0.32,
-    fontFamily: "System",
   },
 
   /** Subheadline — 15pt Regular, secondary labels. */
@@ -90,7 +83,6 @@ export const typography = {
     lineHeight: 20,
     fontWeight: "400" as const,
     letterSpacing: -0.24,
-    fontFamily: "System",
   },
 
   /** Footnote — 13pt Regular, tertiary labels / metadata. */
@@ -99,7 +91,6 @@ export const typography = {
     lineHeight: 18,
     fontWeight: "400" as const,
     letterSpacing: -0.08,
-    fontFamily: "System",
   },
 
   /** Caption 1 — 12pt Medium, small annotations. */
@@ -108,7 +99,6 @@ export const typography = {
     lineHeight: 16,
     fontWeight: "500" as const,
     letterSpacing: 0,
-    fontFamily: "System",
   },
 
   /** Caption 2 — 11pt Medium, smallest readable text. */
@@ -117,7 +107,6 @@ export const typography = {
     lineHeight: 13,
     fontWeight: "500" as const,
     letterSpacing: 0.07,
-    fontFamily: "System",
   },
 } as const;
 

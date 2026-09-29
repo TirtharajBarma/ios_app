@@ -120,14 +120,48 @@ const WIN_ANSI_MAP: Record<number, string> = {
   0xbd: '½', 0xbe: '¾', 0xbf: '¿',
 };
 
+import {
+  extractPdfEncryptionInfo,
+  verifyAndDerivePdfKey,
+  decryptPdfData,
+  PdfEncryptionInfo,
+} from './pdfCrypto';
+
 /**
  * Universal on-device PDF parser engine.
  * Robustly parses PDF streams, resolves ToUnicode CMaps & Font Encodings,
  * tokenizes operators (BT, ET, Tf, Tm, Td, TD, T*, TJ, Tj, '), and reconstructs
  * spatial rows with character and currency mappings.
+ * Supports password-protected / encrypted PDFs (Standard Security R2 to R6).
  */
-export function parsePdfDocument(uint8Data: Uint8Array): ParsedPdfResult {
+export function parsePdfDocument(uint8Data: Uint8Array, password?: string): ParsedPdfResult {
   console.log('[PDF] parsePdfDocument START — byteLength:', uint8Data.byteLength, 'byteOffset:', uint8Data.byteOffset);
+
+  // Check and handle encryption
+  let encInfo: PdfEncryptionInfo | null = null;
+  let fileKey: Uint8Array | undefined;
+
+  if (isPdfEncrypted(uint8Data)) {
+    if (password !== undefined) {
+      const auth = verifyAndDerivePdfKey(uint8Data, password);
+      if (!auth.success || !auth.fileKey || !auth.encInfo) {
+        throw new Error(auth.error || 'Incorrect PDF password.');
+      }
+      encInfo = auth.encInfo;
+      fileKey = auth.fileKey;
+      console.log(`[PDF] Decryption key derived successfully (R${encInfo.r}, ${encInfo.length}-bit)`);
+    } else {
+      // Try empty password by default (some PDFs have owner password but blank user password)
+      const auth = verifyAndDerivePdfKey(uint8Data, '');
+      if (auth.success && auth.fileKey && auth.encInfo) {
+        encInfo = auth.encInfo;
+        fileKey = auth.fileKey;
+        console.log('[PDF] Empty password unlocked document');
+      } else {
+        throw new Error('PASSWORD_REQUIRED');
+      }
+    }
+  }
 
   let latin1Str: string;
   try {
@@ -217,6 +251,12 @@ export function parsePdfDocument(uint8Data: Uint8Array): ParsedPdfResult {
         );
       }
 
+      // Decrypt stream if document is encrypted
+      if (encInfo && fileKey) {
+        const objIdNum = parseInt(id, 10);
+        streamBytes = decryptPdfData(streamBytes, objIdNum, 0, encInfo, fileKey);
+      }
+
       const hasFlateDecode = body.includes('/Filter') && (body.includes('/FlateDecode') || body.includes('/Fl'));
       console.log(`[PDF] obj ${id}: streamStart=${streamStart} streamLen=${streamLen} sliceLen=${streamBytes.length} hasFlateDecode=${hasFlateDecode} sliceByteOffset=${streamBytes.byteOffset}`);
 
@@ -236,7 +276,11 @@ export function parsePdfDocument(uint8Data: Uint8Array): ParsedPdfResult {
             // Fallback: try locating endstream if streamLen was slightly off
             const fallbackEnd = latin1Str.indexOf('endstream', streamStart);
             if (fallbackEnd !== -1) {
-              const fallbackBytes = uint8Data.slice(streamStart, fallbackEnd);
+              let fallbackBytes: Uint8Array = uint8Data.slice(streamStart, fallbackEnd);
+              if (encInfo && fileKey) {
+                const objIdNum = parseInt(id, 10);
+                fallbackBytes = decryptPdfData(fallbackBytes, objIdNum, 0, encInfo, fileKey);
+              }
               console.log(`[PDF] obj ${id}: fallback slice len=${fallbackBytes.length}`);
               try {
                 const dec = fflate.unzlibSync(fallbackBytes);
@@ -424,6 +468,24 @@ export function parsePdfDocument(uint8Data: Uint8Array): ParsedPdfResult {
     return res;
   }
 
+  function multiplyMatrix(m1: number[], m2: number[]): number[] {
+    return [
+      m2[0] * m1[0] + m2[1] * m1[2],
+      m2[0] * m1[1] + m2[1] * m1[3],
+      m2[2] * m1[0] + m2[3] * m1[2],
+      m2[2] * m1[1] + m2[3] * m1[3],
+      m2[4] * m1[0] + m2[5] * m1[2] + m1[4],
+      m2[4] * m1[1] + m2[5] * m1[3] + m1[5],
+    ];
+  }
+
+  function transformPoint(ctm: number[], x: number, y: number): { x: number; y: number } {
+    return {
+      x: ctm[0] * x + ctm[2] * y + ctm[4],
+      y: ctm[1] * x + ctm[3] * y + ctm[5],
+    };
+  }
+
   const pagesExtracted: ParsedPdfResult['pages'] = [];
   const allRows: ParsedPdfRow[] = [];
   let fullDocRawText = '';
@@ -432,100 +494,120 @@ export function parsePdfDocument(uint8Data: Uint8Array): ParsedPdfResult {
     const combinedStream = p.streamIds.map((sid) => decompressedStreams[sid] || '').join('\n');
     console.log(`[PDF] Page ${pIdx + 1}: combinedStream length=${combinedStream.length}, streamIds=${p.streamIds.join(',')}`);
     const items: PositionedTextItem[] = [];
+    const stateStack: number[][] = [];
+    let currentCtm = [1, 0, 0, 1, 0, 0];
+    let textMatrix = [1, 0, 0, 1, 0, 0];
+    let textLineMatrix = [1, 0, 0, 1, 0, 0];
+    let currentFont = '';
 
-    const btRegex = /BT([\s\S]*?)ET/g;
-    let b: RegExpExecArray | null;
-    let btCount = 0;
+    const cmdRegex =
+      /(q\b)|(Q\b)|((?:[-\d.]+\s+){6}cm)|(\bBT\b)|(\bET\b)|(\/([A-Za-z0-9_]+)\s+[\d.]+\s+Tf)|((?:[-\d.]+\s+){6}Tm)|((?:[-\d.]+\s+){2}T[dm*D])|(\bT\*\b)|(\[(?:[\s\S]*?)\]\s*TJ)|(\((?:\\.|[^\\()])*\)\s*Tj)|(<[0-9a-fA-F\s]+>\s*Tj)/g;
+    let match: RegExpExecArray | null;
 
-    while ((b = btRegex.exec(combinedStream)) !== null) {
-      btCount++;
-      const block = b[1];
-      let currentFont = '';
-      let currentX = 0;
-      let currentY = 0;
+    while ((match = cmdRegex.exec(combinedStream)) !== null) {
+      if (match[1]) {
+        // q: push graphics state
+        stateStack.push([...currentCtm]);
+      } else if (match[2]) {
+        // Q: pop graphics state
+        if (stateStack.length > 0) {
+          currentCtm = stateStack.pop()!;
+        }
+      } else if (match[3]) {
+        // cm: concatenate matrix
+        const parts = match[3].trim().split(/\s+/).map(Number);
+        currentCtm = multiplyMatrix(currentCtm, parts);
+      } else if (match[4]) {
+        // BT: begin text object
+        textMatrix = [1, 0, 0, 1, 0, 0];
+        textLineMatrix = [1, 0, 0, 1, 0, 0];
+      } else if (match[6]) {
+        // Tf: set font
+        currentFont = '/' + match[7];
+      } else if (match[8]) {
+        // Tm: set text matrix
+        const tmParts = match[8].trim().split(/\s+/).map(Number);
+        textMatrix = tmParts;
+        textLineMatrix = tmParts;
+      } else if (match[9]) {
+        // Td / TD / Tm relative translation
+        const tdParts = match[9].trim().split(/\s+/).map(Number);
+        textLineMatrix[4] += tdParts[0];
+        textLineMatrix[5] += tdParts[1];
+        textMatrix = [...textLineMatrix];
+      } else if (match[10]) {
+        // T* (newline)
+        textLineMatrix[5] -= 12;
+        textMatrix = [...textLineMatrix];
+      } else if (match[11]) {
+        // TJ array
+        const tjContent = match[11];
+        const fontInfo = fontDicts[currentFont];
+        const cmap = fontInfo?.cmap;
+        const encoding = fontInfo?.encoding;
 
-      const cmdRegex =
-        /(\/([A-Za-z0-9_]+)\s+[\d.]+\s+Tf)|((?:[-\d.]+\s+){6}Tm)|((?:[-\d.]+\s+){2}T[dm*D])|(T\*)|(\[(?:[\s\S]*?)\]\s*TJ)|(\((?:\\.|[^\\()])*\)\s*Tj)|(<[0-9a-fA-F\s]+>\s*Tj)/g;
-      let match: RegExpExecArray | null;
-
-      while ((match = cmdRegex.exec(block)) !== null) {
-        if (match[1]) {
-          currentFont = '/' + match[2];
-        } else if (match[3]) {
-          const tmParts = match[3].trim().split(/\s+/).map(Number);
-          currentX = tmParts[4];
-          currentY = tmParts[5];
-        } else if (match[4]) {
-          const tdParts = match[4].trim().split(/\s+/).map(Number);
-          currentX += tdParts[0];
-          currentY += tdParts[1];
-        } else if (match[5]) {
-          // T* (newline)
-          currentY -= 12;
-        } else if (match[6]) {
-          const tjContent = match[6];
-          const fontInfo = fontDicts[currentFont];
-          const cmap = fontInfo?.cmap;
-          const encoding = fontInfo?.encoding;
-
-          let text = '';
-          const tokenRegex = /\(((?:\\.|[^\\()])*)\)|<([0-9a-fA-F\s]+)>|([-\d.]+)/g;
-          let tok: RegExpExecArray | null;
-          while ((tok = tokenRegex.exec(tjContent)) !== null) {
-            if (tok[1] !== undefined) {
-              text += decodePdfString(tok[1], cmap, encoding);
-            } else if (tok[2] !== undefined) {
-              text += decodeHex(tok[2].replace(/\s+/g, ''), cmap);
-            } else if (tok[3] !== undefined) {
-              const kerning = parseFloat(tok[3]);
-              if (kerning < -200) text += ' ';
-            }
+        let text = '';
+        const tokenRegex = /\(((?:\\.|[^\\()])*)\)|<([0-9a-fA-F\s]+)>|([-\d.]+)/g;
+        let tok: RegExpExecArray | null;
+        while ((tok = tokenRegex.exec(tjContent)) !== null) {
+          if (tok[1] !== undefined) {
+            text += decodePdfString(tok[1], cmap, encoding);
+          } else if (tok[2] !== undefined) {
+            text += decodeHex(tok[2].replace(/\s+/g, ''), cmap);
+          } else if (tok[3] !== undefined) {
+            const kerning = parseFloat(tok[3]);
+            if (kerning < -200) text += ' ';
           }
-          if (text.trim()) {
-            items.push({
-              text: text.trim(),
-              x: currentX,
-              y: currentY,
-              font: currentFont,
-              page: pIdx + 1,
-            });
-          }
-        } else if (match[7]) {
-          const raw = match[7].slice(1, match[7].lastIndexOf(')')).replace(/\\([\\()])/g, '$1');
-          const fontInfo = fontDicts[currentFont];
-          const text = decodePdfString(raw, fontInfo?.cmap, fontInfo?.encoding);
-          if (text.trim()) {
-            items.push({
-              text: text.trim(),
-              x: currentX,
-              y: currentY,
-              font: currentFont,
-              page: pIdx + 1,
-            });
-          }
-        } else if (match[8]) {
-          const hex = match[8].replace(/[<>\s]/g, '');
-          const fontInfo = fontDicts[currentFont];
-          const text = decodeHex(hex, fontInfo?.cmap);
-          if (text.trim()) {
-            items.push({
-              text: text.trim(),
-              x: currentX,
-              y: currentY,
-              font: currentFont,
-              page: pIdx + 1,
-            });
-          }
+        }
+        if (text.trim()) {
+          const pt = transformPoint(currentCtm, textMatrix[4], textMatrix[5]);
+          items.push({
+            text: text.trim(),
+            x: pt.x,
+            y: pt.y,
+            font: currentFont,
+            page: pIdx + 1,
+          });
+        }
+      } else if (match[12]) {
+        // (string) Tj
+        const raw = match[12].slice(1, match[12].lastIndexOf(')')).replace(/\\([\\()])/g, '$1');
+        const fontInfo = fontDicts[currentFont];
+        const text = decodePdfString(raw, fontInfo?.cmap, fontInfo?.encoding);
+        if (text.trim()) {
+          const pt = transformPoint(currentCtm, textMatrix[4], textMatrix[5]);
+          items.push({
+            text: text.trim(),
+            x: pt.x,
+            y: pt.y,
+            font: currentFont,
+            page: pIdx + 1,
+          });
+        }
+      } else if (match[13]) {
+        // <hex> Tj
+        const hex = match[13].replace(/[<>\s]/g, '');
+        const fontInfo = fontDicts[currentFont];
+        const text = decodeHex(hex, fontInfo?.cmap);
+        if (text.trim()) {
+          const pt = transformPoint(currentCtm, textMatrix[4], textMatrix[5]);
+          items.push({
+            text: text.trim(),
+            x: pt.x,
+            y: pt.y,
+            font: currentFont,
+            page: pIdx + 1,
+          });
         }
       }
     }
-    console.log(`[PDF] Page ${pIdx + 1}: BT blocks=${btCount}, items extracted=${items.length}`);
+    console.log(`[PDF] Page ${pIdx + 1}: items extracted=${items.length}`);
 
     if (items.length > 0) {
       // Determine if coordinate system is standard PDF (Y=0 at bottom) or Quartz inverted (Y=0 at top)
-      // Check if top-of-page keywords (DATE, Generated, Statement, Klarr, Bank) have higher Y than footer items (Page, Generated by)
+      // Check if top-of-page keywords (DATE, Generated, Statement, Export, Bank) have higher Y than footer items (Page, Generated by)
       let isYInverted = false;
-      const headerItem = items.find((it) => /generated|statement|date|klarr|bank/i.test(it.text));
+      const headerItem = items.find((it) => /generated|statement|date|export|bank/i.test(it.text));
       const footerItem = items.find((it) => /page\s+\d+|generated\s+by/i.test(it.text));
       if (headerItem && footerItem) {
         // If header Y is less than footer Y, Y increases downwards (flipped)

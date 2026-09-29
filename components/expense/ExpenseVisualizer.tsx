@@ -5,7 +5,7 @@ import {
   ScrollView,
   TouchableOpacity,
   Platform,
-  Dimensions,
+  useWindowDimensions,
   Animated,
   Easing,
   LayoutAnimation,
@@ -16,12 +16,15 @@ import Svg, { Path, Rect } from 'react-native-svg';
 import { Flame, Trophy, Plus, Zap, ChevronRight } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { AppText } from '@/components/ui';
-import { useExpenseStore } from '@/store/useExpenseStore';
+import { useExpenseStore, getUserCategories, isSystemCategory } from '@/store/useExpenseStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useSubscriptionStore } from '@/store/useSubscriptionStore';
 import { expenseColors } from '@/constants/expenseColors';
 import { ExpenseTransaction } from '@/types/expense';
+import { getSubscriptionActivePrice } from '@/utils/date';
 
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter, useFocusEffect, useScrollToTop } from 'expo-router';
+import { handleTabFocus } from '@/services/navigation/tabTracker';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -46,30 +49,45 @@ import { formatCompactCurrency } from './MoneyFlowCard';
 
 export type TimeHorizon = '1W' | '1M' | '6M' | '1Y' | 'ALL';
 
-const SW = Dimensions.get('window').width;
-
 // ─────────────────────────────────────────────
 // ALL SIZES ARE COMPUTED FROM SCREEN WIDTH
+//
+// These used to be module-scope constants derived from
+// `Dimensions.get('window')` evaluated at import time. In a standalone build the
+// module is evaluated before the window is measured, so the width could be stale
+// (or the pre-rotation width) and every card came out the wrong size. They are
+// now derived per-render from useWindowDimensions() via getVizMetrics().
 // ─────────────────────────────────────────────
 const PAGE_M   = 16;           // page horizontal margin
 const CARD_P   = 16;           // compact card inner padding
-const CARD_W   = SW - PAGE_M * 2;
-const INNER_W  = CARD_W - CARD_P * 2;
 
 // ── Calendar ─────────────────────────────────
 const CAL_GAP      = 5;
 const CAL_ROW_GAP  = 4;
-const TILE_W       = Math.floor((INNER_W - CAL_GAP * 6) / 7);
 const TILE_H       = 32;       // compact tile height to reduce card height
 
 // ── Sankey ───────────────────────────────────
 const INCOME_W  = 50;
-const RLABEL_W  = Math.max(92, Math.min(108, Math.round(INNER_W * 0.30)));
-const SVG_W     = INNER_W - INCOME_W - RLABEL_W;
 const CHART_H   = 200;
 const SRC_W     = 8;
 const DST_W     = 8;
 const DST_GAP   = 6;
+
+interface VizMetrics {
+  CARD_W: number;
+  INNER_W: number;
+  TILE_W: number;
+  RLABEL_W: number;
+  SVG_W: number;
+}
+
+function getVizMetrics(width: number): VizMetrics {
+  const CARD_W = width - PAGE_M * 2;
+  const INNER_W = CARD_W - CARD_P * 2;
+  const TILE_W = Math.floor((INNER_W - CAL_GAP * 6) / 7);
+  const RLABEL_W = Math.max(92, Math.min(108, Math.round(INNER_W * 0.30)));
+  return { CARD_W, INNER_W, TILE_W, RLABEL_W, SVG_W: INNER_W - INCOME_W - RLABEL_W };
+}
 
 // ─────────────────────────────────────────────
 // FLOW CATEGORIES
@@ -92,7 +110,7 @@ const MIN_SRC_H = 4;
 const MIN_DST_H = 6;
 const LABEL_H = 22;
 
-function buildStreams(cats: FlowCat[], chartHeight: number): Stream[] {
+function buildStreams(cats: FlowCat[], chartHeight: number, SVG_W: number): Stream[] {
   const active = cats.filter(c => c.amount > 0);
   const total  = active.reduce((s, c) => s + c.amount, 0);
   if (!total) return [];
@@ -300,7 +318,14 @@ function horizonWindow(
 export const ExpenseVisualizer: React.FC = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { selectedMonth, transactions, categories: storeCategories, currencySymbol } = useExpenseStore();
+  const { selectedMonth, transactions, storeCategories, currencySymbol } = useExpenseStore(
+    useShallow((s) => ({
+      selectedMonth: s.selectedMonth,
+      transactions: s.transactions,
+      storeCategories: s.categories,
+      currencySymbol: s.currencySymbol,
+    }))
+  );
   const sym = currencySymbol || '₹';
   const { subscriptions, isLoaded: isSubsLoaded, loadSubscriptions } = useSubscriptionStore();
   const [timeHorizon, setTimeHorizon] = useState<TimeHorizon>('1M');
@@ -326,13 +351,24 @@ export const ExpenseVisualizer: React.FC = () => {
 
   const scrollRef = useRef<ScrollView>(null);
 
-  // Reset scroll to top on tab focus
+  // Width-derived layout metrics, recomputed whenever the window resizes
+  // (rotation, split view, foldable posture) instead of being frozen at import.
+  const { width: vizWidth } = useWindowDimensions();
+  const { CARD_W, INNER_W, TILE_W, RLABEL_W, SVG_W } = useMemo(
+    () => getVizMetrics(vizWidth),
+    [vizWidth]
+  );
+  const cardWidthStyle = useMemo(() => ({ width: CARD_W }), [CARD_W]);
+
+  // Standard HIG tap active tab to scroll to top
+  useScrollToTop(scrollRef);
+
+  // Reset scroll to top ONLY when actively switching tabs from another tab
   useFocusEffect(
     useCallback(() => {
-      const rafId = requestAnimationFrame(() => {
+      handleTabFocus('visualizer', () => {
         scrollRef.current?.scrollTo({ y: 0, animated: false });
       });
-      return () => cancelAnimationFrame(rafId);
     }, [])
   );
 
@@ -412,6 +448,8 @@ export const ExpenseVisualizer: React.FC = () => {
 
     let weekdaySum = 0;
     let weekendSum = 0;
+    let weekdayTxCount = 0;
+    let weekendTxCount = 0;
     const weekdayCatMap: Record<string, number> = {};
     const weekendCatMap: Record<string, number> = {};
 
@@ -422,9 +460,11 @@ export const ExpenseVisualizer: React.FC = () => {
       const catId = tx.categoryId || 'other';
       if (day === 0 || day === 6) {
         weekendSum += share;
+        weekendTxCount += 1;
         weekendCatMap[catId] = (weekendCatMap[catId] || 0) + share;
       } else {
         weekdaySum += share;
+        weekdayTxCount += 1;
         weekdayCatMap[catId] = (weekdayCatMap[catId] || 0) + share;
       }
     });
@@ -469,28 +509,41 @@ export const ExpenseVisualizer: React.FC = () => {
     // Daily averages
     const avgWeekend = weekendDays > 0 ? weekendSum / weekendDays : 0;
     const avgWeekday = weekdayDays > 0 ? weekdaySum / weekdayDays : 0;
-    const ratio = avgWeekday > 0 ? (avgWeekend / avgWeekday).toFixed(1) : (avgWeekend > 0 ? '∞' : '1.0');
+
+    // Statistical Surge Criteria:
+    // 1. Both weekday and weekend spend must exist (baseline comparison is required)
+    // 2. At least 2 transactions logged in this horizon
+    // 3. Weekend daily burn rate is at least 25% higher than weekday burn rate
+    // 4. Calculated excess spend is at least ₹100
+    const hasBaseline = weekdaySum > 0 && weekendSum > 0;
+    const totalTxCount = weekdayTxCount + weekendTxCount;
+    const excessBurnDaily = avgWeekend - avgWeekday;
+    const rawWeekendTax = excessBurnDaily * weekendDays;
+
+    const isSurge = hasBaseline && totalTxCount >= 2 && avgWeekend > (avgWeekday * 1.25) && rawWeekendTax >= 100;
+    const ratio = hasBaseline && avgWeekday > 0 ? (avgWeekend / avgWeekday).toFixed(1) : '1.0';
+    const weekendTax = isSurge ? Math.round(rawWeekendTax) : 0;
 
     // Leisure Leak algorithm: identify which category surges most on weekends vs weekday pace
     let topLeakCatId = '';
     let maxLeakAmount = 0;
 
-    const allCatIds = Array.from(new Set([...Object.keys(weekdayCatMap), ...Object.keys(weekendCatMap)]));
-    allCatIds.forEach(catId => {
-      const wEndAmt = weekendCatMap[catId] || 0;
-      const wDayAmt = weekdayCatMap[catId] || 0;
-      const avgWEnd = weekendDays > 0 ? wEndAmt / weekendDays : 0;
-      const avgWDay = weekdayDays > 0 ? wDayAmt / weekdayDays : 0;
-      const diffDaily = avgWEnd - avgWDay;
-      const excessSpend = Math.max(0, wEndAmt - (avgWDay * weekendDays));
-      if (diffDaily > 0 && excessSpend > maxLeakAmount) {
-        maxLeakAmount = excessSpend;
-        topLeakCatId = catId;
-      }
-    });
+    if (isSurge) {
+      const allCatIds = Array.from(new Set([...Object.keys(weekdayCatMap), ...Object.keys(weekendCatMap)]));
+      allCatIds.forEach(catId => {
+        const wEndAmt = weekendCatMap[catId] || 0;
+        const wDayAmt = weekdayCatMap[catId] || 0;
+        const avgWDay = weekdayDays > 0 ? wDayAmt / weekdayDays : 0;
+        const avgWEnd = weekendDays > 0 ? wEndAmt / weekendDays : 0;
+        const catExcess = Math.max(0, (avgWEnd - avgWDay) * weekendDays);
+        if (catExcess > maxLeakAmount) {
+          maxLeakAmount = catExcess;
+          topLeakCatId = catId;
+        }
+      });
+    }
 
     const topLeakCategory = topLeakCatId ? storeCategories.find(c => c.id === topLeakCatId) : null;
-    const weekendTax = Math.max(0, Math.round((avgWeekend - avgWeekday) * weekendDays));
 
     return {
       weekdaySum,
@@ -502,6 +555,7 @@ export const ExpenseVisualizer: React.FC = () => {
       ratio,
       topLeakCategory,
       weekendTax,
+      isSurge,
     };
   }, [transactions, horizonExpenses, timeHorizon, curYear, curMonth, daysInMonth, storeCategories]);
 
@@ -553,9 +607,9 @@ export const ExpenseVisualizer: React.FC = () => {
       catMap[tx.categoryId] = (catMap[tx.categoryId] || 0) + share;
     });
 
-    const knownCatIds = new Set(storeCategories.map(c => c.id));
-    const list = storeCategories
-      .filter(c => c.id !== 'cat_income')
+    const userCats = getUserCategories(storeCategories);
+    const knownCatIds = new Set(userCats.map(c => c.id));
+    const list = userCats
       .map(cat => ({
         category: cat,
         amount: catMap[cat.id] || 0,
@@ -564,7 +618,7 @@ export const ExpenseVisualizer: React.FC = () => {
 
     // Include any custom/unlisted category IDs
     Object.keys(catMap).forEach(catId => {
-      if (catId !== 'cat_income' && !knownCatIds.has(catId) && catMap[catId] > 0) {
+      if (!isSystemCategory(catId) && !knownCatIds.has(catId) && catMap[catId] > 0) {
         list.push({
           category: {
             id: catId,
@@ -596,7 +650,7 @@ export const ExpenseVisualizer: React.FC = () => {
   }, [cats.length]);
 
   // sankey
-  const streams   = useMemo(() => buildStreams(cats, chartHeight), [cats, chartHeight]);
+  const streams   = useMemo(() => buildStreams(cats, chartHeight, SVG_W), [cats, chartHeight, SVG_W]);
   const labelTops = useMemo(() => resolveY(streams, chartHeight), [streams, chartHeight]);
   const dstLX     = SVG_W - DST_W;
 
@@ -761,24 +815,28 @@ export const ExpenseVisualizer: React.FC = () => {
     return '#FFFFFF';                                // White text on dark red tiles
   };
 
-  // Heaviest weekday dynamically calculated
-  const weekdayTotals = useMemo(() => {
-    const totals = [0, 0, 0, 0, 0, 0, 0]; // Sun=0, Mon=1, Tue=2, Wed=3, Thu=4, Fri=5, Sat=6
-    monthExpenses.forEach(tx => {
-      const dayIdx = parseTxDate(tx.date).getDay();
-      const share = tx.split ? tx.split.yourShare : tx.amount;
-      totals[dayIdx] += share;
+  // True single heaviest spend date dynamically calculated from daily spend
+  const heaviestDayInfo = useMemo(() => {
+    let peakDay = 0;
+    let peakAmt = 0;
+    Object.entries(dailySpend).forEach(([dayStr, amt]) => {
+      const d = Number(dayStr);
+      if (amt > peakAmt) {
+        peakAmt = amt;
+        peakDay = d;
+      }
     });
-    return totals;
-  }, [monthExpenses]);
 
-  const WDN = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  let heaviestIdx = 0;
-  weekdayTotals.forEach((amt, i) => {
-    if (amt > weekdayTotals[heaviestIdx]) heaviestIdx = i;
-  });
-  const heaviestDayName = weekdayTotals[heaviestIdx] > 0 ? WDN[heaviestIdx] : 'None';
-  const heaviestDayAmount = weekdayTotals[heaviestIdx];
+    if (peakDay === 0 || peakAmt === 0) {
+      return { label: 'None', amount: 0, day: null };
+    }
+
+    const date = new Date(curYear, curMonth, peakDay);
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const label = `${dayNames[date.getDay()]}, ${peakDay} ${monthNames[curMonth]}`;
+    return { label, amount: peakAmt, day: peakDay };
+  }, [dailySpend, curYear, curMonth]);
 
   // Longest no-spend streak dynamically calculated (capped at today for active month)
   const noSpendStreak = useMemo(() => {
@@ -797,34 +855,82 @@ export const ExpenseVisualizer: React.FC = () => {
     return best;
   }, [dailySpend, daysInMonth, curYear, curMonth]);
 
-  // Dynamic Weekly Rhythm calculated from horizonExpenses
+  // Dynamic Weekly Rhythm: represents the 7 real consecutive days of the active week with exact real spend
   const rhythmData = useMemo(() => {
-    const spendByMonSun = [0, 0, 0, 0, 0, 0, 0]; // Mon (0) to Sun (6)
-    horizonExpenses.forEach(tx => {
-      const jsDay = parseTxDate(tx.date).getDay(); // 0 is Sun
-      const idx = jsDay === 0 ? 6 : jsDay - 1;
-      const share = tx.split ? tx.split.yourShare : tx.amount;
-      spendByMonSun[idx] += share;
-    });
+    const now = new Date();
+    const isCurrentMonth = curYear === now.getFullYear() && curMonth === now.getMonth();
 
-    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    return days.map((day, idx) => ({
-      day,
-      amt: spendByMonSun[idx],
-      showLabel: spendByMonSun[idx] > 0,
-      labelText: formatCompactCurrency(spendByMonSun[idx], sym),
-    }));
-  }, [horizonExpenses, sym]);
+    // Determine the 7-day anchor:
+    // If viewing current month, anchor to rolling 7 days up to today
+    // If viewing past/future month, anchor to the last 7 days of that month
+    const endDate = isCurrentMonth
+      ? new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999)
+      : new Date(curYear, curMonth, daysInMonth, 23, 59, 59, 999);
+
+    const startDate = new Date(endDate);
+    startDate.setDate(endDate.getDate() - 6);
+    startDate.setHours(0, 0, 0, 0);
+
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+    const daysList = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(startDate);
+      d.setDate(startDate.getDate() + i);
+      const dYear = d.getFullYear();
+      const dMonth = d.getMonth();
+      const dDate = d.getDate();
+      const dayOfWeek = dayNames[d.getDay()];
+      const isToday = isCurrentMonth && dDate === now.getDate() && dMonth === now.getMonth() && dYear === now.getFullYear();
+
+      // Find real spending for this exact calendar date
+      const daySpend = transactions
+        .filter((t) => {
+          if (t.type !== 'expense') return false;
+          const tDate = parseTxDate(t.date);
+          return (
+            tDate.getFullYear() === dYear &&
+            tDate.getMonth() === dMonth &&
+            tDate.getDate() === dDate
+          );
+        })
+        .reduce((sum, t) => sum + (t.split ? t.split.yourShare : t.amount), 0);
+
+      daysList.push({
+        day: dayOfWeek,
+        dateNum: dDate,
+        dateLabel: `${dDate} ${monthNames[dMonth]}`,
+        amt: Math.round(daySpend),
+        isToday,
+        showLabel: daySpend > 0,
+        labelText: formatCompactCurrency(Math.round(daySpend), sym),
+      });
+    }
+
+    const startLabel = `${startDate.getDate()} ${monthNames[startDate.getMonth()]}`;
+    const endLabel = `${endDate.getDate()} ${monthNames[endDate.getMonth()]}`;
+    const totalWeekSpend = daysList.reduce((sum, d) => sum + d.amt, 0);
+    const dateRangeLabel = `${startLabel} – ${endLabel}`;
+    const avgDailySpend = Math.round(totalWeekSpend / 7);
+
+    return {
+      days: daysList,
+      totalWeekSpend,
+      dateRangeLabel,
+      avgDailySpend,
+      isCurrentMonth,
+    };
+  }, [transactions, curYear, curMonth, daysInMonth, sym]);
 
   const maxRhythmAmount = useMemo(() => {
-    const maxVal = Math.max(...rhythmData.map(r => r.amt), 100);
+    const maxVal = Math.max(...rhythmData.days.map((r) => r.amt), 100);
     return Math.max(Math.ceil(maxVal / 100) * 100, 100);
-  }, [rhythmData]);
+  }, [rhythmData.days]);
 
   const avgRhythmAmount = useMemo(() => {
-    const total = rhythmData.reduce((sum, r) => sum + r.amt, 0);
-    return Math.round(total / 7);
-  }, [rhythmData]);
+    return rhythmData.avgDailySpend;
+  }, [rhythmData.avgDailySpend]);
 
   const handleDayPress = (day: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
@@ -983,6 +1089,7 @@ export const ExpenseVisualizer: React.FC = () => {
           <Animated.View
             style={[
               st.card,
+              cardWidthStyle,
               {
                 opacity: animTrend,
                 transform: [
@@ -1009,6 +1116,18 @@ export const ExpenseVisualizer: React.FC = () => {
             </View>
 
             <View style={st.trendChartContainer}>
+              {/* Dashed Average Monthly Baseline */}
+              {multiMonthTrend.avgMonthly > 0 && (
+                <View
+                  style={[
+                    st.trendAvgLine,
+                    {
+                      bottom: 24 + Math.min(Math.round((multiMonthTrend.avgMonthly / multiMonthTrend.maxAmt) * 110), 110),
+                    },
+                  ]}
+                  pointerEvents="none"
+                />
+              )}
               {multiMonthTrend.data.map((item, idx) => {
                 const barH = Math.max(Math.round((item.amount / multiMonthTrend.maxAmt) * 110), 4);
                 const barCount = multiMonthTrend.data.length;
@@ -1056,6 +1175,7 @@ export const ExpenseVisualizer: React.FC = () => {
         <Animated.View
           style={[
             st.card,
+            cardWidthStyle,
             {
               opacity: animFlow,
               transform: [
@@ -1219,6 +1339,7 @@ export const ExpenseVisualizer: React.FC = () => {
         <Animated.View
           style={[
             st.compactCard,
+            cardWidthStyle,
             {
               opacity: animCalendar,
               transform: [
@@ -1280,18 +1401,29 @@ export const ExpenseVisualizer: React.FC = () => {
             ))}
           </View>
 
+          {/* Dashed Separator */}
+          <View style={st.calendarDashedDivider} />
+
           {/* dynamic insight cards with responsive, non-truncating layout */}
           <View style={st.insightRow}>
-            <View style={st.insightCard}>
+            <TouchableOpacity
+              style={st.insightCard}
+              activeOpacity={heaviestDayInfo.day ? 0.7 : 1}
+              onPress={() => {
+                if (heaviestDayInfo.day) {
+                  handleDayPress(heaviestDayInfo.day);
+                }
+              }}
+            >
               <View style={st.insightHeadRow}>
                 <Flame size={12} color="#FF9D66" />
                 <AppText style={st.insightHead}>HEAVIEST DAY</AppText>
               </View>
               <AppText style={st.insightVal} numberOfLines={1} adjustsFontSizeToFit>
-                {heaviestDayAmount > 0 ? `${heaviestDayName} (${formatCompactCurrency(heaviestDayAmount, sym)})` : 'None'}
+                {heaviestDayInfo.amount > 0 ? `${heaviestDayInfo.label} (${formatCompactCurrency(heaviestDayInfo.amount, sym)})` : 'None'}
               </AppText>
-              <AppText style={st.insightSub}>Top spend day of month</AppText>
-            </View>
+              <AppText style={st.insightSub}>Largest single spend date</AppText>
+            </TouchableOpacity>
             <View style={st.insightCard}>
               <View style={st.insightHeadRow}>
                 <Trophy size={12} color="#FBBF24" />
@@ -1378,6 +1510,7 @@ export const ExpenseVisualizer: React.FC = () => {
         <Animated.View
           style={[
             st.card,
+            cardWidthStyle,
             {
               opacity: animRhythm,
               transform: [
@@ -1395,16 +1528,10 @@ export const ExpenseVisualizer: React.FC = () => {
             <View>
               <AppText style={st.cardLabel}>WEEKLY RHYTHM</AppText>
               <AppText style={st.cardSub}>
-                {timeHorizon === '1W'
-                  ? 'Last 7 Days'
-                  : timeHorizon === '1M'
-                  ? 'Monthly Pattern'
-                  : timeHorizon === '6M'
-                  ? '6-Month Pattern'
-                  : timeHorizon === '1Y'
-                  ? '12-Month Pattern'
-                  : 'All-Time Pattern'}
-                {avgRhythmAmount > 0 ? ` • Avg: ${sym}${avgRhythmAmount.toLocaleString('en-IN')}/day` : ''}
+                {rhythmData.isCurrentMonth
+                  ? `Current Week (${rhythmData.dateRangeLabel})`
+                  : `Week of ${rhythmData.dateRangeLabel}`}
+                {rhythmData.totalWeekSpend > 0 ? ` • Total: ${sym}${rhythmData.totalWeekSpend.toLocaleString('en-IN')}` : ''}
               </AppText>
             </View>
           </View>
@@ -1419,6 +1546,16 @@ export const ExpenseVisualizer: React.FC = () => {
 
             {/* Chart Area */}
             <View style={st.rhythmChartArea}>
+              {/* Subtle Dashed Grid Reference Tiers */}
+              <View
+                style={[st.gridDashedLine, { bottom: 28 + Math.round(RHYTHM_BAR_H * 0.33) }]}
+                pointerEvents="none"
+              />
+              <View
+                style={[st.gridDashedLine, { bottom: 28 + Math.round(RHYTHM_BAR_H * 0.66) }]}
+                pointerEvents="none"
+              />
+
               {/* Dashed Average Line at mathematically correct height */}
               {avgRhythmAmount > 0 && (
                 <>
@@ -1426,7 +1563,7 @@ export const ExpenseVisualizer: React.FC = () => {
                     style={[
                       st.avgLine,
                       {
-                        bottom: 24 + Math.min(Math.round((avgRhythmAmount / maxRhythmAmount) * RHYTHM_BAR_H), RHYTHM_BAR_H),
+                        bottom: 28 + Math.min(Math.round((avgRhythmAmount / maxRhythmAmount) * RHYTHM_BAR_H), RHYTHM_BAR_H),
                       },
                     ]}
                   />
@@ -1434,7 +1571,7 @@ export const ExpenseVisualizer: React.FC = () => {
                     style={[
                       st.avgLbl,
                       {
-                        bottom: 24 + Math.min(Math.round((avgRhythmAmount / maxRhythmAmount) * RHYTHM_BAR_H), RHYTHM_BAR_H) - 6,
+                        bottom: 28 + Math.min(Math.round((avgRhythmAmount / maxRhythmAmount) * RHYTHM_BAR_H), RHYTHM_BAR_H) - 6,
                       },
                     ]}
                   >
@@ -1445,11 +1582,11 @@ export const ExpenseVisualizer: React.FC = () => {
 
               {/* Bars Row */}
               <View style={st.barsRow}>
-                {rhythmData.map(rd => {
+                {rhythmData.days.map(rd => {
                   const barH = Math.round((rd.amt / maxRhythmAmount) * RHYTHM_BAR_H);
-                  const isHeaviest = rd.amt > 0 && rd.amt === Math.max(...rhythmData.map(r => r.amt));
+                  const isHeaviest = rd.amt > 0 && rd.amt === Math.max(...rhythmData.days.map(r => r.amt));
                   return (
-                    <View key={rd.day} style={st.barCol}>
+                    <View key={`${rd.day}-${rd.dateNum}`} style={st.barCol}>
                       {/* Top Label (e.g. ₹244 or ₹0) */}
                       {rd.showLabel ? (
                         <AppText
@@ -1457,7 +1594,7 @@ export const ExpenseVisualizer: React.FC = () => {
                             st.barAmt,
                             isHeaviest && st.barAmtHighlight,
                             rd.amt === 0 && st.barAmtZero,
-                            { bottom: 24 + Math.max(barH + 4, 4) },
+                            { bottom: 30 + Math.max(barH + 4, 4) },
                           ]}
                           numberOfLines={1}
                         >
@@ -1471,6 +1608,7 @@ export const ExpenseVisualizer: React.FC = () => {
                           style={[
                             st.barFill,
                             isHeaviest && st.barFillHighlight,
+                            rd.isToday && st.barFillToday,
                             {
                               height: barGrowAnim.interpolate({
                                 inputRange: [0, 1],
@@ -1481,10 +1619,15 @@ export const ExpenseVisualizer: React.FC = () => {
                         />
                       ) : null}
 
-                      {/* Day Label below axis */}
-                      <AppText style={[st.barDay, isHeaviest && st.barDayHighlight]}>
-                        {rd.day}
-                      </AppText>
+                      {/* Day Label & Date Number below axis */}
+                      <View style={st.barLabelStack}>
+                        <AppText style={[st.barDay, isHeaviest && st.barDayHighlight, rd.isToday && st.barDayToday]}>
+                          {rd.day}
+                        </AppText>
+                        <AppText style={[st.barDateNum, rd.isToday && st.barDateNumToday]}>
+                          {rd.dateNum}
+                        </AppText>
+                      </View>
                     </View>
                   );
                 })}
@@ -1497,6 +1640,7 @@ export const ExpenseVisualizer: React.FC = () => {
         <Animated.View
           style={[
             st.card,
+            cardWidthStyle,
             {
               opacity: animContrast,
               transform: [
@@ -1516,8 +1660,14 @@ export const ExpenseVisualizer: React.FC = () => {
               <AppText style={st.cardSub}>
                 {weekendVsWeekday.weekdaySum + weekendVsWeekday.weekendSum === 0
                   ? 'No expenses logged in this period'
-                  : weekendVsWeekday.weekendPct >= 50
+                  : weekendVsWeekday.weekdaySum === 0 && weekendVsWeekday.weekendSum > 0
+                  ? 'Weekend spending · Awaiting weekday baseline'
+                  : weekendVsWeekday.weekendSum === 0 && weekendVsWeekday.weekdaySum > 0
+                  ? 'Weekday spending · Awaiting weekend baseline'
+                  : weekendVsWeekday.isSurge
                   ? `⚡ Weekend Surge: ${weekendVsWeekday.ratio}x higher daily burn`
+                  : weekendVsWeekday.avgWeekday > (weekendVsWeekday.avgWeekend * 1.25)
+                  ? '🛡️ Steady weekday pace · Low weekend burn'
                   : '⚖️ Balanced weekday vs weekend rhythm'}
               </AppText>
             </View>
@@ -1572,13 +1722,25 @@ export const ExpenseVisualizer: React.FC = () => {
             </View>
           </View>
 
-          {/* Natural Weekend Insight Footnote */}
-          {weekendVsWeekday.weekendTax > 0 && (
-            <View style={st.leisureFootnote}>
-              <AppText style={st.leisureFootnoteText} numberOfLines={1}>
-                <AppText style={{ color: '#FF9D66', fontWeight: '700' }}>+{sym}{weekendVsWeekday.weekendTax.toLocaleString('en-IN')} weekend surge</AppText>
-                {weekendVsWeekday.topLeakCategory ? ` driven primarily by ${weekendVsWeekday.topLeakCategory.emoji ? weekendVsWeekday.topLeakCategory.emoji + ' ' : ''}${weekendVsWeekday.topLeakCategory.name}` : ''}
-              </AppText>
+          {/* Natural Weekend Insight Callout Banner */}
+          {weekendVsWeekday.isSurge && weekendVsWeekday.weekendTax > 0 && (
+            <View style={st.leisureBanner}>
+              <View style={st.leisureIconPill}>
+                <Zap size={14} color="#FF9D66" />
+              </View>
+              <View style={st.leisureContent}>
+                <View style={st.leisureTopRow}>
+                  <AppText style={st.leisureSurgeLabel}>WEEKEND SURGE</AppText>
+                  <AppText style={st.leisureSurgeAmount}>
+                    +{sym}{weekendVsWeekday.weekendTax.toLocaleString('en-IN')}
+                  </AppText>
+                </View>
+                <AppText style={st.leisureSubtext} numberOfLines={2}>
+                  {weekendVsWeekday.topLeakCategory
+                    ? `Driven primarily by ${weekendVsWeekday.topLeakCategory.emoji ? weekendVsWeekday.topLeakCategory.emoji + ' ' : ''}${weekendVsWeekday.topLeakCategory.name}`
+                    : 'Higher daily spending rhythm on weekends'}
+                </AppText>
+              </View>
             </View>
           )}
         </Animated.View>
@@ -1588,6 +1750,7 @@ export const ExpenseVisualizer: React.FC = () => {
           <Animated.View
             style={[
               st.card,
+              cardWidthStyle,
               {
                 opacity: animVs,
                 transform: [
@@ -1689,6 +1852,7 @@ export const ExpenseVisualizer: React.FC = () => {
         <Animated.View
           style={[
             st.card,
+            cardWidthStyle,
             {
               opacity: animAudit,
               transform: [
@@ -1742,6 +1906,9 @@ export const ExpenseVisualizer: React.FC = () => {
                   : 'N/A';
                 const subColor = sub.color || expenseColors.accentPeach;
 
+                const activePrice = getSubscriptionActivePrice(sub);
+                const isSplitSub = sub.splitEnabled && activePrice < sub.price;
+
                 return (
                   <TouchableOpacity
                     key={sub.id}
@@ -1765,9 +1932,16 @@ export const ExpenseVisualizer: React.FC = () => {
                     </View>
 
                     <View style={st.subRowRight}>
-                      <AppText style={st.subCostText}>
-                        {sym}{sub.price.toLocaleString('en-IN')}
-                      </AppText>
+                      <View style={{ alignItems: 'flex-end' }}>
+                        <AppText style={st.subCostText}>
+                          {sym}{activePrice.toLocaleString('en-IN')}
+                        </AppText>
+                        {isSplitSub && (
+                          <AppText style={{ fontSize: 10, color: '#7E8394', fontWeight: '500' }}>
+                            Your share
+                          </AppText>
+                        )}
+                      </View>
                       <ChevronRight size={14} color="#7E8394" />
                     </View>
                   </TouchableOpacity>
@@ -1835,12 +2009,22 @@ const st = StyleSheet.create({
 
   // ── Multi-Month Trend ──
   trendChartContainer: {
+    position: 'relative',
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'space-between',
     paddingTop: 16,
     paddingBottom: 4,
     minHeight: 140,
+  },
+  trendAvgLine: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.20)',
+    borderStyle: 'dashed',
+    zIndex: 1,
   },
   trendCol: {
     flex: 1,
@@ -1925,8 +2109,10 @@ const st = StyleSheet.create({
   },
   contrastDivider: {
     width: 1,
-    height: 36,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    height: 38,
+    borderLeftWidth: 1,
+    borderLeftColor: 'rgba(255, 255, 255, 0.14)',
+    borderStyle: 'dashed',
     marginHorizontal: 12,
   },
   statDotRow: {
@@ -1954,22 +2140,56 @@ const st = StyleSheet.create({
     fontSize: 11,
     fontWeight: '500',
   },
-  leisureFootnote: {
-    marginTop: 14,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.05)',
+  leisureBanner: {
+    marginTop: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 157, 102, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 157, 102, 0.18)',
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 12,
   },
-  leisureFootnoteText: {
-    color: '#8E919D',
+  leisureIconPill: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 157, 102, 0.16)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  leisureContent: {
+    flex: 1,
+    minWidth: 0,
+  },
+  leisureTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 2,
+  },
+  leisureSurgeLabel: {
+    color: '#FF9D66',
     fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+  },
+  leisureSurgeAmount: {
+    color: '#FF9D66',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  leisureSubtext: {
+    color: '#A0A5B5',
+    fontSize: 11,
+    lineHeight: 15,
     fontWeight: '500',
   },
 
   card: {
-    width: CARD_W,
     marginHorizontal: PAGE_M,
     backgroundColor: expenseColors.bgCard,
     borderRadius: 22,
@@ -1980,7 +2200,6 @@ const st = StyleSheet.create({
   },
 
   compactCard: {
-    width: CARD_W,
     marginHorizontal: PAGE_M,
     backgroundColor: expenseColors.bgCard,
     borderRadius: 22,
@@ -2016,7 +2235,13 @@ const st = StyleSheet.create({
   tileSel: { borderWidth: 2, borderColor: '#FFF' },
   tileNum: { color: '#FFF', fontSize: 12, lineHeight: 16, fontWeight: '600' },
 
-  insightRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  calendarDashedDivider: {
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.08)',
+    borderStyle: 'dashed',
+    marginVertical: 6,
+  },
+  insightRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
   insightCard: {
     flex: 1,
     backgroundColor: '#22242F',
@@ -2143,12 +2368,20 @@ const st = StyleSheet.create({
     position: 'relative',
     marginLeft: 4,
   },
+  gridDashedLine: {
+    position: 'absolute',
+    left: 0,
+    right: 28,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.06)',
+    borderStyle: 'dashed',
+  },
   avgLine: {
     position: 'absolute',
     left: 0,
     right: 28,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.18)',
+    borderTopColor: 'rgba(255,255,255,0.22)',
     borderStyle: 'dashed',
   },
   avgLbl: {
@@ -2166,8 +2399,8 @@ const st = StyleSheet.create({
     paddingRight: 28,
   },
   barCol: {
-    width: 28,
-    height: RHYTHM_BAR_H + 24,
+    width: 32,
+    height: RHYTHM_BAR_H + 30,
     alignItems: 'center',
     position: 'relative',
   },
@@ -2178,7 +2411,7 @@ const st = StyleSheet.create({
     lineHeight: 12,
     fontWeight: '600',
     textAlign: 'center',
-    width: 36,
+    width: 40,
   },
   barAmtHighlight: {
     color: '#FF9D66',
@@ -2189,8 +2422,8 @@ const st = StyleSheet.create({
   },
   barFill: {
     position: 'absolute',
-    bottom: 24,
-    width: 24,
+    bottom: 28,
+    width: 22,
     backgroundColor: '#FF9D66',
     borderTopLeftRadius: 5,
     borderTopRightRadius: 5,
@@ -2200,17 +2433,40 @@ const st = StyleSheet.create({
   barFillHighlight: {
     backgroundColor: '#FF8A4C',
   },
-  barDay: {
+  barFillToday: {
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+  },
+  barLabelStack: {
     position: 'absolute',
     bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 1,
+  },
+  barDay: {
     color: expenseColors.textMuted,
-    fontSize: 11,
-    lineHeight: 14,
-    fontWeight: '500',
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: '600',
   },
   barDayHighlight: {
+    color: '#FF9D66',
+    fontWeight: '800',
+  },
+  barDayToday: {
     color: '#FFFFFF',
-    fontWeight: '700',
+    fontWeight: '800',
+  },
+  barDateNum: {
+    color: '#5E6272',
+    fontSize: 9,
+    lineHeight: 11,
+    fontWeight: '600',
+  },
+  barDateNumToday: {
+    color: '#FF9D66',
+    fontWeight: '800',
   },
 
   // ── VS Last Month ──

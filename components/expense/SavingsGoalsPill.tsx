@@ -4,6 +4,7 @@ import { Target, ChevronRight } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { AppText } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
+import { useShallow } from 'zustand/react/shallow';
 import { formatCompactCurrency } from './MoneyFlowCard';
 
 interface SavingsGoalsPillProps {
@@ -11,7 +12,9 @@ interface SavingsGoalsPillProps {
 }
 
 export const SavingsGoalsPill: React.FC<SavingsGoalsPillProps> = ({ onPress }) => {
-  const { savingsVaults, currencySymbol } = useExpenseStore();
+  const { savingsVaults, currencySymbol } = useExpenseStore(
+  useShallow((s) => ({ savingsVaults: s.savingsVaults, currencySymbol: s.currencySymbol }))
+);
   const sym = currencySymbol || '₹';
 
   const totalSaved = (savingsVaults || []).reduce((sum, v) => sum + (v.currentAmount || 0), 0);
