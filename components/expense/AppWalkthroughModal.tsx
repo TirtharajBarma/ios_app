@@ -420,7 +420,7 @@ export const AppWalkthroughModal: React.FC<AppWalkthroughModalProps> = ({ visibl
                       {/* Account Connection Pill */}
                       <View style={styles.heroAccountsBar}>
                         <View style={styles.heroAccountChip}>
-                          <View style={[styles.heroAccountDot, { backgroundColor: '#70D6BC' }]} />
+                          <View style={[styles.heroAccountDot, { backgroundColor: '#A9DFBF' }]} />
                           <AppText style={styles.heroAccountName}>HDFC Bank</AppText>
                           <AppText style={styles.heroAccountAmt}>{sym}34,200</AppText>
                         </View>
@@ -440,8 +440,8 @@ export const AppWalkthroughModal: React.FC<AppWalkthroughModalProps> = ({ visibl
                     <View style={styles.accountsShowcaseStack}>
                       {/* Bank Card */}
                       <View style={styles.accountShowcaseCard}>
-                        <View style={[styles.accountIconBox, { backgroundColor: 'rgba(112, 214, 188, 0.15)' }]}>
-                          <Building2 size={18} color="#70D6BC" />
+                        <View style={[styles.accountIconBox, { backgroundColor: 'rgba(169, 223, 191, 0.15)' }]}>
+                          <Building2 size={18} color="#A9DFBF" />
                         </View>
                         <View style={{ flex: 1 }}>
                           <AppText style={styles.accountCardTitle}>HDFC SALARY ACCOUNT</AppText>
@@ -528,8 +528,8 @@ export const AppWalkthroughModal: React.FC<AppWalkthroughModalProps> = ({ visibl
                       </View>
 
                       <View style={styles.txRowDemo}>
-                        <View style={[styles.txIconBox, { backgroundColor: 'rgba(112, 214, 188, 0.15)' }]}>
-                          <Banknote size={16} color="#70D6BC" />
+                        <View style={[styles.txIconBox, { backgroundColor: 'rgba(169, 223, 191, 0.15)' }]}>
+                          <Banknote size={16} color="#A9DFBF" />
                         </View>
                         <View style={{ flex: 1 }}>
                           <AppText style={styles.txTitleDemo}>SALARY DEPOSIT</AppText>
@@ -566,7 +566,7 @@ export const AppWalkthroughModal: React.FC<AppWalkthroughModalProps> = ({ visibl
                           <AppText style={styles.participantName}>You (Payer)</AppText>
                           <AppText style={styles.participantShare}>My share: {sym}50</AppText>
                           <View style={styles.settledBadge}>
-                            <Check size={10} color="#70D6BC" />
+                            <Check size={10} color="#A9DFBF" />
                             <AppText style={styles.settledBadgeText}>PAID</AppText>
                           </View>
                         </View>
@@ -584,13 +584,13 @@ export const AppWalkthroughModal: React.FC<AppWalkthroughModalProps> = ({ visibl
                           <View
                             style={[
                               styles.pendingBadge,
-                              demoSplitSettled && { backgroundColor: 'rgba(112, 214, 188, 0.15)', borderColor: 'rgba(112, 214, 188, 0.3)' },
+                              demoSplitSettled && { backgroundColor: 'rgba(169, 223, 191, 0.15)', borderColor: 'rgba(169, 223, 191, 0.3)' },
                             ]}
                           >
                             <AppText
                               style={[
                                 styles.pendingBadgeText,
-                                demoSplitSettled && { color: '#70D6BC' },
+                                demoSplitSettled && { color: '#A9DFBF' },
                               ]}
                             >
                               {demoSplitSettled ? 'SETTLED ✓' : 'TAP TO SETTLE'}
@@ -602,7 +602,7 @@ export const AppWalkthroughModal: React.FC<AppWalkthroughModalProps> = ({ visibl
                           <AppText style={styles.participantName}>Aditi</AppText>
                           <AppText style={styles.participantShare}>Share: {sym}50</AppText>
                           <View style={styles.settledBadge}>
-                            <Check size={10} color="#70D6BC" />
+                            <Check size={10} color="#A9DFBF" />
                             <AppText style={styles.settledBadgeText}>SETTLED</AppText>
                           </View>
                         </View>
@@ -662,20 +662,20 @@ export const AppWalkthroughModal: React.FC<AppWalkthroughModalProps> = ({ visibl
                     <View style={styles.importerShowcaseCard}>
                       <View style={styles.importerDocHeader}>
                         <View style={styles.importerDocIcon}>
-                          <FileSpreadsheet size={20} color="#70D6BC" />
+                          <FileSpreadsheet size={20} color="#A9DFBF" />
                         </View>
                         <View style={{ flex: 1 }}>
                           <AppText style={styles.importerDocName}>HDFC_Statement_Sep2026.pdf</AppText>
                           <AppText style={styles.importerDocMeta}>48 Transactions · Auto-Categorized</AppText>
                         </View>
                         <View style={styles.privacyShieldTag}>
-                          <ShieldCheck size={12} color="#70D6BC" />
+                          <ShieldCheck size={12} color="#A9DFBF" />
                           <AppText style={styles.privacyShieldTagText}>LOCAL ONLY</AppText>
                         </View>
                       </View>
 
                       <View style={styles.reconciliationPill}>
-                        <CheckCircle2 size={14} color="#70D6BC" />
+                        <CheckCircle2 size={14} color="#A9DFBF" />
                         <AppText style={styles.reconciliationPillText}>
                           Opening {sym}12,400 → Closing {sym}18,920 (Reconciled ✓)
                         </AppText>
@@ -809,7 +809,7 @@ export const AppWalkthroughModal: React.FC<AppWalkthroughModalProps> = ({ visibl
 
                 {/* Privacy Badge */}
                 <View style={styles.profilePrivacyPill}>
-                  <ShieldCheck size={14} color="#70D6BC" />
+                  <ShieldCheck size={14} color="#A9DFBF" />
                   <AppText style={styles.profilePrivacyText}>
                     100% On-Device · Syncs directly to your Settings profile
                   </AppText>
@@ -1230,7 +1230,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   txAmountIncome: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
     fontSize: 13,
     lineHeight: 17,
     fontWeight: '800',
@@ -1325,13 +1325,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: 'rgba(112, 214, 188, 0.15)',
+    backgroundColor: 'rgba(169, 223, 191, 0.15)',
     paddingHorizontal: 6,
     paddingVertical: 3,
     borderRadius: 6,
   },
   settledBadgeText: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
     fontSize: 9,
     lineHeight: 12,
     fontWeight: '800',
@@ -1460,7 +1460,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: 'rgba(112, 214, 188, 0.15)',
+    backgroundColor: 'rgba(169, 223, 191, 0.15)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1480,13 +1480,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: 'rgba(112, 214, 188, 0.12)',
+    backgroundColor: 'rgba(169, 223, 191, 0.12)',
     paddingHorizontal: 6,
     paddingVertical: 3,
     borderRadius: 6,
   },
   privacyShieldTagText: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
     fontSize: 8,
     lineHeight: 11,
     fontWeight: '800',
@@ -1495,13 +1495,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: 'rgba(112, 214, 188, 0.1)',
+    backgroundColor: 'rgba(169, 223, 191, 0.1)',
     paddingHorizontal: 10,
     paddingVertical: 7,
     borderRadius: 8,
   },
   reconciliationPillText: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
     fontSize: 11,
     lineHeight: 15,
     fontWeight: '600',
@@ -1567,13 +1567,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: 'rgba(112, 214, 188, 0.12)',
+    backgroundColor: 'rgba(169, 223, 191, 0.12)',
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 8,
   },
   profilePrivacyText: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
     fontSize: 11,
     lineHeight: 15,
     fontWeight: '600',

@@ -196,7 +196,7 @@ export default function PrivacyScreen() {
         <View style={styles.localFirstBanner}>
           <View style={styles.bannerHeaderRow}>
             <View style={styles.bannerBadge}>
-              <ShieldCheck size={14} color="#70D6BC" />
+              <ShieldCheck size={14} color="#A9DFBF" />
               <AppText style={styles.bannerBadgeText}>OFFLINE-FIRST ARCHITECTURE</AppText>
             </View>
           </View>
@@ -238,8 +238,8 @@ export default function PrivacyScreen() {
           </AppText>
           <View style={[styles.sectionCard, { padding: spacing[16], gap: spacing[16] }]}>
             <View style={styles.dataRow}>
-              <View style={[styles.iconBox, { backgroundColor: "rgba(112, 214, 188, 0.15)" }]}>
-                <WifiOff size={16} color="#70D6BC" />
+              <View style={[styles.iconBox, { backgroundColor: "rgba(169, 223, 191, 0.15)" }]}>
+                <WifiOff size={16} color="#A9DFBF" />
               </View>
               <View style={{ flex: 1 }}>
                 <AppText variant="footnote" weight="600" color={colors.white}>Zero Financial Telemetry</AppText>
@@ -332,7 +332,7 @@ const styles = StyleSheet.create({
     borderRadius: radius[16],
     padding: spacing[16],
     borderWidth: 1,
-    borderColor: "rgba(112, 214, 188, 0.25)",
+    borderColor: "rgba(169, 223, 191, 0.25)",
   },
   bannerHeaderRow: {
     marginBottom: 8,
@@ -341,14 +341,14 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    backgroundColor: "rgba(112, 214, 188, 0.12)",
+    backgroundColor: "rgba(169, 223, 191, 0.12)",
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 8,
     alignSelf: "flex-start",
   },
   bannerBadgeText: {
-    color: "#70D6BC",
+    color: "#A9DFBF",
     fontSize: 11,
     fontWeight: "700",
     letterSpacing: 0.6,

@@ -4,6 +4,7 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Pressable,
   Modal,
   Platform,
   Linking,
@@ -47,6 +48,22 @@ import { SplitDetailsModal } from '@/components/expense/SplitDetailsModal';
 import { AddTransactionModal } from '@/components/expense/AddTransactionModal';
 
 type ViewTab = 'splits' | 'loans' | 'friends' | 'history';
+
+function formatLocalDate(dateStr: string | undefined | null): string {
+  if (!dateStr) return '';
+  try {
+    const parts = dateStr.split('T')[0].split('-');
+    if (parts.length === 3) {
+      const y = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10) - 1;
+      const d = parseInt(parts[2], 10);
+      return new Date(y, m, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+    return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  } catch {
+    return dateStr;
+  }
+}
 
 interface SplitBillNameInfo {
   title: string;
@@ -538,7 +555,8 @@ export default function ReceivablesScreen() {
   }) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     setSettlingItem(item);
-    setSettleAccountId(item.tx.accountId || accounts[0]?.id || 'acc_primary');
+    const accountExists = accounts.some((a) => a.id === item.tx.accountId);
+    setSettleAccountId(accountExists ? item.tx.accountId : (accounts[0]?.id || 'acc_primary'));
   };
 
   return (
@@ -605,6 +623,9 @@ export default function ReceivablesScreen() {
 
           <View style={styles.heroAmountRow}>
             <AppText
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.7}
               style={
                 netPosition > 0
                   ? styles.heroAmountGreen
@@ -631,7 +652,7 @@ export default function ReceivablesScreen() {
               }}
             >
               <View style={styles.dualHeaderRow}>
-                <ArrowDownLeft size={12} color="#70D6BC" />
+                <ArrowDownLeft size={12} color="#A9DFBF" />
                 <AppText style={styles.dualColLabel}>TO COLLECT</AppText>
               </View>
               <AppText style={styles.dualColAmountGreen}>
@@ -759,7 +780,7 @@ export default function ReceivablesScreen() {
             {filteredSplitBills.length === 0 ? (
               <View style={styles.emptyContainer}>
                 <View style={styles.emptyIconCircle}>
-                  <Receipt size={20} color="#70D6BC" />
+                  <Receipt size={20} color="#A9DFBF" />
                 </View>
                 <AppText style={styles.emptyTitle}>No Active Split Bills</AppText>
                 <AppText style={styles.emptySub}>
@@ -773,10 +794,7 @@ export default function ReceivablesScreen() {
                     bill.totalCount > 0
                       ? Math.round((bill.settledCount / bill.totalCount) * 100)
                       : 0;
-                  const formattedDate = new Date(bill.date).toLocaleDateString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                  });
+                  const formattedDate = formatLocalDate(bill.date);
 
                   return (
                     <View key={bill.tx.id} style={styles.splitGroupCard}>
@@ -850,7 +868,7 @@ export default function ReceivablesScreen() {
                                   ]}
                                 >
                                   {isSettled ? (
-                                    <Check size={11} color="#70D6BC" strokeWidth={3} />
+                                    <Check size={11} color="#A9DFBF" strokeWidth={3} />
                                   ) : (
                                     <AppText style={styles.participantInitials}>
                                       {friend.name.slice(0, 2).toUpperCase()}
@@ -884,16 +902,18 @@ export default function ReceivablesScreen() {
                                     <TouchableOpacity
                                       style={styles.participantWhatsAppBtn}
                                       activeOpacity={0.7}
+                                      hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
                                       onPress={() =>
                                         sendWhatsAppReminder(friend.name, friend.amount, bill.title)
                                       }
                                     >
-                                      <MessageSquare size={11} color="#70D6BC" />
+                                      <MessageSquare size={13} color="#A9DFBF" />
                                     </TouchableOpacity>
 
                                     <TouchableOpacity
                                       style={styles.participantSettleBtn}
                                       activeOpacity={0.8}
+                                      hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
                                       onPress={() =>
                                         handleOpenSettle({
                                           tx: bill.tx,
@@ -905,7 +925,7 @@ export default function ReceivablesScreen() {
                                         })
                                       }
                                     >
-                                      <Check size={10} color="#0F1015" strokeWidth={3} />
+                                      <Check size={12} color="#0F1015" strokeWidth={3} />
                                       <AppText style={styles.participantSettleBtnText}>
                                         Settle
                                       </AppText>
@@ -966,7 +986,7 @@ export default function ReceivablesScreen() {
             {/* Section: Money Lent */}
             <View style={styles.subSectionHeaderRow}>
               <View style={styles.subSectionTitleRow}>
-                <ArrowDownLeft size={13} color="#70D6BC" />
+                <ArrowDownLeft size={13} color="#A9DFBF" />
                 <AppText style={styles.subSectionHeading}>
                   MONEY YOU LENT ({filteredLentList.length})
                 </AppText>
@@ -982,10 +1002,7 @@ export default function ReceivablesScreen() {
               <View style={styles.listCard}>
                 {filteredLentList.map((item, idx) => {
                   const isLast = idx === filteredLentList.length - 1;
-                  const formattedDate = new Date(item.date).toLocaleDateString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                  });
+                  const formattedDate = formatLocalDate(item.date);
 
                   return (
                     <View
@@ -995,10 +1012,10 @@ export default function ReceivablesScreen() {
                       <View
                         style={[
                           styles.dueIconSquare,
-                          { backgroundColor: 'rgba(112, 214, 188, 0.1)' },
+                          { backgroundColor: 'rgba(169, 223, 191, 0.1)' },
                         ]}
                       >
-                        <ArrowDownLeft size={15} color="#70D6BC" />
+                        <ArrowDownLeft size={15} color="#A9DFBF" />
                       </View>
 
                       <View style={styles.dueInfoCol}>
@@ -1022,7 +1039,7 @@ export default function ReceivablesScreen() {
                               sendWhatsAppReminder(item.person, item.amount, item.title)
                             }
                           >
-                            <MessageSquare size={11} color="#70D6BC" />
+                            <MessageSquare size={11} color="#A9DFBF" />
                           </TouchableOpacity>
 
                           <TouchableOpacity
@@ -1068,10 +1085,7 @@ export default function ReceivablesScreen() {
               <View style={styles.listCard}>
                 {filteredBorrowList.map((item, idx) => {
                   const isLast = idx === filteredBorrowList.length - 1;
-                  const formattedDate = new Date(item.date).toLocaleDateString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                  });
+                  const formattedDate = formatLocalDate(item.date);
 
                   return (
                     <View
@@ -1133,7 +1147,7 @@ export default function ReceivablesScreen() {
             {filteredFriendSummaries.length === 0 ? (
               <View style={styles.emptyContainer}>
                 <View style={styles.emptyIconCircle}>
-                  <Users size={20} color="#70D6BC" />
+                  <Users size={20} color="#A9DFBF" />
                 </View>
                 <AppText style={styles.emptyTitle}>No Friend Dues</AppText>
                 <AppText style={styles.emptySub}>
@@ -1184,7 +1198,7 @@ export default function ReceivablesScreen() {
                               styles.friendBadge,
                               {
                                 backgroundColor: isOwed
-                                  ? 'rgba(112, 214, 188, 0.1)'
+                                  ? 'rgba(169, 223, 191, 0.1)'
                                   : isOwing
                                   ? 'rgba(244, 205, 137, 0.1)'
                                   : 'rgba(255, 255, 255, 0.05)',
@@ -1194,7 +1208,7 @@ export default function ReceivablesScreen() {
                             <AppText
                               style={[
                                 styles.friendBadgeText,
-                                { color: isOwed ? '#70D6BC' : isOwing ? '#F4CD89' : '#8E919D' },
+                                { color: isOwed ? '#A9DFBF' : isOwing ? '#F4CD89' : '#8E919D' },
                               ]}
                             >
                               {isOwed ? 'OWES YOU' : isOwing ? 'YOU OWE' : 'EVEN'}
@@ -1225,7 +1239,7 @@ export default function ReceivablesScreen() {
                               {item.kind === 'borrow' ? (
                                 <ArrowUpRight size={11} color="#F4CD89" />
                               ) : (
-                                <ArrowDownLeft size={11} color="#70D6BC" />
+                                <ArrowDownLeft size={11} color="#A9DFBF" />
                               )}
                               <AppText style={styles.friendMiniTitle} numberOfLines={1}>
                                 {item.title} ({item.kind === 'borrow' ? 'Borrowed' : 'Lent'})
@@ -1257,7 +1271,7 @@ export default function ReceivablesScreen() {
                           sendWhatsAppReminder(friend.name, friend.netBalance, itemsSummary);
                         }}
                       >
-                        <MessageSquare size={12} color="#70D6BC" />
+                        <MessageSquare size={12} color="#A9DFBF" />
                         <AppText style={styles.friendWhatsAppText}>
                           Send Statement on WhatsApp
                         </AppText>
@@ -1289,10 +1303,7 @@ export default function ReceivablesScreen() {
               <View style={styles.listCard}>
                 {filteredHistoryList.map((item, idx) => {
                   const isLast = idx === filteredHistoryList.length - 1;
-                  const formattedDate = new Date(item.date).toLocaleDateString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                  });
+                  const formattedDate = formatLocalDate(item.date);
 
                   return (
                     <View
@@ -1302,10 +1313,10 @@ export default function ReceivablesScreen() {
                       <View
                         style={[
                           styles.dueIconSquare,
-                          { backgroundColor: 'rgba(112, 214, 188, 0.1)' },
+                          { backgroundColor: 'rgba(169, 223, 191, 0.1)' },
                         ]}
                       >
-                        <CheckCircle2 size={15} color="#70D6BC" />
+                        <CheckCircle2 size={15} color="#A9DFBF" />
                       </View>
 
                       <View style={styles.dueInfoCol}>
@@ -1335,15 +1346,16 @@ export default function ReceivablesScreen() {
       <Modal
         visible={settlingItem !== null}
         transparent
+        statusBarTranslucent={true}
         animationType="slide"
         onRequestClose={() => setSettlingItem(null)}
       >
-        <TouchableOpacity
-          style={styles.modalBackdrop}
-          activeOpacity={1}
-          onPress={() => setSettlingItem(null)}
-        >
-          <View style={styles.settleSheetCard} onStartShouldSetResponder={() => true}>
+        <View style={styles.modalBackdrop}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => setSettlingItem(null)}
+          />
+          <View style={[styles.settleSheetCard, { paddingBottom: Math.max(insets.bottom, 16) + 16 }]}>
             <View style={styles.sheetGrabber} />
 
             <View style={styles.sheetHeader}>
@@ -1355,7 +1367,7 @@ export default function ReceivablesScreen() {
                       backgroundColor:
                         settlingItem?.type === 'borrow'
                           ? 'rgba(244, 205, 137, 0.15)'
-                          : 'rgba(112, 214, 188, 0.15)',
+                          : 'rgba(169, 223, 191, 0.15)',
                     },
                   ]}
                 >
@@ -1486,13 +1498,13 @@ export default function ReceivablesScreen() {
                     }
                   }}
                 >
-                  <MessageSquare size={13} color="#70D6BC" />
+                  <MessageSquare size={13} color="#A9DFBF" />
                   <AppText style={styles.sheetWhatsAppBtnText}>Send Note on WhatsApp</AppText>
                 </TouchableOpacity>
               </>
             )}
           </View>
-        </TouchableOpacity>
+        </View>
       </Modal>
 
       {/* ── SPLIT DETAILS MODAL ── */}
@@ -1614,7 +1626,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   heroAmountGreen: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
     fontSize: 30,
     lineHeight: 38,
     fontWeight: '900',
@@ -1662,7 +1674,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
   },
   dualColAmountGreen: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
     fontSize: 16,
     fontWeight: '800',
     marginVertical: 2,
@@ -1827,7 +1839,7 @@ const styles = StyleSheet.create({
   },
   progressFill: {
     height: '100%',
-    backgroundColor: '#70D6BC',
+    backgroundColor: '#A9DFBF',
     borderRadius: 2,
   },
 
@@ -1867,7 +1879,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   participantAvatarSettled: {
-    backgroundColor: 'rgba(112, 214, 188, 0.12)',
+    backgroundColor: 'rgba(169, 223, 191, 0.12)',
   },
   participantInitials: {
     color: '#D1D4DE',
@@ -1889,7 +1901,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   participantAmount: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
     fontSize: 12.5,
     fontWeight: '800',
   },
@@ -1899,12 +1911,12 @@ const styles = StyleSheet.create({
   participantActionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    gap: 10,
   },
   participantWhatsAppBtn: {
-    width: 24,
-    height: 24,
-    borderRadius: 6,
+    width: 32,
+    height: 32,
+    borderRadius: 8,
     backgroundColor: '#1E212D',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1912,25 +1924,26 @@ const styles = StyleSheet.create({
   participantSettleBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
+    gap: 4,
     backgroundColor: '#FFFFFF',
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    minHeight: 32,
   },
   participantSettleBtnText: {
     color: '#0F1015',
-    fontSize: 9.5,
+    fontSize: 10.5,
     fontWeight: '800',
   },
   settledBadgePill: {
-    backgroundColor: 'rgba(112, 214, 188, 0.1)',
+    backgroundColor: 'rgba(169, 223, 191, 0.1)',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 5,
   },
   settledBadgePillText: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
     fontSize: 9,
     fontWeight: '800',
   },
@@ -1955,7 +1968,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   splitFooterAmount: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
     fontSize: 14,
     fontWeight: '900',
   },
@@ -2060,7 +2073,7 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   friendAmountGreen: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
     fontSize: 15,
     fontWeight: '900',
   },
@@ -2111,7 +2124,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   friendMiniAmountGreen: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
     fontSize: 11.5,
     fontWeight: '800',
   },
@@ -2131,7 +2144,7 @@ const styles = StyleSheet.create({
     borderTopColor: 'rgba(255, 255, 255, 0.04)',
   },
   friendWhatsAppText: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
     fontSize: 11.5,
     fontWeight: '700',
   },
@@ -2182,7 +2195,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   dueAmountGreen: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
     fontSize: 14,
     fontWeight: '900',
   },
@@ -2235,7 +2248,7 @@ const styles = StyleSheet.create({
 
   // ── History View ──
   historyAmountText: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
     fontSize: 13,
     fontWeight: '800',
   },
@@ -2254,7 +2267,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(112, 214, 188, 0.1)',
+    backgroundColor: 'rgba(169, 223, 191, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 10,
@@ -2453,15 +2466,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    backgroundColor: 'rgba(112, 214, 188, 0.08)',
+    backgroundColor: 'rgba(169, 223, 191, 0.08)',
     borderRadius: 14,
     height: 44,
     marginTop: 10,
     borderWidth: 1,
-    borderColor: 'rgba(112, 214, 188, 0.2)',
+    borderColor: 'rgba(169, 223, 191, 0.2)',
   },
   sheetWhatsAppBtnText: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
     fontSize: 12.5,
     fontWeight: '700',
   },

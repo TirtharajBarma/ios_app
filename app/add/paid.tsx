@@ -807,11 +807,11 @@ export default function UnifiedFormScreen() {
       Alert.alert("Error", "Please enter a valid subscription amount");
       return;
     }
-    if (promoEnabled && (!promoPrice || Number(promoPrice) < 0)) {
+    if (promoEnabled && (!promoPrice || isNaN(Number(promoPrice)) || Number(promoPrice) < 0)) {
       Alert.alert("Error", "Please enter a valid promo price");
       return;
     }
-    if (promoEnabled && (!promoDurationValue || Number(promoDurationValue) <= 0)) {
+    if (promoEnabled && (!promoDurationValue || isNaN(Number(promoDurationValue)) || Number(promoDurationValue) <= 0)) {
       Alert.alert("Error", "Promo duration must be at least 1");
       return;
     }
@@ -1032,6 +1032,7 @@ export default function UnifiedFormScreen() {
           onPress={handleBack}
           scale={0.9}
           style={styles.navCircleBtn}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
           <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
         </PressableScale>
@@ -1056,8 +1057,8 @@ export default function UnifiedFormScreen() {
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === "android" ? "height" : undefined}
-        keyboardVerticalOffset={0}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 12 : 0}
       >
         <ScrollView
           ref={scrollRef}
@@ -1081,6 +1082,7 @@ export default function UnifiedFormScreen() {
                 }}
                 scale={0.85}
                 style={styles.pencilCircle}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
                 <Pencil size={16} color={colors.white} />
               </PressableScale>
@@ -1181,7 +1183,7 @@ export default function UnifiedFormScreen() {
                   style={styles.amountInput}
                   placeholder="Enter amount"
                   placeholderTextColor={colors.textMuted}
-                  keyboardType="numeric"
+                  keyboardType="decimal-pad"
                   value={amount}
                   onChangeText={setAmount}
                   onFocus={scrollAmountInput}
@@ -1453,7 +1455,7 @@ export default function UnifiedFormScreen() {
                           : "50.00"
                     }
                     placeholderTextColor={colors.textMuted}
-                    keyboardType="numeric"
+                    keyboardType="decimal-pad"
                     value={splitValue}
                     onChangeText={setSplitValue}
                     onFocus={() => scrollCardToY(splitCardY)}
@@ -1628,7 +1630,7 @@ export default function UnifiedFormScreen() {
                     style={styles.bigNumberInput}
                     placeholder="149.00"
                     placeholderTextColor={colors.textMuted}
-                    keyboardType="numeric"
+                    keyboardType="decimal-pad"
                     value={promoPrice}
                     onChangeText={setPromoPrice}
                     onFocus={() => scrollCardToY(promoCardY)}
@@ -1685,7 +1687,7 @@ export default function UnifiedFormScreen() {
                     style={styles.bigNumberInput}
                     placeholder="3"
                     placeholderTextColor={colors.textMuted}
-                    keyboardType="numeric"
+                    keyboardType="number-pad"
                     value={promoDurationValue}
                     onChangeText={setPromoDurationValue}
                     onFocus={() => scrollCardToY(promoCardY)}
@@ -1942,6 +1944,7 @@ export default function UnifiedFormScreen() {
       <Modal
         visible={activePicker !== null}
         transparent
+        statusBarTranslucent={true}
         animationType="slide"
         onRequestClose={() => setActivePicker(null)}
       >
@@ -2125,11 +2128,12 @@ export default function UnifiedFormScreen() {
       <Modal
         visible={showCustomCycleModal}
         transparent
+        statusBarTranslucent={true}
         animationType="fade"
         onRequestClose={() => setShowCustomCycleModal(false)}
       >
         <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
           style={{ flex: 1 }}
         >
           <View style={styles.dropdownOverlay}>
@@ -2160,7 +2164,7 @@ export default function UnifiedFormScreen() {
                   </AppText>
                   <TextInput
                     style={styles.customCycleInput}
-                    keyboardType="numeric"
+                    keyboardType="number-pad"
                     value={customCycleVal}
                     onChangeText={(val) =>
                       setCustomCycleVal(val.replace(/[^0-9]/g, ""))
@@ -2224,6 +2228,7 @@ export default function UnifiedFormScreen() {
       <Modal
         visible={activeDatePicker !== null}
         transparent
+        statusBarTranslucent={true}
         animationType="fade"
         onRequestClose={() => setActiveDatePicker(null)}
       >
@@ -2484,6 +2489,7 @@ export default function UnifiedFormScreen() {
       <Modal
         visible={showColorEditModal}
         transparent
+        statusBarTranslucent={true}
         animationType="fade"
         onRequestClose={() => setShowColorEditModal(false)}
       >
@@ -2493,7 +2499,7 @@ export default function UnifiedFormScreen() {
           onPress={() => setShowColorEditModal(false)}
         />
         <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
           style={{ flex: 1 }}
         >
           <View style={{ flex: 1, justifyContent: "center", paddingHorizontal: 36 }} pointerEvents="box-none">

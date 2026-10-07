@@ -49,10 +49,37 @@ enum ExpenseStore {
   // MARK: - Paths
 
   static var storageDirectory: URL {
-    let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-    let bundleId = Bundle.main.bundleIdentifier ?? "subscription"
+    let fm = FileManager.default
+    let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+
+    let candidateIds = [
+      "com.tirtharajbarma.subscription",
+      Bundle.main.bundleIdentifier,
+      "monevo",
+      "subscription",
+      "orvyn",
+    ].compactMap { $0 }.filter { !$0.starts(with: "com.apple.") }
+
+    for id in candidateIds {
+      let candidate = base
+        .appendingPathComponent(id, isDirectory: true)
+        .appendingPathComponent("RCTAsyncLocalStorage_V1", isDirectory: true)
+      if fm.fileExists(atPath: candidate.appendingPathComponent("manifest.json").path) {
+        return candidate
+      }
+    }
+
+    if let subdirs = try? fm.contentsOfDirectory(at: base, includingPropertiesForKeys: nil) {
+      for sub in subdirs {
+        let candidate = sub.appendingPathComponent("RCTAsyncLocalStorage_V1", isDirectory: true)
+        if fm.fileExists(atPath: candidate.appendingPathComponent("manifest.json").path) {
+          return candidate
+        }
+      }
+    }
+
     return base
-      .appendingPathComponent(bundleId, isDirectory: true)
+      .appendingPathComponent("com.tirtharajbarma.subscription", isDirectory: true)
       .appendingPathComponent("RCTAsyncLocalStorage_V1", isDirectory: true)
   }
 

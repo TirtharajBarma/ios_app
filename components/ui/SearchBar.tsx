@@ -114,6 +114,9 @@ function SearchBar(
         onChangeText={onChangeText}
         placeholder={placeholder}
         placeholderTextColor={colors.textMuted}
+        autoCapitalize="none"
+        autoCorrect={false}
+        returnKeyType="search"
         onFocus={handleFocus}
         onBlur={handleBlur}
         style={{

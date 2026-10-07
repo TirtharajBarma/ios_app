@@ -85,13 +85,13 @@ function computeExpectedCycles(
   } else if (cycleLower === "bi-weekly") {
     periodsPerCycle = diffDays / 14;
   } else if (cycleLower === "monthly") {
-    periodsPerCycle = differenceInCalendarMonths(today, start);
+    periodsPerCycle = diffDays / 30.4375;
   } else if (cycleLower === "quarterly") {
-    periodsPerCycle = Math.floor(differenceInCalendarMonths(today, start) / 3);
+    periodsPerCycle = diffDays / (3 * 30.4375);
   } else if (cycleLower === "semi-yearly") {
-    periodsPerCycle = Math.floor(differenceInCalendarMonths(today, start) / 6);
+    periodsPerCycle = diffDays / (6 * 30.4375);
   } else if (cycleLower === "yearly") {
-    periodsPerCycle = Math.floor(differenceInCalendarMonths(today, start) / 12);
+    periodsPerCycle = diffDays / 365.25;
   } else if (cycleLower.startsWith("custom:")) {
     const parts = cycleLower.split(":");
     const val = Number(parts[1]) || 1;

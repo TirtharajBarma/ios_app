@@ -175,7 +175,7 @@ export default function ShortcutSetupScreen() {
               </AppText>
               <View style={styles.sectionCard}>
                 <ActionRow
-                  icon={<Plus size={18} color="#70D6BC" />}
+                  icon={<Plus size={18} color="#A9DFBF" />}
                   label="Open Shortcuts App"
                   sublabel="Search “Add Expense” in library to add"
                   onPress={() => open("workflow://")}
@@ -387,8 +387,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   checkBoxOn: {
-    backgroundColor: "#70D6BC",
-    borderColor: "#70D6BC",
+    backgroundColor: "#A9DFBF",
+    borderColor: "#A9DFBF",
   },
   steps: {
     paddingHorizontal: 16,

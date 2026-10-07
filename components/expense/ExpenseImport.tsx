@@ -523,7 +523,7 @@ export const ExpenseImport: React.FC = () => {
                 {/* Setup Steps Status Card */}
                 <View style={styles.setupStepsCard}>
                   <View style={styles.setupStepRow}>
-                    <CheckCircle2 size={16} color="#70D6BC" />
+                    <CheckCircle2 size={16} color="#A9DFBF" />
                     <View style={{ flex: 1 }}>
                       <AppText style={styles.setupStepTitle}>1. PDF Statement Imported</AppText>
                       <AppText style={styles.setupStepDesc}>{importedTxnCount} transactions categorized</AppText>
@@ -534,7 +534,7 @@ export const ExpenseImport: React.FC = () => {
 
                   <View style={styles.setupStepRow}>
                     {statementSetup?.openingBalancesConfigured ? (
-                      <CheckCircle2 size={16} color="#70D6BC" />
+                      <CheckCircle2 size={16} color="#A9DFBF" />
                     ) : (
                       <Wallet size={16} color="#60A5FA" />
                     )}
@@ -550,6 +550,7 @@ export const ExpenseImport: React.FC = () => {
                     </View>
                     <TouchableOpacity
                       style={statementSetup?.openingBalancesConfigured ? styles.adjustBtn : styles.actionBtnSmall}
+                      hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
                       onPress={(e) => {
                         e.stopPropagation();
                         Haptics.selectionAsync();
@@ -566,7 +567,7 @@ export const ExpenseImport: React.FC = () => {
 
                   <View style={styles.setupStepRow}>
                     {statementSetup?.budgetConfigured || monthlyBudget > 0 ? (
-                      <CheckCircle2 size={16} color="#70D6BC" />
+                      <CheckCircle2 size={16} color="#A9DFBF" />
                     ) : (
                       <Target size={16} color="#FF9D66" />
                     )}
@@ -582,6 +583,7 @@ export const ExpenseImport: React.FC = () => {
                     </View>
                     <TouchableOpacity
                       style={statementSetup?.budgetConfigured || monthlyBudget > 0 ? styles.adjustBtn : styles.actionBtnSmall}
+                      hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
                       onPress={(e) => {
                         e.stopPropagation();
                         Haptics.selectionAsync();
@@ -943,9 +945,12 @@ const styles = StyleSheet.create({
   },
   actionBtnSmall: {
     backgroundColor: '#FF9D66',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
     borderRadius: 8,
+    minHeight: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   actionBtnSmallText: {
     color: '#0D0E12',
@@ -954,11 +959,14 @@ const styles = StyleSheet.create({
   },
   adjustBtn: {
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.1)',
+    minHeight: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   adjustBtnText: {
     color: '#E0E3EB',

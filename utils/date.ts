@@ -18,8 +18,13 @@ import {
 } from "date-fns";
 import type { BillingCycle } from "@/types/subscription";
 
-/** Parse an ISO-8601 date string into a Date (UTC midnight normalized). */
+/** Parse an ISO-8601 date string into a Date (UTC noon normalized to prevent timezone backward shifting). */
 export function toDate(iso: string): Date {
+  if (!iso) return today();
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (m) {
+    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12, 0, 0);
+  }
   const parsed = parseISO(iso);
   return startOfDay(parsed);
 }
@@ -48,66 +53,83 @@ export function relativeLabel(iso: string): string {
   return formatDistanceToNowStrict(toDate(iso), { addSuffix: true });
 }
 
-/** Advance a date by one billing cycle, returning an ISO-8601 string. */
+/** Advance a date by one billing cycle, returning an ISO-8601 string. Supports raw custom cycles. */
 export function advanceCycle(
   iso: string,
-  cycle: BillingCycle,
+  cycle: BillingCycle | string,
   customMonths = 1
 ): string {
   const base = toDate(iso);
-  let next: Date;
-  switch (cycle) {
-    case "weekly":
-      next = addWeeks(base, 1);
-      break;
-    case "bi-weekly":
-      next = addWeeks(base, 2);
-      break;
-    case "monthly":
-      next = addMonths(base, 1);
-      break;
-    case "quarterly":
-      next = addMonths(base, 3);
-      break;
-    case "semi-yearly":
-      next = addMonths(base, 6);
-      break;
-    case "yearly":
-      next = addYears(base, 1);
-      break;
-    case "custom":
-    default:
-      next = addMonths(base, customMonths > 0 ? customMonths : 1);
-      break;
-  }
+  const next = advanceCycleDate(base, cycle, customMonths);
   return next.toISOString();
 }
 
-/** Advance a Date by one billing cycle. Supports raw custom cycles from forms. */
+/** Advance a Date by one billing cycle. Supports raw custom cycles and preserves anchor days. */
 export function advanceCycleDate(
   date: Date,
   cycle: BillingCycle | string,
-  customMonths = 1
+  customMonths = 1,
+  anchorDay?: number
 ): Date {
   const base = startOfDay(date);
+  const anchor = anchorDay || base.getDate();
   if (cycle === "weekly") return addWeeks(base, 1);
   if (cycle === "bi-weekly") return addWeeks(base, 2);
-  if (cycle === "monthly") return addMonths(base, 1);
-  if (cycle === "quarterly") return addMonths(base, 3);
-  if (cycle === "semi-yearly") return addMonths(base, 6);
-  if (cycle === "yearly") return addYears(base, 1);
+  if (cycle === "monthly") {
+    let next = addMonths(base, 1);
+    const daysInNext = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+    if (anchor <= daysInNext && next.getDate() < anchor) {
+      next.setDate(anchor);
+    }
+    return next;
+  }
+  if (cycle === "quarterly") {
+    let next = addMonths(base, 3);
+    const daysInNext = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+    if (anchor <= daysInNext && next.getDate() < anchor) {
+      next.setDate(anchor);
+    }
+    return next;
+  }
+  if (cycle === "semi-yearly") {
+    let next = addMonths(base, 6);
+    const daysInNext = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+    if (anchor <= daysInNext && next.getDate() < anchor) {
+      next.setDate(anchor);
+    }
+    return next;
+  }
+  if (cycle === "yearly") {
+    let next = addYears(base, 1);
+    const daysInNext = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+    if (anchor <= daysInNext && next.getDate() < anchor) {
+      next.setDate(anchor);
+    }
+    return next;
+  }
 
-  if (cycle.startsWith("custom:")) {
+  if (typeof cycle === "string" && cycle.startsWith("custom:")) {
     const [, rawValue, rawUnit] = cycle.split(":");
-    const value = Number(rawValue) || 1;
+    const value = Math.max(1, Math.abs(Number(rawValue) || 1));
     const unit = rawUnit || "months";
     if (unit === "days") return addDays(base, value);
     if (unit === "weeks") return addWeeks(base, value);
     if (unit === "years") return addYears(base, value);
-    return addMonths(base, value);
+    let next = addMonths(base, value);
+    const daysInNext = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+    if (anchor <= daysInNext && next.getDate() < anchor) {
+      next.setDate(anchor);
+    }
+    return next;
   }
 
-  return addMonths(base, customMonths);
+  const safeMonths = Math.max(1, Math.abs(customMonths));
+  let next = addMonths(base, safeMonths);
+  const daysInNext = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+  if (anchor <= daysInNext && next.getDate() < anchor) {
+    next.setDate(anchor);
+  }
+  return next;
 }
 
 /**
@@ -147,7 +169,7 @@ export function getNextRenewalDate(
       next = addYears(start, periods);
     } else if (typeof cycle === "string" && cycle.startsWith("custom:")) {
       const [, rawValue, rawUnit] = cycle.split(":");
-      const value = Number(rawValue) || 1;
+      const value = Math.max(1, Math.abs(Number(rawValue) || 1));
       const unit = rawUnit || "months";
       if (unit === "days") {
         next = addDays(start, periods * value);
@@ -160,18 +182,20 @@ export function getNextRenewalDate(
       }
     } else {
       const safeMonths = customMonths > 0 ? customMonths : 1;
-      if (safeMonths < 1) {
-        // Handle fractional months (e.g. custom:10:days mapped as 10/30) by calculating days
-        const days = Math.max(1, Math.round(safeMonths * 30));
-        next = addDays(start, periods * days);
+      const wholeMonths = Math.floor(safeMonths);
+      const fracMonths = safeMonths - wholeMonths;
+      if (fracMonths > 0.001) {
+        const extraDays = Math.round(fracMonths * 30.4167);
+        next = addDays(addMonths(start, periods * wholeMonths), periods * extraDays);
       } else {
-        next = addMonths(start, periods * safeMonths);
+        next = addMonths(start, periods * wholeMonths);
       }
     }
 
     // Safety check: ensure `next` strictly advances past previous value to prevent infinite loop
     if (next <= start && periods > 0) {
       next = addDays(start, periods);
+      break;
     }
   }
 
@@ -182,7 +206,7 @@ export function getNextRenewalDate(
 export function periodsPerYear(cycle: BillingCycle | string, customMonths = 1): number {
   if (typeof cycle === "string" && cycle.startsWith("custom:")) {
     const [, rawValue, rawUnit] = cycle.split(":");
-    const value = Number(rawValue) || 1;
+    const value = Math.max(1, Math.abs(Number(rawValue) || 1));
     const unit = rawUnit || "months";
     if (unit === "days") return 365 / value;
     if (unit === "weeks") return 52 / value;

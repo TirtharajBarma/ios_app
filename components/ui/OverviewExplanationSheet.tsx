@@ -119,8 +119,8 @@ export default function OverviewExplanationSheet({
                  const price = getSubscriptionActivePrice(s);
                  return (
                   <View key={s.id} style={styles.dueRow}>
-                    <View>
-                      <AppText color={colors.white} variant="callout" weight="600">{s.name}</AppText>
+                    <View style={{ flex: 1 }}>
+                      <AppText color={colors.white} variant="callout" weight="600" numberOfLines={1}>{s.name}</AppText>
                       <AppText color={colors.textSecondary} variant="footnote">
                         {new Date(s.nextBillingDate!).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}
                       </AppText>

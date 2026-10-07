@@ -1,93 +1,41 @@
 -- =====================================================================
--- Share Groups — allow devices to share flagged subscriptions across any
--- number of private groups (Family, YouTube, Roommates, Office, ...).
+-- Migration: Security Hardening & Vulnerability Remediation (2026-10-06)
 --
--- Security model: the client signs in ANONYMOUSLY (Supabase anonymous
--- auth). Row Level Security is ENABLED on all tables:
---   * Only verified group members can SELECT group & shared data.
---   * Direct table mutations (INSERT/UPDATE/DELETE) are revoked from anon.
---   * All mutations run through audited SECURITY DEFINER RPC functions
---     with explicit search_path = public, pg_temp and strict authorization.
+-- Remediates findings:
+--   1. N1: Enables Row-Level Security on share_groups, share_group_members,
+--      and shared_subscriptions with membership-scoped SELECT policies.
+--      Revokes direct INSERT/UPDATE/DELETE from anon and authenticated.
+--   2. #1: Hardens app_devices by dropping the permissive "true" policy,
+--      revoking direct table access from anon, dropping device_name,
+--      securing views with security_invoker, and channeling telemetry
+--      through a dedicated SECURITY DEFINER RPC.
+--   3. #5: Generates cryptographically secure 6-character group join codes
+--      using pgcrypto gen_random_bytes(6) with uniform distribution;
+--      adds attempt rate-limiting on join_group; tracks removed members
+--      so they cannot rejoin; enforces publisher/owner authorization on
+--      shared subscription updates and deletes; adds input length checks;
+--      adds rotate_group_code RPC.
+--   4. #6: Sets explicit `search_path = public, pg_temp` on every
+--      SECURITY DEFINER function to eliminate search-path injection.
+--
+-- Idempotent and safely re-runnable in Supabase SQL editor.
 -- =====================================================================
 
 create extension if not exists "pgcrypto";
 
--- ── Tables ───────────────────────────────────────────────────────────
-
-create table if not exists public.share_groups (
-  id uuid primary key default gen_random_uuid(),
-  code text not null unique,
-  name text not null default 'My Shared Group',
-  owner_id uuid not null,
-  created_at timestamptz not null default now()
-);
-
--- Composite PK so one user can belong to many groups at once.
-create table if not exists public.share_group_members (
-  user_id uuid not null,
-  group_id uuid not null references public.share_groups(id) on delete cascade,
-  user_name text not null default 'Someone',
-  joined_at timestamptz not null default now(),
-  primary key (user_id, group_id)
-);
-
--- One row per shared subscription, keyed by (local sub id, group id) so
--- the same subscription can be shared into several groups. `id` mirrors
--- the local SQLite sub id so syncs are natural upserts.
-create table if not exists public.shared_subscriptions (
-  id text not null,
-  group_id uuid not null references public.share_groups(id) on delete cascade,
-  publisher_user_id uuid,
-  publisher_name text not null default 'Someone',
-  name text not null,
-  price real not null default 0,
-  currency text not null default 'USD',
-  billing_cycle text,
-  next_billing_date text not null,
-  category text,
-  brand_color text,
-  logo_icon text,
-  is_trial boolean not null default false,
-  trial_end_date text,
-  split_enabled boolean not null default false,
-  split_type text,
-  split_value real,
-  is_paused boolean not null default false,
-  notes text,
-  website text,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  primary key (id, group_id)
-);
-
--- Tracking removed members so removed users cannot rejoin with an old join code
-create table if not exists public.share_group_removed_members (
-  group_id uuid not null references public.share_groups(id) on delete cascade,
-  user_id uuid not null,
-  removed_at timestamptz not null default now(),
-  primary key (group_id, user_id)
-);
-
--- Rate limiting table for group join attempts
-create table if not exists public.group_join_attempts (
-  id bigint generated always as identity primary key,
-  user_id uuid not null,
-  attempted_at timestamptz not null default now()
-);
-
-create index if not exists idx_subs_group on public.shared_subscriptions(group_id);
-create index if not exists idx_members_group on public.share_group_members(group_id);
-create index if not exists idx_join_attempts_uid_time on public.group_join_attempts(user_id, attempted_at desc);
-
--- ── Row Level Security (RLS) ──────────────────────────────────────────
+-- ── 1. Row-Level Security on Shared-Group Tables ─────────────────────
 
 alter table public.share_groups enable row level security;
 alter table public.share_group_members enable row level security;
 alter table public.shared_subscriptions enable row level security;
-alter table public.share_group_removed_members enable row level security;
-alter table public.group_join_attempts enable row level security;
 
--- Members can select only their own groups
+-- Drop previous policies if existing to avoid duplication
+drop policy if exists "Members can view their own groups" on public.share_groups;
+drop policy if exists "Members can view members of their groups" on public.share_group_members;
+drop policy if exists "Group members can view shared subscriptions" on public.shared_subscriptions;
+drop policy if exists "Allow anonymous device upsert" on public.app_devices;
+
+-- SELECT policies: allow only verified group members to read rows
 create policy "Members can view their own groups"
   on public.share_groups for select
   using (
@@ -98,7 +46,6 @@ create policy "Members can view their own groups"
     )
   );
 
--- Members can select fellow members of their groups
 create policy "Members can view members of their groups"
   on public.share_group_members for select
   using (
@@ -109,7 +56,7 @@ create policy "Members can view members of their groups"
     )
   );
 
--- Members can read group subscriptions (required for Supabase Realtime)
+-- Group members can read subscriptions (essential for Supabase Realtime)
 create policy "Group members can view shared subscriptions"
   on public.shared_subscriptions for select
   using (
@@ -120,14 +67,12 @@ create policy "Group members can view shared subscriptions"
     )
   );
 
--- Block direct mutations from anon/authenticated
+-- Revoke direct table mutations: all writes must pass through RPC functions
 revoke insert, update, delete on public.share_groups from anon, authenticated;
 revoke insert, update, delete on public.share_group_members from anon, authenticated;
 revoke insert, update, delete on public.shared_subscriptions from anon, authenticated;
-revoke all on public.share_group_removed_members from anon, authenticated;
-revoke all on public.group_join_attempts from anon, authenticated;
 
--- Ensure Realtime includes shared_subscriptions
+-- Ensure Realtime publication includes shared_subscriptions
 do $$
 begin
   if not exists (
@@ -140,7 +85,78 @@ exception
   when others then null;
 end $$;
 
--- ── Join-code generator (cryptographic CSPRNG, uniform distribution) ──
+-- ── 2. Table for tracking removed members (Prevent rejoin) ───────────
+
+create table if not exists public.share_group_removed_members (
+  group_id uuid not null references public.share_groups(id) on delete cascade,
+  user_id uuid not null,
+  removed_at timestamptz not null default now(),
+  primary key (group_id, user_id)
+);
+
+alter table public.share_group_removed_members enable row level security;
+revoke all on public.share_group_removed_members from anon, authenticated;
+
+-- ── 3. Table for Join Attempt Rate Limiting ───────────────────────────
+
+create table if not exists public.group_join_attempts (
+  id bigint generated always as identity primary key,
+  user_id uuid not null,
+  attempted_at timestamptz not null default now()
+);
+
+create index if not exists idx_join_attempts_uid_time
+  on public.group_join_attempts (user_id, attempted_at desc);
+
+alter table public.group_join_attempts enable row level security;
+revoke all on public.group_join_attempts from anon, authenticated;
+
+-- ── 4. App Devices & Telemetry Hardening ──────────────────────────────
+
+-- Ensure all app_devices columns exist safely
+create table if not exists public.app_devices (
+  device_id text primary key
+);
+
+alter table public.app_devices
+  add column if not exists brand text,
+  add column if not exists model_name text,
+  add column if not exists os_name text,
+  add column if not exists os_version text,
+  add column if not exists app_version text,
+  add column if not exists update_hash text,
+  add column if not exists channel text default 'preview',
+  add column if not exists timezone text default 'Asia/Kolkata',
+  add column if not exists total_launches integer default 1,
+  add column if not exists last_active_at timestamptz default now(),
+  add column if not exists created_at timestamptz default now();
+
+-- Drop personal device_name column if present
+alter table public.app_devices drop column if exists device_name;
+
+-- Ensure RLS is active and revoke direct access from anon/authenticated
+alter table public.app_devices enable row level security;
+revoke all on public.app_devices from anon, authenticated;
+
+-- Recreate view with security_invoker = true
+drop view if exists public.v_app_devices_ist;
+create or replace view public.v_app_devices_ist with (security_invoker = true) as
+select
+  device_id,
+  brand,
+  model_name,
+  os_name,
+  os_version,
+  app_version,
+  update_hash,
+  channel,
+  total_launches,
+  to_char(coalesce(last_active_at, now()) at time zone 'Asia/Kolkata', 'YYYY-MM-DD HH24:MI:SS') || ' IST' as last_active_ist,
+  to_char(coalesce(created_at, now()) at time zone 'Asia/Kolkata', 'YYYY-MM-DD HH24:MI:SS') || ' IST' as registered_at_ist
+from public.app_devices
+order by last_active_at desc nulls last;
+
+-- ── 5. Cryptographically Secure Code Generator ────────────────────────
 
 create or replace function public.generate_group_code() returns text
 language plpgsql
@@ -149,7 +165,7 @@ set search_path = public, pg_temp
 as $$
 declare
   result text;
-  alphabet text := 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; -- 32 characters
+  alphabet text := 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; -- 32 symbols
   bytes bytea;
   b int;
 begin
@@ -158,6 +174,7 @@ begin
     bytes := gen_random_bytes(6);
     for i in 0..5 loop
       b := get_byte(bytes, i);
+      -- Modulo 32 on 256 has zero bias (256 is an exact multiple of 32)
       result := result || substr(alphabet, 1 + (b % 32), 1);
     end loop;
     exit when not exists (select 1 from public.share_groups where code = result);
@@ -165,8 +182,9 @@ begin
   return result;
 end $$;
 
--- ── RPC: create a group (creator becomes owner + first member) ───────
+-- ── 6. Group RPCs with search_path and Input Validation ───────────────
 
+-- Create Group
 create or replace function public.create_group(p_name text, p_user_name text) returns jsonb
 language plpgsql
 security definer
@@ -199,8 +217,7 @@ begin
   );
 end $$;
 
--- ── RPC: join a group by code (max 10 members, rate limited) ─────────
-
+-- Join Group (Rate limited, format validated, checks removed members)
 create or replace function public.join_group(p_code text, p_user_name text) returns jsonb
 language plpgsql
 security definer
@@ -226,6 +243,7 @@ begin
     raise exception 'Too many join attempts. Please wait a few minutes before trying again.';
   end if;
 
+  -- Record attempt
   insert into public.group_join_attempts (user_id) values (uid);
 
   clean_code := upper(trim(p_code));
@@ -246,7 +264,7 @@ begin
     raise exception 'You have been removed from this group and cannot rejoin';
   end if;
 
-  -- Enforce the max 10 members limit
+  -- Enforce max 10 members limit
   select user_id into full_count
   from public.share_group_members where group_id = g.id limit 1 offset 9;
   if full_count is not null then raise exception 'This group is full (max 10 people)'; end if;
@@ -254,6 +272,7 @@ begin
   insert into public.share_group_members (user_id, group_id, user_name)
   values (uid, g.id, clean_user);
 
+  -- Clean up successful user's recent attempts
   delete from public.group_join_attempts where user_id = uid;
 
   return jsonb_build_object(
@@ -265,8 +284,7 @@ begin
   );
 end $$;
 
--- ── RPC: leave a group ───────────────────────────────────────────────
-
+-- Leave Group
 create or replace function public.leave_group(p_group_id uuid) returns void
 language plpgsql
 security definer
@@ -279,14 +297,13 @@ begin
 
   delete from public.share_group_members where user_id = uid and group_id = p_group_id;
 
-  -- Clean up group if empty
+  -- If the group has no members left, clean it up.
   delete from public.share_groups g
   where g.id = p_group_id
     and not exists (select 1 from public.share_group_members m where m.group_id = g.id);
 end $$;
 
--- ── RPC: remove a member (owner only) ─────────────────────────────────
-
+-- Remove Member (Owner only, records removed member)
 create or replace function public.remove_member(p_group_id uuid, p_user_id uuid) returns void
 language plpgsql
 security definer
@@ -303,13 +320,13 @@ begin
 
   delete from public.share_group_members where group_id = p_group_id and user_id = p_user_id;
 
+  -- Prevent member from rejoining using the same code
   insert into public.share_group_removed_members (group_id, user_id)
   values (p_group_id, p_user_id)
   on conflict do nothing;
 end $$;
 
--- ── RPC: rotate join code (owner only) ────────────────────────────────
-
+-- Rotate Group Join Code (Owner only)
 create or replace function public.rotate_group_code(p_group_id uuid) returns text
 language plpgsql
 security definer
@@ -329,8 +346,7 @@ begin
   return new_code;
 end $$;
 
--- ── RPC: rename group ─────────────────────────────────────────────────
-
+-- Rename Group (Owner only)
 create or replace function public.rename_group(p_group_id uuid, p_name text) returns void
 language plpgsql
 security definer
@@ -345,8 +361,7 @@ begin
   where id = p_group_id and owner_id = auth.uid();
 end $$;
 
--- ── RPC: update display name ──────────────────────────────────────────
-
+-- Update Display Name
 create or replace function public.update_my_name(p_user_name text) returns void
 language plpgsql
 security definer
@@ -364,8 +379,7 @@ begin
   where user_id = uid;
 end $$;
 
--- ── RPC: get groups ───────────────────────────────────────────────────
-
+-- Get Groups
 create or replace function public.get_groups() returns jsonb
 language plpgsql
 security definer
@@ -403,8 +417,7 @@ begin
   return result;
 end $$;
 
--- ── RPC: get single group (first) ─────────────────────────────────────
-
+-- Back-compat Get Group (First group)
 create or replace function public.get_group() returns jsonb
 language plpgsql
 security definer
@@ -422,8 +435,7 @@ begin
   return groups->0;
 end $$;
 
--- ── RPC: get shared subscriptions ─────────────────────────────────────
-
+-- Get Shared Subscriptions
 create or replace function public.get_shared_subscriptions() returns setof public.shared_subscriptions
 language sql
 security definer
@@ -436,8 +448,7 @@ as $$
   order by s.next_billing_date asc;
 $$;
 
--- ── RPC: upsert shared subscription ───────────────────────────────────
-
+-- Upsert Shared Subscription (With publisher/owner authorization check & input limits)
 create or replace function public.upsert_shared_subscription(p_sub jsonb) returns void
 language plpgsql
 security definer
@@ -467,6 +478,7 @@ begin
 
   clean_name := substr(trim(coalesce(p_sub->>'name', 'Unnamed')), 1, 100);
 
+  -- Check if already exists and enforce authorization
   select publisher_user_id, publisher_name into existing_publisher, existing_name
   from public.shared_subscriptions
   where id = sub_id and group_id = g;
@@ -526,8 +538,7 @@ begin
     updated_at = now();
 end $$;
 
--- ── RPC: delete shared subscription ───────────────────────────────────
-
+-- Delete Shared Subscription (With publisher/owner authorization check)
 create or replace function public.delete_shared_subscription(p_id text, p_group_id uuid) returns void
 language plpgsql
 security definer
@@ -557,43 +568,7 @@ begin
   where s.id = p_id and s.group_id = p_group_id;
 end $$;
 
--- ── Table & RPC: App Devices Anonymous Telemetry ──────────────────────
-
-create table if not exists public.app_devices (
-  device_id text primary key,
-  brand text,
-  model_name text,
-  os_name text,
-  os_version text,
-  app_version text,
-  update_hash text,
-  channel text default 'preview',
-  timezone text default 'Asia/Kolkata',
-  total_launches integer default 1,
-  last_active_at timestamptz default now(),
-  created_at timestamptz default now()
-);
-
-alter table public.app_devices enable row level security;
-revoke all on public.app_devices from anon, authenticated;
-
-drop view if exists public.v_app_devices_ist;
-create or replace view public.v_app_devices_ist with (security_invoker = true) as
-select
-  device_id,
-  brand,
-  model_name,
-  os_name,
-  os_version,
-  app_version,
-  update_hash,
-  channel,
-  total_launches,
-  to_char(coalesce(last_active_at, now()) at time zone 'Asia/Kolkata', 'YYYY-MM-DD HH24:MI:SS') || ' IST' as last_active_ist,
-  to_char(coalesce(created_at, now()) at time zone 'Asia/Kolkata', 'YYYY-MM-DD HH24:MI:SS') || ' IST' as registered_at_ist
-from public.app_devices
-order by last_active_at desc nulls last;
-
+-- Record Device Telemetry (Anonymous diagnostic metric upsert)
 create or replace function public.record_device_telemetry(
   p_device_id text,
   p_brand text,
@@ -656,7 +631,7 @@ begin
     last_active_at = now();
 end $$;
 
--- ── Grants ───────────────────────────────────────────────────────────
+-- ── 7. Grants ─────────────────────────────────────────────────────────
 
 grant execute on function
   public.create_group(text, text),

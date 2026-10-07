@@ -229,7 +229,8 @@ export function formatMoney(
 
 export function roundMoney(amount: number | null | undefined): number {
   if (!amount || isNaN(amount) || !isFinite(amount)) return 0;
-  return Math.round((amount + Number.EPSILON) * 100) / 100;
+  const sign = amount < 0 ? -1 : 1;
+  return sign * (Math.round((Math.abs(amount) + Number.EPSILON) * 100) / 100);
 }
 
 /**

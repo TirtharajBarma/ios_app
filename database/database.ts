@@ -89,9 +89,9 @@ function mapDbToSubscription(dbSub: DbSubscription): Subscription {
     const val = Number(parts[1]) || 1;
     const unit = parts[2] || "months";
     if (unit === "days") {
-      customMonths = val / 30;
+      customMonths = (val * 12) / 365;
     } else if (unit === "weeks") {
-      customMonths = (val * 7) / 30;
+      customMonths = (val * 12) / 52;
     } else if (unit === "months") {
       customMonths = val;
     } else if (unit === "years") {
@@ -113,7 +113,7 @@ function mapDbToSubscription(dbSub: DbSubscription): Subscription {
     rawBillingCycle: dbSub.billingCycle || undefined,
     nextBillingDate: dbSub.isTrial === 1
       ? (dbSub.trialEndDate || new Date().toISOString())
-      : (dbSub.renewDate || dbSub.trialEndDate || new Date().toISOString()),
+      : (dbSub.renewDate || new Date().toISOString()),
     category: (dbSub.category?.toLowerCase() || "other") as any,
     reminderEnabled: dbSub.reminderEnabled === 1,
     reminderDays: dbSub.reminderDays,
@@ -253,7 +253,12 @@ export async function updateSubscription(
   if (input.currency !== undefined) dbUpdates.currency = input.currency;
   if (input.rawBillingCycle !== undefined) dbUpdates.billingCycle = input.rawBillingCycle;
   else if (input.billingCycle !== undefined) dbUpdates.billingCycle = input.billingCycle;
-  if (input.isTrial !== undefined) dbUpdates.isTrial = input.isTrial ? 1 : 0;
+  if (input.isTrial !== undefined) {
+    dbUpdates.isTrial = input.isTrial ? 1 : 0;
+    if (input.isTrial === false && input.trialEndDate === undefined) {
+      dbUpdates.trialEndDate = null;
+    }
+  }
   
   if (input.nextBillingDate !== undefined) {
     if (input.isTrial === true) {

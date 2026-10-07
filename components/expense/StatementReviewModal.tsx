@@ -388,12 +388,13 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
       visible={visible}
       animationType="slide"
       presentationStyle="pageSheet"
+      statusBarTranslucent={true}
       onRequestClose={onClose}
     >
       <KeyboardAvoidingView
         style={[styles.modalRoot, { paddingTop: androidTopPadding }]}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
       >
         {/* iOS Drag Handle */}
         {Platform.OS === 'ios' && (
@@ -495,7 +496,7 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
               <View style={styles.summaryCard}>
                 <View style={styles.metricRow}>
                   {/* Debits / Outflow */}
-                  <View style={styles.metricCol}>
+                  <View style={[styles.metricCol, { flex: 1 }]}>
                     <AppText style={styles.metricLabel}>OUTFLOW</AppText>
                     <AppText
                       style={[styles.metricValue, { color: '#FF9D66' }]}
@@ -510,10 +511,10 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                   <View style={styles.metricDivider} />
 
                   {/* Credits / Inflow */}
-                  <View style={styles.metricCol}>
+                  <View style={[styles.metricCol, { flex: 1 }]}>
                     <AppText style={styles.metricLabel}>INFLOW</AppText>
                     <AppText
-                      style={[styles.metricValue, { color: '#70D6BC' }]}
+                      style={[styles.metricValue, { color: '#A9DFBF' }]}
                       numberOfLines={1}
                       adjustsFontSizeToFit={true}
                       minimumFontScale={0.7}
@@ -525,7 +526,7 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                   <View style={styles.metricDivider} />
 
                   {/* Net Flow */}
-                  <View style={styles.metricCol}>
+                  <View style={[styles.metricCol, { flex: 1 }]}>
                     <AppText style={styles.metricLabel}>NET FLOW</AppText>
                     <AppText
                       style={[
@@ -533,7 +534,7 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                         {
                           color:
                             selectedCredits - selectedDebits >= 0
-                              ? '#70D6BC'
+                              ? '#A9DFBF'
                               : '#FFFFFF',
                         },
                       ]}
@@ -559,7 +560,7 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                 >
                   {result.reconciliation.isReconciled ? (
                     <>
-                      <ShieldCheck size={13} color="#70D6BC" strokeWidth={2.2} />
+                      <ShieldCheck size={13} color="#A9DFBF" strokeWidth={2.2} />
                       <AppText style={styles.reconciledSuccessText} numberOfLines={1}>
                         Mathematical Balance Reconciled ({stagedList.length} Transactions)
                       </AppText>
@@ -624,6 +625,8 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                     placeholderTextColor="#696C75"
                     value={searchQuery}
                     onChangeText={setSearchQuery}
+                    autoCapitalize="none"
+                    autoCorrect={false}
                     returnKeyType="search"
                     onSubmitEditing={() => Keyboard.dismiss()}
                   />
@@ -706,7 +709,7 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                             <AppText
                               style={[
                                 styles.txAmount,
-                                { color: isDebit ? '#FFFFFF' : '#70D6BC' },
+                                { color: isDebit ? '#FFFFFF' : '#A9DFBF' },
                               ]}
                               numberOfLines={1}
                               adjustsFontSizeToFit={true}
@@ -943,7 +946,7 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                       {/* Statement Activity Summary Pill */}
                       {linkedTxCount > 0 && (
                         <View style={styles.statementActivityBar}>
-                          <Sparkles size={13} color="#70D6BC" strokeWidth={2.2} />
+                          <Sparkles size={13} color="#A9DFBF" strokeWidth={2.2} />
                           <AppText style={styles.statementActivityText} numberOfLines={1}>
                             Statement activity: {linkedTxCount} {linkedTxCount === 1 ? 'txn' : 'txns'} (
                             {isCredit
@@ -982,7 +985,7 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                             style={styles.balanceTextInput}
                             placeholder="0"
                             placeholderTextColor="#696C75"
-                            keyboardType="numeric"
+                            keyboardType="decimal-pad"
                             value={inputVal === '0' ? '' : inputVal}
                             returnKeyType="done"
                             onSubmitEditing={() => Keyboard.dismiss()}
@@ -1102,7 +1105,7 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                         style={styles.balanceTextInput}
                         placeholder="0"
                         placeholderTextColor="#696C75"
-                        keyboardType="numeric"
+                        keyboardType="decimal-pad"
                         value={newAccBalance}
                         onChangeText={setNewAccBalance}
                         returnKeyType="done"
@@ -1198,7 +1201,7 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
                     style={styles.budgetHeroInput}
                     placeholder="35000"
                     placeholderTextColor="#696C75"
-                    keyboardType="numeric"
+                    keyboardType="decimal-pad"
                     value={budgetInput}
                     onChangeText={setBudgetInput}
                     returnKeyType="done"
@@ -1342,8 +1345,8 @@ const styles = StyleSheet.create({
     borderColor: '#FF9D66',
   },
   stepTabItemPast: {
-    backgroundColor: 'rgba(112, 214, 188, 0.12)',
-    borderColor: 'rgba(112, 214, 188, 0.25)',
+    backgroundColor: 'rgba(169, 223, 191, 0.12)',
+    borderColor: 'rgba(169, 223, 191, 0.25)',
   },
   stepTabText: {
     color: '#8E919D',
@@ -1356,7 +1359,7 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   stepTabTextPast: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
     fontWeight: '800',
   },
   horizontalTrack: {
@@ -1423,9 +1426,9 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   reconciledSuccess: {
-    backgroundColor: 'rgba(112, 214, 188, 0.1)',
+    backgroundColor: 'rgba(169, 223, 191, 0.1)',
     borderWidth: 1,
-    borderColor: 'rgba(112, 214, 188, 0.2)',
+    borderColor: 'rgba(169, 223, 191, 0.2)',
   },
   reconciledWarning: {
     backgroundColor: 'rgba(255, 184, 77, 0.1)',
@@ -1433,7 +1436,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 184, 77, 0.25)',
   },
   reconciledSuccessText: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
     fontSize: 11,
     fontWeight: '700',
   },
@@ -1553,6 +1556,7 @@ const styles = StyleSheet.create({
   },
   txNarrationBox: {
     flex: 1,
+    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
@@ -1569,6 +1573,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 5,
     paddingVertical: 2,
     borderRadius: 4,
+    flexShrink: 0,
   },
   duplicateTagText: {
     color: '#FF9D66',
@@ -1726,7 +1731,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    backgroundColor: '#70D6BC',
+    backgroundColor: '#A9DFBF',
     borderRadius: 14,
     height: 48,
   },
@@ -1838,15 +1843,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: 'rgba(112, 214, 188, 0.08)',
+    backgroundColor: 'rgba(169, 223, 191, 0.08)',
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderWidth: 1,
-    borderColor: 'rgba(112, 214, 188, 0.2)',
+    borderColor: 'rgba(169, 223, 191, 0.2)',
   },
   statementActivityText: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
     fontSize: 11,
     fontWeight: '700',
     flex: 1,
@@ -1924,19 +1929,19 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   liveFormulaPill: {
-    backgroundColor: 'rgba(112, 214, 188, 0.12)',
+    backgroundColor: 'rgba(169, 223, 191, 0.12)',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: 'rgba(112, 214, 188, 0.25)',
+    borderColor: 'rgba(169, 223, 191, 0.25)',
   },
   liveFormulaPillDue: {
     backgroundColor: 'rgba(255, 157, 102, 0.12)',
     borderColor: 'rgba(255, 157, 102, 0.3)',
   },
   liveFormulaPillText: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
     fontSize: 11.5,
     fontWeight: '800',
   },

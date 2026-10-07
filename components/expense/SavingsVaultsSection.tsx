@@ -70,7 +70,7 @@ export const SavingsVaultsSection: React.FC<SavingsVaultsSectionProps> = ({ onOp
   const handleExecuteAction = () => {
     Keyboard.dismiss();
     if (!selectedVault) return;
-    const amt = parseFloat(actionAmount);
+    const amt = parseFloat(actionAmount.replace(/,/g, ''));
     if (isNaN(amt) || amt <= 0) {
       Alert.alert('Invalid Amount', 'Please enter a valid amount.');
       return;
@@ -103,7 +103,7 @@ export const SavingsVaultsSection: React.FC<SavingsVaultsSectionProps> = ({ onOp
       return;
     }
 
-    const pastelColors = ['#70D6BC', '#C4A7E7', '#F8A888', '#8CD9C8', '#FF9D66'];
+    const pastelColors = ['#A9DFBF', '#C4A7E7', '#F8A888', '#8CD9C8', '#FF9D66'];
     const randomColor = pastelColors[savingsVaults.length % pastelColors.length];
 
     addSavingsVault({
@@ -126,7 +126,7 @@ export const SavingsVaultsSection: React.FC<SavingsVaultsSectionProps> = ({ onOp
       <View style={styles.headerRow}>
         <View style={styles.titleWithIcon}>
           <View style={styles.iconCircle}>
-            <Shield size={13} color="#70D6BC" strokeWidth={2.5} />
+            <Shield size={13} color="#A9DFBF" strokeWidth={2.5} />
           </View>
           <AppText style={styles.sectionTitle}>SAVINGS & GOALS</AppText>
           {totalSavedInVaults > 0 && (
@@ -183,7 +183,7 @@ export const SavingsVaultsSection: React.FC<SavingsVaultsSectionProps> = ({ onOp
                 <View style={styles.vaultTopRow}>
                   <View style={styles.vaultLeft}>
                     <AppText style={styles.vaultEmoji}>{vault.emoji || '🎯'}</AppText>
-                    <View>
+                    <View style={{ flex: 1, minWidth: 0 }}>
                       <AppText style={styles.vaultName} numberOfLines={1}>
                         {vault.name}
                       </AppText>
@@ -207,7 +207,7 @@ export const SavingsVaultsSection: React.FC<SavingsVaultsSectionProps> = ({ onOp
                       styles.progressBarFill,
                       {
                         width: `${Math.max(pct, 2)}%`,
-                        backgroundColor: vault.color || '#70D6BC',
+                        backgroundColor: vault.color || '#A9DFBF',
                       },
                     ]}
                   />
@@ -224,16 +224,18 @@ export const SavingsVaultsSection: React.FC<SavingsVaultsSectionProps> = ({ onOp
                   <View style={styles.actionBtnsGroup}>
                     <TouchableOpacity
                       style={styles.miniActionBtn}
+                      hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
                       onPress={() => handleOpenAction(vault, 'deposit')}
                       activeOpacity={0.7}
                     >
-                      <ArrowUpRight size={11} color="#70D6BC" />
+                      <ArrowUpRight size={11} color="#A9DFBF" />
                       <AppText style={styles.miniActionTextGreen}>Deposit</AppText>
                     </TouchableOpacity>
 
                     {current > 0 && (
                       <TouchableOpacity
                         style={styles.miniActionBtn}
+                        hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
                         onPress={() => handleOpenAction(vault, 'withdraw')}
                         activeOpacity={0.7}
                       >
@@ -253,6 +255,7 @@ export const SavingsVaultsSection: React.FC<SavingsVaultsSectionProps> = ({ onOp
       <Modal
         visible={showActionModal}
         transparent
+        statusBarTranslucent={true}
         animationType="fade"
         onRequestClose={() => {
           Keyboard.dismiss();
@@ -261,7 +264,7 @@ export const SavingsVaultsSection: React.FC<SavingsVaultsSectionProps> = ({ onOp
       >
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
           style={styles.modalOverlay}
         >
           <TouchableOpacity
@@ -306,7 +309,7 @@ export const SavingsVaultsSection: React.FC<SavingsVaultsSectionProps> = ({ onOp
                 style={styles.modalTextInput}
                 placeholder="Amount (e.g. 3000)"
                 placeholderTextColor="#555866"
-                keyboardType="numeric"
+                keyboardType="decimal-pad"
                 autoFocus
                 value={actionAmount}
                 onChangeText={setActionAmount}
@@ -335,6 +338,7 @@ export const SavingsVaultsSection: React.FC<SavingsVaultsSectionProps> = ({ onOp
       <Modal
         visible={showNewGoalModal}
         transparent
+        statusBarTranslucent={true}
         animationType="slide"
         onRequestClose={() => {
           Keyboard.dismiss();
@@ -343,7 +347,7 @@ export const SavingsVaultsSection: React.FC<SavingsVaultsSectionProps> = ({ onOp
       >
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
           style={styles.modalOverlayBottom}
         >
           <TouchableOpacity
@@ -398,7 +402,7 @@ export const SavingsVaultsSection: React.FC<SavingsVaultsSectionProps> = ({ onOp
                 style={styles.sheetTextInput}
                 placeholder="e.g. 50000"
                 placeholderTextColor="#555866"
-                keyboardType="numeric"
+                keyboardType="decimal-pad"
                 value={newGoalTarget}
                 onChangeText={setNewGoalTarget}
                 returnKeyType="done"
@@ -441,7 +445,7 @@ const styles = StyleSheet.create({
     width: 22,
     height: 22,
     borderRadius: 11,
-    backgroundColor: 'rgba(112, 214, 188, 0.12)',
+    backgroundColor: 'rgba(169, 223, 191, 0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -456,12 +460,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 8,
-    backgroundColor: 'rgba(112, 214, 188, 0.1)',
+    backgroundColor: 'rgba(169, 223, 191, 0.1)',
     borderWidth: 1,
-    borderColor: 'rgba(112, 214, 188, 0.2)',
+    borderColor: 'rgba(169, 223, 191, 0.2)',
   },
   totalPillText: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
     fontSize: 10,
     fontWeight: '800',
   },
@@ -559,8 +563,8 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.08)',
   },
   pctBadgeCompleted: {
-    backgroundColor: 'rgba(112, 214, 188, 0.15)',
-    borderColor: '#70D6BC',
+    backgroundColor: 'rgba(169, 223, 191, 0.15)',
+    borderColor: '#A9DFBF',
   },
   pctText: {
     color: '#D1D5DB',
@@ -568,7 +572,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   pctTextCompleted: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
   },
   progressTrack: {
     height: 6,
@@ -600,14 +604,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
     backgroundColor: 'rgba(255, 255, 255, 0.04)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    minHeight: 30,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.07)',
   },
   miniActionTextGreen: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
     fontSize: 10,
     fontWeight: '700',
   },
@@ -706,7 +711,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   modalInputPrefix: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
     fontSize: 18,
     fontWeight: '700',
     marginRight: 6,
@@ -725,7 +730,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   modalSubmitBtnGreen: {
-    backgroundColor: '#70D6BC',
+    backgroundColor: '#A9DFBF',
   },
   modalSubmitBtnPeach: {
     backgroundColor: '#FF9D66',

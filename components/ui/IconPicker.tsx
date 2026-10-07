@@ -175,8 +175,10 @@ export default function IconPicker({ visible, onClose, onSelect }: IconPickerPro
         <ScrollView
           style={styles.scroll}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: 60 }]}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          automaticallyAdjustKeyboardInsets={true}
         >
           {filteredSets.map((section) => (
             <View key={section.title} style={styles.section}>

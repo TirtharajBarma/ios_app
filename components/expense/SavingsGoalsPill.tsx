@@ -3,6 +3,7 @@ import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { Target, ChevronRight } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { AppText } from '@/components/ui';
+import { expenseColors } from '@/constants/expenseColors';
 import { useExpenseStore } from '@/store/useExpenseStore';
 import { useShallow } from 'zustand/react/shallow';
 import { formatCompactCurrency } from './MoneyFlowCard';
@@ -32,7 +33,7 @@ export const SavingsGoalsPill: React.FC<SavingsGoalsPillProps> = ({ onPress }) =
       >
         <View style={styles.leftContent}>
           <View style={styles.iconCircle}>
-            <Target size={13} color="#70D6BC" strokeWidth={2.5} />
+            <Target size={13} color={expenseColors.accentGreen} strokeWidth={2.5} />
           </View>
           <View style={styles.textWrap}>
             <AppText style={styles.label}>SAVINGS GOALS</AppText>

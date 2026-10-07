@@ -221,11 +221,11 @@ export default function SubscriptionDetailScreen() {
 
       {/* Navbar row */}
       <View style={[styles.navbar, { paddingTop: insets.top + spacing[12] }]}>
-        <PressableScale onPress={handleBack} scale={0.88} style={styles.navCircleBtn}>
+        <PressableScale onPress={handleBack} scale={0.88} style={styles.navCircleBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
           <ChevronLeft size={22} color={colors.white} strokeWidth={2.5} />
         </PressableScale>
         <View style={styles.navbarRight}>
-          <PressableScale onPress={handleEdit} scale={0.92} style={styles.navEditBtn}>
+          <PressableScale onPress={handleEdit} scale={0.92} style={styles.navEditBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
             <AppText weight="700" color={colors.white} style={styles.navEditBtnText}>
               Edit
             </AppText>
@@ -484,7 +484,7 @@ export default function SubscriptionDetailScreen() {
                       <AppText weight="600" color="rgba(255, 255, 255, 0.9)">
                         {safeFormat(pay.date, "MMM d, yyyy")}
                       </AppText>
-                      <AppText weight="700" color={colors.success} style={styles.timelineAmountText}>
+                      <AppText weight="700" color={colors.success} style={styles.timelineAmountText} numberOfLines={1}>
                         +{getCurrencySymbol(currency)}{pay.amount.toFixed(2)}
                       </AppText>
                     </View>

@@ -1,34 +1,37 @@
 {
   "expo": {
-    "name": "subscription",
+    "name": "Monevo",
     "slug": "subscription",
-    "version": "1.0.0",
+    "version": "1.1.8",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "subscription",
+    "scheme": "monevo",
     "userInterfaceStyle": "dark",
     "ios": {
       "icon": "./assets/images/icon.png",
       "bundleIdentifier": "com.tirtharajbarma.subscription",
       "userInterfaceStyle": "dark",
       "infoPlist": {
-        "NSFaceIDUsageDescription": "Authentication is required to unlock the app and access your subscription details."
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSFaceIDUsageDescription": "Authentication is required to unlock the app and access your financial details."
       }
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#070A10",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "userInterfaceStyle": "dark",
       "navigationBar": {
-        "backgroundColor": "#12141A",
+        "backgroundColor": "#070A10",
         "barStyle": "light-content"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.tirtharajbarma.subscription"
+      "softwareKeyboardLayoutMode": "resize",
+      "package": "com.tirtharajbarma.subscription",
+      "allowBackup": false
     },
     "web": {
       "output": "static",
@@ -39,9 +42,9 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
+          "backgroundColor": "#070A10",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "imageWidth": 100
         }
       ],
       "expo-sqlite",
@@ -80,7 +83,13 @@
         "projectId": "382b12ce-7c53-4d52-9dd2-8206e0bdea03"
       },
       "supabaseUrl": "https://nvsjrfzzessvynnuurcg.supabase.co",
-      "supabaseAnonKey": "sb_publishable_hmdnizlu8wzE6EwOj2IJvw_0mc9qG7J"
+      "supabaseAnonKey": "sb_publishable_hmdnizlu8wzE6EwOj2IJvw_0mc9qG7J",
+      "updateVersion": "v1.1.8",
+      "updateDescription": "Fix Safe to spend amount visibility and smooth dynamic calendar carousel",
+      "updateNotes": [
+        "Fix Safe to spend amount visibility and smooth dynamic calendar carousel"
+      ],
+      "easUpdateMessage": "v1.1.8: Fix Safe to spend amount visibility and smooth dynamic calendar carousel"
     },
     "owner": "tirtharaj_barma",
     "runtimeVersion": "1",

@@ -128,7 +128,7 @@ export default function SavingsBottomSheet({
                       <AppText style={styles.advisorRowName} numberOfLines={1}>
                         {trial.name}
                       </AppText>
-                      <AppText style={styles.advisorRowMeta}>
+                      <AppText style={styles.advisorRowMeta} numberOfLines={1}>
                         Trial ends {new Date(trial.trialEndDate).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
                       </AppText>
                     </View>
@@ -179,7 +179,7 @@ export default function SavingsBottomSheet({
                       <AppText style={styles.advisorRowName} numberOfLines={1}>
                         {split.name}
                       </AppText>
-                      <AppText style={styles.advisorRowMeta}>
+                      <AppText style={styles.advisorRowMeta} numberOfLines={1}>
                         {currencySymbol}{split.fullPrice.toFixed(2)} → {currencySymbol}{split.userShare.toFixed(2)} you pay
                       </AppText>
                     </View>

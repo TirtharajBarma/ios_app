@@ -21,6 +21,8 @@ private let systemCategoryIds: Set<String> = [
   "cat_split_return",
   "cat_debt_repayment",
   "cat_income",
+  "cat_goal",
+  "cat_vault",
   "cat_cig",
 ]
 
@@ -28,37 +30,67 @@ private func isUserExpenseCategory(_ raw: [String: Any]) -> Bool {
   let id = string(raw["id"])
   let name = string(raw["name"]).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
   if systemCategoryIds.contains(id) { return false }
-  if name == "income" || name == "split received" || name == "debt repayment" || name.contains("cigarette") {
+  if name == "income"
+    || name.contains("split")
+    || name.contains("debt")
+    || name.contains("borrow")
+    || name.contains("lent")
+    || name.contains("lend")
+    || name.contains("goal")
+    || name.contains("vault")
+    || name.contains("cigarette")
+  {
     return false
   }
   return !id.isEmpty && !name.isEmpty
 }
 
 @available(iOS 16.0, *)
+private let defaultCategories: [ExpenseCategoryEntity] = [
+  ExpenseCategoryEntity(id: "cat_food", name: "Food"),
+  ExpenseCategoryEntity(id: "cat_shop", name: "Shopping"),
+  ExpenseCategoryEntity(id: "cat_trans", name: "Transport"),
+  ExpenseCategoryEntity(id: "cat_subs", name: "Subscription"),
+  ExpenseCategoryEntity(id: "cat_ent", name: "Entertainment"),
+  ExpenseCategoryEntity(id: "cat_health", name: "Health"),
+  ExpenseCategoryEntity(id: "cat_fin", name: "Finance"),
+  ExpenseCategoryEntity(id: "cat_util", name: "Utilities"),
+  ExpenseCategoryEntity(id: "cat_misc", name: "Misc"),
+]
+
+@available(iOS 16.0, *)
+private let defaultAccounts: [ExpenseAccountEntity] = [
+  ExpenseAccountEntity(id: "acc_cash", name: "Cash", kind: "cash"),
+  ExpenseAccountEntity(id: "acc_bank", name: "Bank Account", kind: "bank"),
+  ExpenseAccountEntity(id: "acc_card", name: "Credit Card", kind: "credit"),
+]
+
+@available(iOS 16.0, *)
 struct ExpenseCategoryQuery: EntityStringQuery {
 
   func entities(for identifiers: [ExpenseCategoryEntity.ID]) async throws -> [ExpenseCategoryEntity] {
     let all = (ExpenseStore.load()?.categories ?? []).filter { isUserExpenseCategory($0) }
-    return all
+    let mapped = all
       .filter { identifiers.contains(string($0["id"])) }
       .map { ExpenseCategoryEntity(id: string($0["id"]), name: string($0["name"])) }
+    return mapped.isEmpty ? defaultCategories.filter { identifiers.contains($0.id) } : mapped
   }
 
   func suggestedEntities() async throws -> [ExpenseCategoryEntity] {
-    (ExpenseStore.load()?.categories ?? [])
+    let fromStore = (ExpenseStore.load()?.categories ?? [])
       .filter { isUserExpenseCategory($0) }
       .map { ExpenseCategoryEntity(id: string($0["id"]), name: string($0["name"])) }
+    return fromStore.isEmpty ? defaultCategories : fromStore
   }
 
   func entities(matching query: String) async throws -> [ExpenseCategoryEntity] {
     let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    let filtered = (ExpenseStore.load()?.categories ?? []).filter { isUserExpenseCategory($0) }
-    guard !needle.isEmpty else {
-      return filtered.map { ExpenseCategoryEntity(id: string($0["id"]), name: string($0["name"])) }
-    }
-    return filtered
+    let fromStore = (ExpenseStore.load()?.categories ?? [])
+      .filter { isUserExpenseCategory($0) }
       .map { ExpenseCategoryEntity(id: string($0["id"]), name: string($0["name"])) }
-      .filter { $0.name.lowercased().contains(needle) }
+    let list = fromStore.isEmpty ? defaultCategories : fromStore
+    guard !needle.isEmpty else { return list }
+    return list.filter { $0.name.lowercased().contains(needle) }
   }
 }
 
@@ -82,24 +114,27 @@ struct ExpenseAccountQuery: EntityStringQuery {
 
   func entities(for identifiers: [ExpenseAccountEntity.ID]) async throws -> [ExpenseAccountEntity] {
     let all = (ExpenseStore.load()?.accounts ?? []).filter { !(($0["isArchived"] as? Bool) ?? false) }
-    return all
+    let mapped = all
       .filter { identifiers.contains(string($0["id"])) }
       .map { account(from: $0) }
+    return mapped.isEmpty ? defaultAccounts.filter { identifiers.contains($0.id) } : mapped
   }
 
   func suggestedEntities() async throws -> [ExpenseAccountEntity] {
-    (ExpenseStore.load()?.accounts ?? [])
+    let fromStore = (ExpenseStore.load()?.accounts ?? [])
       .filter { !(($0["isArchived"] as? Bool) ?? false) }
       .map { account(from: $0) }
+    return fromStore.isEmpty ? defaultAccounts : fromStore
   }
 
   func entities(matching query: String) async throws -> [ExpenseAccountEntity] {
     let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    let all = (ExpenseStore.load()?.accounts ?? [])
+    let fromStore = (ExpenseStore.load()?.accounts ?? [])
       .filter { !(($0["isArchived"] as? Bool) ?? false) }
       .map { account(from: $0) }
-    guard !needle.isEmpty else { return all }
-    return all.filter { $0.name.lowercased().contains(needle) }
+    let list = fromStore.isEmpty ? defaultAccounts : fromStore
+    guard !needle.isEmpty else { return list }
+    return list.filter { $0.name.lowercased().contains(needle) }
   }
 
   private func account(from raw: [String: Any]) -> ExpenseAccountEntity {

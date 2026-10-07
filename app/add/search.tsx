@@ -175,7 +175,7 @@ export default function AddSearchScreen() {
       />
       {/* Header bar */}
       <View style={[styles.header, { paddingTop: insets.top + spacing[12] }]}>
-        <TouchableOpacity onPress={handleClose} style={styles.closeBtn}>
+        <TouchableOpacity onPress={handleClose} style={styles.closeBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
           <X size={18} color={colors.white} />
         </TouchableOpacity>
         <AppText style={styles.headerTitle}>Add new</AppText>
@@ -191,7 +191,7 @@ export default function AddSearchScreen() {
             keyboardShouldPersistTaps="handled"
             contentContainerStyle={[
               styles.searchResultsContainer,
-              { paddingBottom: keyboardHeight + 100 },
+              { paddingBottom: (Platform.OS === "ios" ? keyboardHeight : 0) + insets.bottom + 80 },
             ]}
           >
             {filteredSearchList.length === 0 ? (
@@ -209,7 +209,7 @@ export default function AddSearchScreen() {
                       <Plus size={20} color={colors.accent} />
                     </View>
                     <View style={styles.searchResultInfo}>
-                      <AppText style={styles.searchResultName}>{"Add \""}{query}{"\""}</AppText>
+                      <AppText style={styles.searchResultName} numberOfLines={1}>{"Add \""}{query}{"\""}</AppText>
                       <AppText style={styles.searchResultCategory}>Create custom subscription from scratch</AppText>
                     </View>
                   </View>
@@ -234,7 +234,7 @@ export default function AddSearchScreen() {
                       website={service.website}
                     />
                     <View style={styles.searchResultInfo}>
-                      <AppText style={styles.searchResultName}>{service.name}</AppText>
+                      <AppText style={styles.searchResultName} numberOfLines={1}>{service.name}</AppText>
                       <AppText style={styles.searchResultCategory}>{service.category}</AppText>
                     </View>
                   </View>

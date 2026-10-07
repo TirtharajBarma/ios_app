@@ -4,6 +4,7 @@ import {
   StyleSheet,
   Modal,
   TouchableOpacity,
+  Pressable,
   TextInput,
   ScrollView,
   Switch,
@@ -45,7 +46,7 @@ import {
 import * as Haptics from 'expo-haptics';
 import { AppText, NativeLiquidMenu } from '@/components/ui';
 import type { MenuAction } from '@/components/ui';
-import { useExpenseStore, getUserCategories } from '@/store/useExpenseStore';
+import { useExpenseStore, getUserCategories, monthKeyOf } from '@/store/useExpenseStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useSubscriptionStore } from '@/store/useSubscriptionStore';
 import { createExpense } from '@/services/expense/createExpense';
@@ -288,6 +289,13 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   const [note, setNote] = useState<string>('');
   const [selectedTag, setSelectedTag] = useState<string>('');
   const [customTagInput, setCustomTagInput] = useState<string>('');
+  const [isAllocateToNextMonth, setIsAllocateToNextMonth] = useState<boolean>(false);
+
+  const currentMonthKey = useMemo(() => monthKeyOf(txDate), [txDate]);
+  const nextMonthKey = useMemo(() => {
+    const nextMonthDate = new Date(txDate.getFullYear(), txDate.getMonth() + 1, 1);
+    return monthKeyOf(nextMonthDate);
+  }, [txDate]);
 
   // Multi-Friend Split in Expense Mode
   const [isSplitEnabled, setIsSplitEnabled] = useState<boolean>(false);
@@ -395,14 +403,20 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
           setIsSplitEnabled(true);
           setYourShare(tx.split.yourShare.toString());
           if (tx.split.friends && tx.split.friends.length > 0) {
-            setSplitFriends(tx.split.friends.map(f => ({ id: f.id, name: f.name, amount: f.amount.toString() })));
+            setSplitFriends(tx.split.friends.map(f => ({ id: f.id, name: f.name, amount: (f.amount ?? 0).toString() })));
           } else {
-            setSplitFriends([{ id: `f_${Date.now()}`, name: tx.split.friendNames || '', amount: tx.split.friendsShare.toString() }]);
+            setSplitFriends([{ id: `f_${Date.now()}`, name: tx.split.friendNames || '', amount: (tx.split.friendsShare ?? 0).toString() }]);
           }
         } else {
           setIsSplitEnabled(false);
           setYourShare('');
           setSplitFriends([{ id: `f_${Date.now()}`, name: '', amount: '' }]);
+        }
+
+        if (tx.allocatedMonth) {
+          setIsAllocateToNextMonth(true);
+        } else {
+          setIsAllocateToNextMonth(false);
         }
 
         if (tx.subscriptionId || tx.categoryId === 'cat_subs') {
@@ -421,7 +435,9 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
         setGoalAllocations({});
         setSelectedFolderId('');
         setSelectedCategoryId('');
-        setTxDate(new Date());
+        const nowDate = new Date();
+        setTxDate(nowDate);
+        setIsAllocateToNextMonth(nowDate.getDate() >= 25);
         setToAccountId(initialToAccountId || '');
         setBillingCycle('monthly');
         const nextBill = new Date();
@@ -983,6 +999,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
           : 'cat_salary';
 
       const effectiveAccId = selectedAccountId || accounts[0]?.id || 'acc_primary';
+      const finalAllocatedMonth = isAllocateToNextMonth ? nextMonthKey : undefined;
 
       if (initialTransaction) {
         updateTransaction(initialTransaction.id, {
@@ -991,6 +1008,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
           categoryId: finalIncomeCatId,
           accountId: effectiveAccId,
           date: format(txDate, 'yyyy-MM-dd'),
+          allocatedMonth: finalAllocatedMonth,
           merchant: finalMerchant || undefined,
           note: finalNote || (finalMerchant ? undefined : 'Income'),
           tag: finalTag || undefined,
@@ -1002,6 +1020,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
           categoryId: finalIncomeCatId,
           accountId: effectiveAccId,
           date: format(txDate, 'yyyy-MM-dd'),
+          allocatedMonth: finalAllocatedMonth,
           merchant: finalMerchant || undefined,
           note: finalNote || (finalMerchant ? undefined : 'Income'),
           tag: finalTag || undefined,
@@ -1178,11 +1197,12 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
       visible={visible}
       animationType="slide"
       presentationStyle="pageSheet"
+      statusBarTranslucent={true}
       onRequestClose={onClose}
     >
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 0}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
         style={[styles.container, { paddingTop: androidTopPadding }]}
       >
         {/* iOS Drag Handle */}
@@ -1194,11 +1214,11 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
 
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={onClose} style={styles.closeBtn} activeOpacity={0.7}>
+          <TouchableOpacity onPress={onClose} style={styles.closeBtn} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
             <X size={18} color="#A0A5B5" />
           </TouchableOpacity>
           <AppText style={styles.headerTitle}>{initialTransaction ? 'Edit Transaction' : 'New Transaction'}</AppText>
-          <TouchableOpacity onPress={handleSave} style={styles.headerDoneBtn} activeOpacity={0.7}>
+          <TouchableOpacity onPress={handleSave} style={styles.headerDoneBtn} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
             <AppText style={styles.headerDoneText}>{initialTransaction ? 'Update' : 'Save'}</AppText>
           </TouchableOpacity>
         </View>
@@ -1208,11 +1228,12 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
           style={styles.scroll}
           contentContainerStyle={[
             styles.scrollContent,
-            { paddingBottom: Platform.OS === 'ios' ? 60 : 30 },
+            { paddingBottom: Math.max(insets.bottom, 20) + 40 },
           ]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
+          automaticallyAdjustKeyboardInsets={true}
           bounces={true}
           overScrollMode="never"
         >
@@ -1451,7 +1472,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                 style={styles.heroAmountInput}
                 placeholder="0"
                 placeholderTextColor="rgba(255, 255, 255, 0.25)"
-                keyboardType="numeric"
+                keyboardType="decimal-pad"
                 value={amount}
                 onChangeText={handleAmountChange}
                 autoFocus={false}
@@ -1749,6 +1770,34 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             </View>
           </View>
 
+          {/* ── BUDGET MONTH ALLOCATION (Income Mode) ── */}
+          {tabMode === 'income' && (
+            <View style={styles.section}>
+              <View style={styles.allocatedMonthCard}>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                    <Sparkles size={13} color={expenseColors.accentGreen} />
+                    <AppText style={styles.allocatedMonthTitle}>BUDGET CYCLE ALLOCATION</AppText>
+                  </View>
+                  <AppText style={styles.allocatedMonthSubtitle}>
+                    {isAllocateToNextMonth
+                      ? `Funds ${nextMonthKey} cash flow & leftover`
+                      : `Funds ${currentMonthKey} (current month)`}
+                  </AppText>
+                </View>
+                <Switch
+                  value={isAllocateToNextMonth}
+                  onValueChange={(val) => {
+                    Haptics.selectionAsync().catch(() => {});
+                    setIsAllocateToNextMonth(val);
+                  }}
+                  trackColor={{ false: '#2B2E3D', true: expenseColors.accentGreen }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
+            </View>
+          )}
+
           {/* ── EVENT / TRIP FOLDER SELECTOR (Only in Expense Mode, Hidden in Debt Mode) ── */}
           {tabMode === 'expense' && (
             <View style={styles.section}>
@@ -1828,7 +1877,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                       }}
                       activeOpacity={0.7}
                     >
-                      <Users size={11} color="#70D6BC" />
+                      <Users size={11} color="#A9DFBF" />
                       <AppText style={styles.smartSplitPresetText}>They Owe All</AppText>
                     </TouchableOpacity>
                     <TouchableOpacity
@@ -1852,7 +1901,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                       style={styles.splitShareInput}
                       placeholder="0"
                       placeholderTextColor="#555866"
-                      keyboardType="numeric"
+                      keyboardType="decimal-pad"
                       value={yourShare}
                       onChangeText={setYourShare}
                       onFocus={() => handleInputFocus(480)}
@@ -1886,7 +1935,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                           style={styles.splitFriendAmtInput}
                           placeholder="0"
                           placeholderTextColor="#555866"
-                          keyboardType="numeric"
+                          keyboardType="decimal-pad"
                           value={friend.amount}
                           onChangeText={(t) => {
                             const nextFriends = splitFriends.map((f) => f.id === friend.id ? { ...f, amount: t } : f);
@@ -1903,6 +1952,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                         <TouchableOpacity
                           onPress={() => handleRemoveSplitFriend(friend.id)}
                           style={styles.splitFriendRemoveBtn}
+                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                         >
                           <X size={14} color="#FF725E" />
                         </TouchableOpacity>
@@ -2024,7 +2074,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                               </AppText>
                             </View>
                           </View>
-                          <AppText style={[styles.goalAllocStatus, isAllocated && { color: '#70D6BC' }]}>
+                          <AppText style={[styles.goalAllocStatus, isAllocated && { color: '#A9DFBF' }]}>
                             {isAllocated ? 'Allocating' : 'Untouched'}
                           </AppText>
                         </TouchableOpacity>
@@ -2037,7 +2087,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                                 style={styles.goalAmountInput}
                                 placeholder="0"
                                 placeholderTextColor="#555866"
-                                keyboardType="numeric"
+                                keyboardType="decimal-pad"
                                 returnKeyType="done"
                                 onSubmitEditing={Keyboard.dismiss}
                                 value={allocatedVal}
@@ -2239,15 +2289,19 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
         <Modal
           visible={showAddPresetModal}
           transparent
+          statusBarTranslucent={true}
           animationType="fade"
           onRequestClose={() => setShowAddPresetModal(false)}
         >
-          <TouchableOpacity
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             style={styles.modalBackdrop}
-            activeOpacity={1}
-            onPress={() => setShowAddPresetModal(false)}
           >
-            <View style={styles.presetModalCard} onStartShouldSetResponder={() => true}>
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              onPress={() => setShowAddPresetModal(false)}
+            />
+            <View style={styles.presetModalCard}>
               <View style={styles.presetModalHeader}>
                 <AppText style={styles.presetModalTitle}>NEW QUICK PRESET</AppText>
                 <TouchableOpacity onPress={() => setShowAddPresetModal(false)}>
@@ -2281,7 +2335,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                     style={styles.textInput}
                     placeholder="122"
                     placeholderTextColor="#555866"
-                    keyboardType="numeric"
+                    keyboardType="decimal-pad"
                     value={newPresetAmount}
                     onChangeText={setNewPresetAmount}
                   />
@@ -2314,7 +2368,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                 <AppText style={styles.presetModalSaveBtnText}>Save Quick Preset</AppText>
               </TouchableOpacity>
             </View>
-          </TouchableOpacity>
+          </KeyboardAvoidingView>
         </Modal>
 
         {/* Transaction Date Picker Modal */}
@@ -2346,6 +2400,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
         <Modal
           visible={showNewGoalSheet}
           transparent
+          statusBarTranslucent={true}
           animationType="slide"
           onRequestClose={() => setShowNewGoalSheet(false)}
         >
@@ -2437,7 +2492,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                 />
               </View>
 
-              <View style={{ marginBottom: 16, gap: 6 }}>
+              <View style={{ marginBottom: 14, gap: 6 }}>
                 <AppText
                   style={{
                     color: '#7E8394',
@@ -2464,7 +2519,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                   }}
                   placeholder="e.g. 50000"
                   placeholderTextColor="#555866"
-                  keyboardType="numeric"
+                  keyboardType="decimal-pad"
                   value={inlineGoalTarget}
                   onChangeText={setInlineGoalTarget}
                 />
@@ -2512,6 +2567,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
         <Modal
           visible={showNewFolderModal}
           transparent
+          statusBarTranslucent={true}
           animationType="slide"
           onRequestClose={() => setShowNewFolderModal(false)}
         >
@@ -2668,6 +2724,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
         <Modal
           visible={Boolean(splitExplanationModal?.visible)}
           transparent
+          statusBarTranslucent={true}
           animationType="fade"
           onRequestClose={() => setSplitExplanationModal(null)}
         >
@@ -2685,14 +2742,14 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                     splitExplanationModal?.mode === 'all_equal'
                       ? { backgroundColor: 'rgba(255, 157, 102, 0.15)' }
                       : splitExplanationModal?.mode === 'they_owe'
-                      ? { backgroundColor: 'rgba(112, 214, 188, 0.15)' }
+                      ? { backgroundColor: 'rgba(169, 223, 191, 0.15)' }
                       : { backgroundColor: 'rgba(157, 198, 235, 0.15)' },
                   ]}
                 >
                   {splitExplanationModal?.mode === 'all_equal' ? (
                     <Zap size={20} color="#FF9D66" />
                   ) : splitExplanationModal?.mode === 'they_owe' ? (
-                    <Users size={20} color="#70D6BC" />
+                    <Users size={20} color="#A9DFBF" />
                   ) : (
                     <RefreshCw size={20} color="#9DC6EB" />
                   )}
@@ -3199,6 +3256,7 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
     fontWeight: '800',
     letterSpacing: 0.3,
+    flexShrink: 1,
   },
   dropdownTriggerSub: {
     color: '#7E8394',
@@ -3548,8 +3606,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   splitSummaryBalanced: {
-    backgroundColor: 'rgba(112, 214, 188, 0.08)',
-    borderColor: 'rgba(112, 214, 188, 0.25)',
+    backgroundColor: 'rgba(169, 223, 191, 0.08)',
+    borderColor: 'rgba(169, 223, 191, 0.25)',
   },
   splitSummaryUnder: {
     backgroundColor: 'rgba(244, 205, 137, 0.08)',
@@ -3565,13 +3623,37 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   splitSummaryTextBalanced: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
   },
   splitSummaryTextUnder: {
     color: '#F4CD89',
   },
   splitSummaryTextOver: {
     color: '#F48B8B',
+  },
+
+  allocatedMonthCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#1E2029',
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  allocatedMonthTitle: {
+    color: '#8E919D',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+  },
+  allocatedMonthSubtitle: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 2,
+    lineHeight: 16,
   },
 
   // ── Split Explanation Bottom Modal (Frosted Sheet) ──
@@ -3978,7 +4060,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.06)',
   },
   goalAllocCardActive: {
-    borderColor: 'rgba(112, 214, 188, 0.4)',
+    borderColor: 'rgba(169, 223, 191, 0.4)',
     backgroundColor: '#1E232B',
   },
   goalAllocHeaderRow: {
@@ -4002,8 +4084,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   goalCheckboxActive: {
-    backgroundColor: '#70D6BC',
-    borderColor: '#70D6BC',
+    backgroundColor: '#A9DFBF',
+    borderColor: '#A9DFBF',
   },
   goalAllocEmoji: {
     fontSize: 18,
@@ -4039,7 +4121,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.08)',
   },
   goalInputPrefix: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
     fontSize: 14,
     fontWeight: '700',
     marginRight: 6,
@@ -4090,7 +4172,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   goalSummaryValGreen: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
     fontSize: 12,
     fontWeight: '800',
   },

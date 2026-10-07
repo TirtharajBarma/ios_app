@@ -105,6 +105,30 @@ export async function checkNotificationPermissions(): Promise<boolean> {
   }
 }
 
+/**
+ * Sends an immediate local test notification to verify OS banners, sounds, and channels.
+ */
+export async function sendTestNotification(): Promise<boolean> {
+  if (!isNotificationsAvailable || !Notifications) return false;
+  try {
+    const hasPermission = await requestNotificationPermissions();
+    if (!hasPermission) return false;
+
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: "🔔 Monevo Notification Test",
+        body: "Notifications are working perfectly! You will receive daily check-ins and bill reminders on schedule.",
+        sound: true,
+      },
+      trigger: null, // deliver immediately
+    });
+    return true;
+  } catch (error) {
+    console.warn("Notifications: Failed to trigger test notification", error);
+    return false;
+  }
+}
+
 export async function scheduleDailyReminders(): Promise<void> {
   if (!isNotificationsAvailable || !Notifications) return;
   const settings = useSettingsStore.getState();

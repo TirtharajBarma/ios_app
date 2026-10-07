@@ -16,7 +16,7 @@ import {
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { AppText } from '@/components/ui';
-import { useExpenseStore } from '@/store/useExpenseStore';
+import { useExpenseStore, monthKeyOf } from '@/store/useExpenseStore';
 import { useShallow } from 'zustand/react/shallow';
 import { expenseColors } from '@/constants/expenseColors';
 import { ExpenseHeader } from './ExpenseHeader';
@@ -67,9 +67,13 @@ export const ExpenseDashboard: React.FC = () => {
   // Standard HIG tap active tab to scroll to top
   useScrollToTop(scrollRef);
 
-  // Reset scroll to top ONLY when actively switching tabs from another tab
+  // Reset scroll to top ONLY when actively switching tabs from another tab + sync month
   useFocusEffect(
     useCallback(() => {
+      const currentCalMonth = monthKeyOf(new Date());
+      if (useExpenseStore.getState().selectedMonth !== currentCalMonth) {
+        useExpenseStore.getState().setSelectedMonth(currentCalMonth);
+      }
       handleTabFocus('index', () => {
         scrollRef.current?.scrollTo({ y: 0, animated: false });
       });

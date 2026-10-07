@@ -9,7 +9,7 @@ import * as db from "@/database/database";
 import { toMonthly, toYearly, daysUntil, advanceCycle, advanceCycleDate, getSubscriptionActivePrice, getNextRenewalDate } from "@/utils/date";
 import { scheduleReminder, cancelReminder, cancelAllReminders, scheduleAllReminders } from "@/utils/notifications";
 import AsyncStorage from "@/utils/storage";
-import { getExchangeRates } from "@/utils/currency";
+import { getExchangeRates, convertCurrency } from "@/utils/currency";
 import { triggerAutoBackup } from "@/utils/backup";
 import { computeSavings, type SavingsResult } from "@/utils/savings";
 import { pushSharedSubscription, syncSharedSubscriptions } from "@/utils/sync";
@@ -109,7 +109,7 @@ function computeStats(subscriptions: Subscription[]): SubscriptionStats {
 }
 
 async function populateHistoricalTransactions(sub: Subscription): Promise<void> {
-  if (sub.isTrial) return;
+  if (sub.isTrial || sub.isPaused) return;
   const existing = await db.getTransactionsBySubscriptionId(sub.id);
   if (existing.length > 0) return;
 
@@ -277,8 +277,31 @@ function autoPostRecurringExpense(sub: Subscription, renewalDateISO: string): vo
 
     const noteBase = prevTx?.note ? prevTx.note.replace(/\s*\(Renewal\)$/i, '') : sub.name;
 
+    const appCurrency = expenseStore.currency || 'INR';
+    let finalAmount = sub.price || prevTx?.amount || 0;
+    if (sub.currency && appCurrency && sub.currency.toUpperCase() !== appCurrency.toUpperCase()) {
+      finalAmount = Math.round(convertCurrency(finalAmount, sub.currency, appCurrency) * 100) / 100;
+    }
+
+    let finalSplit = splitDetails;
+    if (splitDetails && sub.currency && appCurrency && sub.currency.toUpperCase() !== appCurrency.toUpperCase()) {
+      const convYour = Math.round(convertCurrency(splitDetails.yourShare, sub.currency, appCurrency) * 100) / 100;
+      const convFriendsShare = Math.max(0, Math.round((finalAmount - convYour) * 100) / 100);
+      const convFriends = splitDetails.friends?.map((f: any) => ({
+        ...f,
+        amount: Math.round(convertCurrency(f.amount, sub.currency, appCurrency) * 100) / 100,
+      }));
+      finalSplit = {
+        ...splitDetails,
+        totalPaid: finalAmount,
+        yourShare: convYour,
+        friendsShare: convFriendsShare,
+        friends: convFriends,
+      };
+    }
+
     expenseStore.addTransaction({
-      amount: sub.price || prevTx?.amount || 0,
+      amount: finalAmount,
       type: 'expense',
       categoryId,
       accountId,
@@ -288,14 +311,14 @@ function autoPostRecurringExpense(sub: Subscription, renewalDateISO: string): vo
       folderId: prevTx?.folderId,
       folderName: prevTx?.folderName,
       subscriptionId: sub.id,
-      split: splitDetails,
+      split: finalSplit,
     });
 
     logInfo('subscription', `Auto-posted recurring expense transaction for ${sub.name} on ${renewalDateStr}`, {
       subId: sub.id,
       date: renewalDateStr,
-      amount: sub.price,
-      isSplit: !!splitDetails,
+      amount: finalAmount,
+      isSplit: !!finalSplit,
     });
   } catch (err) {
     console.warn('Failed to auto-post recurring expense transaction:', err);
@@ -346,33 +369,44 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
           // Only auto-advance paid subscriptions; trials that have ended remain
           // at their trialEndDate — the UI layer shows them as "Expired"
           if (!sub.isTrial && sub.nextBillingDate && !sub.isPaused) {
-            const billDate = startOfDay(parseISO(sub.nextBillingDate));
-            if (billDate < today) {
+            let currentBillingDateStr = sub.nextBillingDate;
+            let billDate = startOfDay(parseISO(currentBillingDateStr));
+            let iterations = 0;
+            let updatedThisSub = false;
+
+            while (billDate <= today && iterations < 24) {
               const activePrice = getSubscriptionActivePrice(sub);
-              const renewalDateISO = sub.nextBillingDate;
+              const renewalDateISO = currentBillingDateStr;
 
               await db.createTransaction({
                 id: generateId(),
                 subscriptionId: sub.id,
                 amount: activePrice,
                 currency: sub.currency,
-                date: sub.nextBillingDate,
-              }).catch(() => {});
+                date: renewalDateISO,
+              }).catch((err) => { /* Ignore duplicate ID errors from re-runs */ });
 
               // Auto-post to Expense Ledger and trigger fresh split debt collection
               autoPostRecurringExpense(sub, renewalDateISO);
 
               const anchorDate = sub.startDate ? startOfDay(parseISO(sub.startDate)) : billDate;
-              const nextDate = getNextRenewalDate(
+              const nextDateObj = getNextRenewalDate(
                 anchorDate,
                 sub.rawBillingCycle || sub.billingCycle,
                 sub.customIntervalMonths,
-                today
-              ).toISOString();
+                billDate
+              );
               
-              await db.updateSubscription(sub.id, { nextBillingDate: nextDate });
-              sub.nextBillingDate = nextDate;
+              billDate = nextDateObj;
+              currentBillingDateStr = billDate.toISOString();
+              sub.nextBillingDate = currentBillingDateStr;
               changed = true;
+              updatedThisSub = true;
+              iterations++;
+            }
+            
+            if (updatedThisSub) {
+              await db.updateSubscription(sub.id, { nextBillingDate: sub.nextBillingDate });
             }
           }
         }
@@ -380,6 +414,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
       } catch (err) {
         await SQLiteDb.execAsync("ROLLBACK;");
         console.error("Failed to auto-advance subscriptions:", err);
+        // TODO: Surface this error to the user via a notification or in-app alert
       }
 
       if (changed) {
@@ -441,11 +476,13 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     let updatedSub: Subscription | undefined;
     let prevGroupId: string | undefined;
     let currentSubscriptions: Subscription[] = [];
+    let wasPaused = false;
     set((state) => {
       const idx = state.subscriptions.findIndex((s) => s.id === id);
       if (idx === -1) return state;
       const updated = [...state.subscriptions];
       prevGroupId = updated[idx].sharedGroupId ?? undefined;
+      wasPaused = Boolean(updated[idx].isPaused);
       updated[idx] = {
         ...updated[idx],
         ...input,
@@ -470,8 +507,8 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
         await cancelReminder(id).catch(() => {});
       }
       
-      // Log transaction and reset next billing date if resuming
-      if (input.isPaused === false) {
+      // Log transaction and reset next billing date only if resuming from paused state
+      if (wasPaused && input.isPaused === false) {
         const activePrice = getSubscriptionActivePrice(updatedSub);
         const today = new Date();
         
@@ -529,8 +566,8 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     const changes = Object.keys(input ?? {});
     logAction('subscription', `Updated subscription: ${updatedSub?.name || id}`, { id, changes, price: updatedSub?.price });
 
-    // Bidirectional sync: update matching transactions in expense store
-    if (updatedSub && (input.name !== undefined || input.price !== undefined)) {
+    // Bidirectional sync: update matching note in expense store if name changed
+    if (updatedSub && input.name !== undefined) {
       try {
         const { useExpenseStore } = require('@/store/useExpenseStore');
         const expenseStore = useExpenseStore.getState();
@@ -541,8 +578,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
               if (t.subscriptionId !== id) return t;
               return {
                 ...t,
-                note: input.name !== undefined ? input.name : t.note,
-                amount: input.price !== undefined ? input.price : t.amount,
+                note: t.note.includes('(Renewal)') ? `${input.name} (Renewal)` : (input.name || t.note),
               };
             }),
           }));

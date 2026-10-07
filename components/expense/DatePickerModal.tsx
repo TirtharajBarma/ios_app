@@ -101,6 +101,7 @@ export const DatePickerModal: React.FC<DatePickerModalProps> = ({
     <Modal
       visible={visible}
       transparent
+      statusBarTranslucent={true}
       animationType="fade"
       onRequestClose={onClose}
     >

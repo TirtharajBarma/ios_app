@@ -11,7 +11,8 @@ import Svg, { Circle, G } from 'react-native-svg';
 import { Zap } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { AppText } from '@/components/ui';
-import { useExpenseStore } from '@/store/useExpenseStore';
+import { useRouter } from 'expo-router';
+import { useExpenseStore, monthKeyToYearMonth } from '@/store/useExpenseStore';
 import { useShallow } from 'zustand/react/shallow';
 import { expenseColors } from '@/constants/expenseColors';
 import { formatCompactCurrency } from './MoneyFlowCard';
@@ -24,6 +25,7 @@ export const BudgetCard: React.FC = () => {
   const {
   monthlyBudget,
   currencySymbol,
+  selectedMonth,
   getTotalSpent,
   getRemainingBudget,
   getCategoryBreakdown,
@@ -34,6 +36,7 @@ export const BudgetCard: React.FC = () => {
   useShallow((s) => ({
     monthlyBudget: s.monthlyBudget,
     currencySymbol: s.currencySymbol,
+    selectedMonth: s.selectedMonth,
     getTotalSpent: s.getTotalSpent,
     getRemainingBudget: s.getRemainingBudget,
     getCategoryBreakdown: s.getCategoryBreakdown,
@@ -43,6 +46,7 @@ export const BudgetCard: React.FC = () => {
   }))
 );
 
+  const router = useRouter();
   const sym = currencySymbol || '₹';
 
   const [selectedCatId, setSelectedCatId] = useState<string | null>(null);
@@ -54,10 +58,7 @@ export const BudgetCard: React.FC = () => {
   const chartProgress = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // Initial chart sweep draw animation, once per mount. Not gated on a store
-    // flag — the persisted flag this used to read could be rewound by
-    // `persist.rehydrate()` or the iOS App Intent, leaving the chart stuck
-    // part-drawn.
+    // Initial chart sweep draw animation, once per mount.
     chartProgress.setValue(0);
     const listenerId = chartProgress.addListener(({ value }) => {
       setSweepProgress(value);
@@ -98,8 +99,15 @@ export const BudgetCard: React.FC = () => {
     ]).start();
   }, [selectedCatId]);
 
+  // Derive Effective Budget: if monthlyBudget > 0, use it.
+  // If monthlyBudget === 0 but user configured category budgets, use their sum!
+  const totalAllocatedCategoryBudget = Object.values(categoryBudgets || {}).reduce(
+    (sum, val) => sum + (val > 0 ? val : 0),
+    0
+  );
+  const effectiveBudget = monthlyBudget > 0 ? monthlyBudget : totalAllocatedCategoryBudget;
+
   const totalSpent = getTotalSpent();
-  const remainingBudget = getRemainingBudget();
   const breakdown = getCategoryBreakdown();
 
   // Scaled donut chart dimensions to match reference proportions
@@ -114,10 +122,18 @@ export const BudgetCard: React.FC = () => {
   const innerStrokeWidth = 4;
   const innerCircumference = 2 * Math.PI * innerRadius;
 
-  // Active categories with spending, dynamically sorted descending by spending amount (highest to lowest)
+  // Active categories: either have spending > 0 OR have an active budget > 0 configured
   const activeBreakdown = breakdown
-    .filter((item) => item.amount > 0)
-    .sort((a, b) => b.amount - a.amount);
+    .filter((item) => {
+      const catBudget = categoryBudgets[item.category.id] || 0;
+      return item.amount > 0 || catBudget > 0;
+    })
+    .sort((a, b) => {
+      if (b.amount !== a.amount) return b.amount - a.amount;
+      const bBudget = categoryBudgets[b.category.id] || 0;
+      const aBudget = categoryBudgets[a.category.id] || 0;
+      return bBudget - aBudget;
+    });
   const totalCategoriesSpent = activeBreakdown.reduce((sum, item) => sum + item.amount, 0);
 
   // Selected category info
@@ -125,20 +141,22 @@ export const BudgetCard: React.FC = () => {
     ? activeBreakdown.find((item) => item.category.id === selectedCatId) || null
     : null;
 
-  // Calculate arc offsets for category segments
+  // Calculate arc offsets for category segments (only for categories with actual spending > 0)
   let cumulativeOffset = 0;
-  const segments = activeBreakdown.map((item) => {
-    const percentage = totalCategoriesSpent > 0 ? item.amount / totalCategoriesSpent : 0;
-    const strokeDashlength = percentage * circumference;
-    const offset = cumulativeOffset;
-    cumulativeOffset += strokeDashlength;
-    return {
-      ...item,
-      strokeDashlength,
-      offset,
-      percentage,
-    };
-  });
+  const segments = activeBreakdown
+    .filter((item) => item.amount > 0)
+    .map((item) => {
+      const percentage = totalCategoriesSpent > 0 ? item.amount / totalCategoriesSpent : 0;
+      const strokeDashlength = percentage * circumference;
+      const offset = cumulativeOffset;
+      cumulativeOffset += strokeDashlength;
+      return {
+        ...item,
+        strokeDashlength,
+        offset,
+        percentage,
+      };
+    });
 
   // Accurate Polar Angle Touch Handler
   const handleChartTouch = (evt: GestureResponderEvent) => {
@@ -147,17 +165,20 @@ export const BudgetCard: React.FC = () => {
     const dy = locationY - center;
     const distance = Math.sqrt(dx * dx + dy * dy);
 
-    // If tapped inside inner circle or on center text, reset selection if active
-    if (distance <= innerRadius + 8) {
+    // If tapped inside inner circle or on center text
+    if (distance <= innerRadius - 2) {
       if (selectedCatId !== null) {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
         setSelectedCatId(null);
+      } else if (effectiveBudget <= 0) {
+        Haptics.selectionAsync().catch(() => {});
+        router.push('/settings/budget');
       }
       return;
     }
 
     // If outside donut ring bounds, ignore
-    if (distance < innerRadius - 4 || distance > radius + strokeWidth / 2 + 16) {
+    if (distance < innerRadius - 2 || distance > radius + strokeWidth / 2 + 16) {
       return;
     }
 
@@ -195,20 +216,21 @@ export const BudgetCard: React.FC = () => {
   };
 
   // ─────────────────────────────────────────────────────────
-  // 1. INNER THIN GREEN PROGRESS RING (ALWAYS OVERALL BUDGET)
+  // 1. INNER THIN GREEN PROGRESS RING (TRACKS EFFECTIVE BUDGET)
   // ─────────────────────────────────────────────────────────
-  const overallBudgetRatio = monthlyBudget > 0 ? Math.min(totalSpent / monthlyBudget, 1) : 0;
+  const overallBudgetRatio = effectiveBudget > 0 ? Math.min(totalSpent / effectiveBudget, 1) : 0;
   const overallBudgetDash = overallBudgetRatio * innerCircumference;
 
   // ─────────────────────────────────────────────────────────
   // 2. CENTER CONTENT DISPLAY
   // ─────────────────────────────────────────────────────────
   let centerTitle = 'LEFT TO SPEND';
-  let centerAmount = formatCompactCurrency(remainingBudget, sym);
-  let centerFootnote = `${formatCompactCurrency(totalSpent, sym)} of ${formatCompactCurrency(monthlyBudget, sym)} used`;
+  let centerAmount = formatCompactCurrency(Math.max(0, effectiveBudget - totalSpent), sym);
+  let centerFootnote = `${formatCompactCurrency(totalSpent, sym)} of ${formatCompactCurrency(effectiveBudget, sym)} used`;
+  let isCenterOverBudget = false;
 
   const hasFixedBudget = selectedCategoryItem && categoryBudgets[selectedCategoryItem.category.id] !== undefined;
-  const catBudget = selectedCategoryItem && hasFixedBudget ? categoryBudgets[selectedCategoryItem.category.id] : 0;
+  const catBudget = selectedCategoryItem && hasFixedBudget ? (categoryBudgets[selectedCategoryItem.category.id] || 0) : 0;
   const catSpent = selectedCategoryItem ? selectedCategoryItem.amount : 0;
 
   if (selectedCategoryItem) {
@@ -216,20 +238,48 @@ export const BudgetCard: React.FC = () => {
     centerTitle = catName;
 
     if (hasFixedBudget && catBudget > 0) {
-      const catRemaining = Math.max(catBudget - catSpent, 0);
-      centerAmount = formatCompactCurrency(catRemaining, sym);
-      centerFootnote = `${formatCompactCurrency(catSpent, sym)} of ${formatCompactCurrency(catBudget, sym)} used`;
+      const isCatOver = catSpent > catBudget;
+      if (isCatOver) {
+        centerAmount = `+${formatCompactCurrency(catSpent - catBudget, sym)}`;
+        centerFootnote = `Over ${formatCompactCurrency(catBudget, sym)} limit`;
+        isCenterOverBudget = true;
+      } else {
+        centerAmount = formatCompactCurrency(catBudget - catSpent, sym);
+        centerFootnote = `${formatCompactCurrency(catSpent, sym)} of ${formatCompactCurrency(catBudget, sym)} used`;
+      }
     } else {
       centerAmount = formatCompactCurrency(catSpent, sym);
-      centerFootnote = 'Total spent';
+      centerFootnote = 'No limit set';
+    }
+  } else {
+    // Unselected state
+    if (effectiveBudget > 0) {
+      const isOverallOver = totalSpent > effectiveBudget;
+      if (isOverallOver) {
+        centerTitle = 'OVER BUDGET';
+        centerAmount = `+${formatCompactCurrency(totalSpent - effectiveBudget, sym)}`;
+        centerFootnote = `${formatCompactCurrency(totalSpent, sym)} spent of ${formatCompactCurrency(effectiveBudget, sym)} limit`;
+        isCenterOverBudget = true;
+      } else {
+        centerTitle = 'LEFT TO SPEND';
+        centerAmount = formatCompactCurrency(effectiveBudget - totalSpent, sym);
+        centerFootnote = `${formatCompactCurrency(totalSpent, sym)} of ${formatCompactCurrency(effectiveBudget, sym)} used`;
+      }
+    } else {
+      centerTitle = 'TOTAL SPENT';
+      centerAmount = formatCompactCurrency(totalSpent, sym);
+      centerFootnote = 'No budget set • Tap to set';
     }
   }
 
   // Dynamic Daily Safe Pace & Adaptive Split Burnout Forecasting
   const now = new Date();
-  const currentDay = now.getDate();
-  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  const daysRemaining = Math.max(1, daysInMonth - currentDay + 1);
+  const { year: selYear, month: selMonth } = monthKeyToYearMonth(selectedMonth);
+  const isCurrentMonth = selYear === now.getFullYear() && selMonth === now.getMonth();
+  const isPastMonth = selYear < now.getFullYear() || (selYear === now.getFullYear() && selMonth < now.getMonth());
+  const daysInMonth = new Date(selYear, selMonth + 1, 0).getDate();
+  const currentDay = isCurrentMonth ? now.getDate() : isPastMonth ? daysInMonth : 0;
+  const daysRemaining = isCurrentMonth ? Math.max(1, daysInMonth - currentDay + 1) : isPastMonth ? 0 : daysInMonth;
 
   // Helper to identify fixed non-discretionary commitments (Rent, Utilities, Subscriptions, EMIs)
   const isFixedCommitment = (cat: { id: string; name: string }) => {
@@ -258,20 +308,23 @@ export const BudgetCard: React.FC = () => {
 
   const variableSpent = Math.max(0, totalSpent - fixedSpent);
   const variableDailyBurn = currentDay > 0 ? Math.round(variableSpent / currentDay) : 0;
-  const safeDailyPace = monthlyBudget > 0 ? Math.max(0, Math.round(remainingBudget / daysRemaining)) : 0;
+  const budgetRunway = Math.max(0, effectiveBudget - totalSpent);
+  const safeDailyPace = effectiveBudget > 0 && daysRemaining > 0 ? Math.max(0, Math.round(budgetRunway / daysRemaining)) : 0;
 
-  // Over-pacing is strictly based on variable burn rate, preventing Day 1 Rent from triggering false alarms
+  // Over-pacing is strictly based on variable burn rate, requiring at least 3 days elapsed to avoid Day 1 false alarms
   const isOverPacing =
-    monthlyBudget > 0 &&
+    isCurrentMonth &&
+    currentDay >= 3 &&
+    effectiveBudget > 0 &&
     variableSpent > 0 &&
     variableDailyBurn > safeDailyPace * 1.15 &&
-    remainingBudget > 0;
+    budgetRunway > 0;
 
-  const isExceeded = monthlyBudget > 0 && totalSpent >= monthlyBudget;
+  const isExceeded = effectiveBudget > 0 && totalSpent >= effectiveBudget;
 
   const projectedBurnoutDay =
-    variableDailyBurn > 0 && remainingBudget > 0
-      ? Math.min(daysInMonth, Math.round(currentDay + remainingBudget / variableDailyBurn))
+    variableDailyBurn > 0 && budgetRunway > 0
+      ? Math.min(daysInMonth, Math.round(currentDay + budgetRunway / variableDailyBurn))
       : daysInMonth;
 
   // Split active categories into left and right columns for the legend (highest to lowest spend)
@@ -327,7 +380,7 @@ export const BudgetCard: React.FC = () => {
                   opacity={segmentOpacity}
                   strokeWidth={segStrokeWidth}
                   fill="transparent"
-                  strokeDasharray={`${visibleDashLength} ${segCircumference - visibleDashLength}`}
+                  strokeDasharray={`${visibleDashLength} ${Math.max(0, segCircumference - visibleDashLength)}`}
                   strokeDashoffset={-segOffset}
                   strokeLinecap="butt"
                 />
@@ -351,7 +404,7 @@ export const BudgetCard: React.FC = () => {
                 stroke={expenseColors.accentGreen}
                 strokeWidth={innerStrokeWidth}
                 fill="transparent"
-                strokeDasharray={`${overallBudgetDash * sweepProgress} ${innerCircumference - (overallBudgetDash * sweepProgress)}`}
+                strokeDasharray={`${overallBudgetDash * sweepProgress} ${Math.max(0, innerCircumference - (overallBudgetDash * sweepProgress))}`}
                 strokeDashoffset={0}
                 strokeLinecap="round"
               />
@@ -370,204 +423,215 @@ export const BudgetCard: React.FC = () => {
           ]}
           pointerEvents="none"
         >
-          <AppText style={styles.centerBudgetLabel} numberOfLines={1}>
+          <AppText
+            style={styles.centerBudgetLabel}
+            numberOfLines={1}
+            adjustsFontSizeToFit={true}
+            minimumFontScale={0.7}
+          >
             {centerTitle}
           </AppText>
-          <AppText style={styles.centerMainAmount} numberOfLines={1}>
+          <AppText
+            style={[
+              styles.centerMainAmount,
+              isCenterOverBudget && styles.centerMainAmountOver,
+            ]}
+            numberOfLines={1}
+            adjustsFontSizeToFit={true}
+            minimumFontScale={0.55}
+          >
             {centerAmount}
           </AppText>
-          <AppText style={styles.centerSubText} numberOfLines={1}>
-            {centerFootnote}
-          </AppText>
+          {effectiveBudget <= 0 && !selectedCategoryItem ? (
+            <View style={styles.noBudgetFootnoteContainer}>
+              <AppText style={styles.centerSubText}>No budget set</AppText>
+              <AppText style={styles.centerTapToSetText}>Tap to set</AppText>
+            </View>
+          ) : (
+            <AppText
+              style={styles.centerSubText}
+              numberOfLines={1}
+              adjustsFontSizeToFit={true}
+              minimumFontScale={0.7}
+            >
+              {centerFootnote}
+            </AppText>
+          )}
         </Animated.View>
       </View>
 
-      {/* Dynamic Bottom Area */}
-      {selectedCategoryItem ? (
-        // Selected Category Detail Card (Smooth Animated)
-        <Animated.View
-          style={[
-            styles.selectedDetailWrapper,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }],
-            },
-          ]}
-        >
-          <TouchableOpacity
-            style={styles.selectedDetailCard}
-            activeOpacity={0.8}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-              setSelectedCatId(null);
-            }}
-          >
-            <View style={styles.selectedLeft}>
-              <View
-                style={[
-                  styles.selectedDot,
-                  { backgroundColor: selectedCategoryItem.category.color },
-                ]}
-              />
-              <View style={styles.selectedTextGroup}>
-                <AppText style={styles.selectedName}>
-                  {selectedCategoryItem.category.name}
-                </AppText>
-                {hasFixedBudget && catBudget > 0 ? (
-                  <AppText style={styles.selectedSpentLine}>
-                    <AppText style={styles.selectedSpentAmount}>
-                      {sym}{catSpent.toLocaleString('en-IN')}
-                    </AppText>
-                    <AppText style={styles.selectedBudgetTotal}>
-                      {` of ${sym}${catBudget.toLocaleString('en-IN')}`}
-                    </AppText>
-                  </AppText>
-                ) : (
-                  <AppText style={styles.selectedSpentLine}>
-                    <AppText style={styles.selectedSpentAmount}>
-                      {sym}{catSpent.toLocaleString('en-IN')}
-                    </AppText>
-                    <AppText style={styles.selectedBudgetTotal}>
-                      {' spent'}
-                    </AppText>
-                  </AppText>
-                )}
-              </View>
-            </View>
-
-            <View style={styles.selectedRight}>
-              {hasFixedBudget && catBudget > 0 ? (
-                <>
-                  <AppText style={styles.selectedRemainingValue}>
-                    {formatCompactCurrency(Math.max(catBudget - catSpent, 0), sym)}
-                  </AppText>
-                  <AppText style={styles.selectedRemainingLabel}>left</AppText>
-                </>
-              ) : (
-                <>
-                  <AppText style={styles.selectedUnbudgetedValue}>
-                    unbudgeted
-                  </AppText>
-                  <AppText style={styles.selectedRemainingLabel}>no limit</AppText>
-                </>
-              )}
-            </View>
-          </TouchableOpacity>
-        </Animated.View>
-      ) : sortedLeft.length === 0 && sortedRight.length === 0 ? (
+      {/* 2-Column Legend for all active categories */}
+      {sortedLeft.length === 0 && sortedRight.length === 0 ? (
         <View style={styles.emptyLegendNotice}>
           <AppText style={styles.emptyLegendText}>
             No expenses logged yet • Tap + to record your first transaction
           </AppText>
         </View>
       ) : (
-        // 2-Column Legend for all active categories
         <View style={styles.legendContainer}>
           {/* Left Column */}
           <View style={styles.legendColumn}>
-            {sortedLeft.map((item) => (
-              <TouchableOpacity
-                key={item.category.id}
-                style={styles.legendRow}
-                activeOpacity={0.7}
-                onPress={() => handleSelectCategory(item.category.id)}
-              >
-                <View style={styles.legendLeft}>
-                  <View
+            {sortedLeft.map((item) => {
+              const isSelected = selectedCatId === item.category.id;
+              const hasSelection = selectedCatId !== null;
+              const itemOpacity = hasSelection ? (isSelected ? 1.0 : 0.35) : 1.0;
+
+              return (
+                <TouchableOpacity
+                  key={item.category.id}
+                  style={[
+                    styles.legendRow,
+                    isSelected && styles.legendRowSelected,
+                    { opacity: itemOpacity },
+                  ]}
+                  activeOpacity={0.7}
+                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                  onPress={() => handleSelectCategory(item.category.id)}
+                >
+                  <View style={styles.legendLeft}>
+                    <View
+                      style={[
+                        styles.legendDot,
+                        { backgroundColor: item.category.color },
+                        isSelected && styles.legendDotSelected,
+                      ]}
+                    />
+                    <AppText
+                      style={[
+                        styles.legendCategoryName,
+                        isSelected && styles.legendCategoryNameSelected,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {item.category.name}
+                    </AppText>
+                  </View>
+                  <AppText
                     style={[
-                      styles.legendDot,
-                      { backgroundColor: item.category.color },
+                      styles.legendAmount,
+                      isSelected && styles.legendAmountSelected,
                     ]}
-                  />
-                  <AppText style={styles.legendCategoryName} numberOfLines={1}>
-                    {item.category.name}
+                  >
+                    {formatBudgetLegendAmount(item.amount, sym)}
                   </AppText>
-                </View>
-                <AppText style={styles.legendAmount}>
-                  {formatBudgetLegendAmount(item.amount, sym)}
-                </AppText>
-              </TouchableOpacity>
-            ))}
+                </TouchableOpacity>
+              );
+            })}
           </View>
 
           {/* Right Column */}
           <View style={styles.legendColumn}>
-            {sortedRight.map((item) => (
-              <TouchableOpacity
-                key={item.category.id}
-                style={styles.legendRow}
-                activeOpacity={0.7}
-                onPress={() => handleSelectCategory(item.category.id)}
-              >
-                <View style={styles.legendLeft}>
-                  <View
+            {sortedRight.map((item) => {
+              const isSelected = selectedCatId === item.category.id;
+              const hasSelection = selectedCatId !== null;
+              const itemOpacity = hasSelection ? (isSelected ? 1.0 : 0.35) : 1.0;
+
+              return (
+                <TouchableOpacity
+                  key={item.category.id}
+                  style={[
+                    styles.legendRow,
+                    isSelected && styles.legendRowSelected,
+                    { opacity: itemOpacity },
+                  ]}
+                  activeOpacity={0.7}
+                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                  onPress={() => handleSelectCategory(item.category.id)}
+                >
+                  <View style={styles.legendLeft}>
+                    <View
+                      style={[
+                        styles.legendDot,
+                        { backgroundColor: item.category.color },
+                        isSelected && styles.legendDotSelected,
+                      ]}
+                    />
+                    <AppText
+                      style={[
+                        styles.legendCategoryName,
+                        isSelected && styles.legendCategoryNameSelected,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {item.category.name}
+                    </AppText>
+                  </View>
+                  <AppText
                     style={[
-                      styles.legendDot,
-                      { backgroundColor: item.category.color },
+                      styles.legendAmount,
+                      isSelected && styles.legendAmountSelected,
                     ]}
-                  />
-                  <AppText style={styles.legendCategoryName} numberOfLines={1}>
-                    {item.category.name}
+                  >
+                    {formatBudgetLegendAmount(item.amount, sym)}
                   </AppText>
-                </View>
-                <AppText style={styles.legendAmount}>
-                  {formatBudgetLegendAmount(item.amount, sym)}
-                </AppText>
-              </TouchableOpacity>
-            ))}
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </View>
       )}
 
       {/* Seamless Daily Safe Allowance Pacing Footer */}
-      {monthlyBudget > 0 && !selectedCategoryItem && (
+      {effectiveBudget > 0 && (
         <View style={styles.pacingFooter}>
-          <View style={styles.pacingFooterLeft}>
-            <Zap
-              size={12}
-              color={
-                isExceeded
-                  ? '#FF6B6B'
-                  : isOverPacing
-                  ? '#FF9D66'
-                  : expenseColors.accentGreen
-              }
-            />
-            <AppText style={styles.pacingValueText}>
-              {sym}{safeDailyPace.toLocaleString('en-IN')}/day
-            </AppText>
-            <AppText style={styles.pacingLabelText}>daily limit</AppText>
-          </View>
+          {isPastMonth ? (
+            <View style={styles.pacingFooterPast}>
+              <AppText style={styles.pacingPastText}>
+                {totalSpent > effectiveBudget
+                  ? `Limit exceeded by ${sym}${(totalSpent - effectiveBudget).toLocaleString('en-IN')}`
+                  : `Ended within budget • ${sym}${(effectiveBudget - totalSpent).toLocaleString('en-IN')} saved`}
+              </AppText>
+            </View>
+          ) : (
+            <>
+              <View style={styles.pacingFooterLeft}>
+                <Zap
+                  size={12}
+                  color={
+                    isExceeded
+                      ? '#FF6B6B'
+                      : isOverPacing
+                      ? '#FF9D66'
+                      : expenseColors.accentGreen
+                  }
+                />
+                <AppText style={styles.pacingValueText}>
+                  {sym}{safeDailyPace.toLocaleString('en-IN')}/day
+                </AppText>
+                <AppText style={styles.pacingLabelText}>daily limit</AppText>
+              </View>
 
-          <View
-            style={[
-              styles.pacingStatusPill,
-              isExceeded
-                ? styles.pacingPillExceeded
-                : isOverPacing
-                ? styles.pacingPillWarning
-                : styles.pacingPillGood,
-            ]}
-          >
-            <AppText
-              style={[
-                styles.pacingStatusText,
-                isExceeded
-                  ? styles.pacingTextExceeded
-                  : isOverPacing
-                  ? styles.pacingTextWarning
-                  : styles.pacingTextGood,
-              ]}
-            >
-              {isExceeded
-                ? 'Limit Exceeded'
-                : isOverPacing
-                ? `Burnout ~Day ${projectedBurnoutDay}`
-                : fixedSpent > 0 && variableSpent === 0
-                ? `Bills Paid • ${daysRemaining}d left`
-                : `${daysRemaining} days left`}
-            </AppText>
-          </View>
+              <View
+                style={[
+                  styles.pacingStatusPill,
+                  isExceeded
+                    ? styles.pacingPillExceeded
+                    : isOverPacing
+                    ? styles.pacingPillWarning
+                    : styles.pacingPillGood,
+                ]}
+              >
+                <AppText
+                  style={[
+                    styles.pacingStatusText,
+                    isExceeded
+                      ? styles.pacingTextExceeded
+                      : isOverPacing
+                      ? styles.pacingTextWarning
+                      : styles.pacingTextGood,
+                  ]}
+                >
+                  {isExceeded
+                    ? 'Limit Exceeded'
+                    : isOverPacing
+                    ? `Burnout ~Day ${projectedBurnoutDay}`
+                    : fixedSpent > 0 && variableSpent === 0
+                    ? `Bills Paid • ${daysRemaining}d left`
+                    : `${daysRemaining} days left`}
+                </AppText>
+              </View>
+            </>
+          )}
         </View>
       )}
     </View>
@@ -602,13 +666,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
-    marginBottom: 16,
+    marginBottom: 8,
   },
   centerOverlay: {
     position: 'absolute',
     alignItems: 'center',
     justifyContent: 'center',
-    width: 140,
+    width: 144,
+    maxWidth: 144,
+    paddingHorizontal: 4,
     gap: 2,
   },
   centerBudgetLabel: {
@@ -616,135 +682,101 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 14,
     fontWeight: '700',
-    letterSpacing: 0.8,
+    letterSpacing: 0.6,
     textAlign: 'center',
     textTransform: 'uppercase',
+    maxWidth: 136,
   },
   centerMainAmount: {
     color: '#FFFFFF',
-    fontSize: 34,
-    lineHeight: 38,
-    fontWeight: '800',
+    fontSize: 32,
+    lineHeight: 36,
+    fontWeight: '400',
     letterSpacing: -0.5,
     textAlign: 'center',
+    maxWidth: 136,
+  },
+  centerMainAmountOver: {
+    color: '#F48B8B',
   },
   centerSubText: {
     color: '#8E919D',
-    fontSize: 12,
-    lineHeight: 15,
+    fontSize: 11,
+    lineHeight: 14,
     fontWeight: '600',
     textAlign: 'center',
+    maxWidth: 136,
   },
   legendContainer: {
     flexDirection: 'row',
     width: '100%',
     justifyContent: 'space-between',
-    gap: 16,
-    paddingHorizontal: 4,
+    gap: 12,
+    paddingHorizontal: 2,
   },
   legendColumn: {
     flex: 1,
-    gap: 3,
+    gap: 1,
   },
   legendRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 2,
+    paddingVertical: 2.5,
+    paddingHorizontal: 6,
+    borderRadius: 8,
+  },
+  legendRowSelected: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
   },
   legendLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
+    gap: 6,
     flex: 1,
+    minWidth: 0,
   },
   legendDot: {
     width: 7,
     height: 7,
     borderRadius: 3.5,
   },
+  legendDotSelected: {
+    transform: [{ scale: 1.25 }],
+  },
   legendCategoryName: {
     color: '#8E919D',
     fontSize: 12,
-    lineHeight: 16,
+    lineHeight: 15,
     fontWeight: '500',
     flex: 1,
+  },
+  legendCategoryNameSelected: {
+    color: '#FFFFFF',
+    fontWeight: '600',
   },
   legendAmount: {
     color: '#A0A5B5',
     fontSize: 12,
-    lineHeight: 16,
+    lineHeight: 15,
     fontWeight: '700',
   },
-  selectedDetailWrapper: {
-    width: '100%',
-    paddingHorizontal: 4,
-  },
-  selectedDetailCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    width: '100%',
-    backgroundColor: '#232633',
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  selectedLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    flex: 1,
-  },
-  selectedDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  selectedTextGroup: {
-    gap: 2,
-  },
-  selectedName: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    lineHeight: 18,
-    fontWeight: '700',
-  },
-  selectedSpentLine: {
-    fontSize: 12,
-    lineHeight: 16,
-  },
-  selectedSpentAmount: {
+  legendAmountSelected: {
     color: '#FFFFFF',
     fontWeight: '700',
   },
-  selectedBudgetTotal: {
-    color: '#8E919D',
-    fontWeight: '500',
-  },
-  selectedRight: {
-    alignItems: 'flex-end',
+  noBudgetFootnoteContainer: {
+    alignItems: 'center',
     justifyContent: 'center',
+    marginTop: 1,
   },
-  selectedRemainingValue: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    lineHeight: 20,
-    fontWeight: '800',
-  },
-  selectedUnbudgetedValue: {
-    color: '#8E919D',
-    fontSize: 13,
-    lineHeight: 16,
-    fontWeight: '600',
-  },
-  selectedRemainingLabel: {
-    color: '#8E919D',
+  centerTapToSetText: {
+    color: expenseColors.accentPeach,
     fontSize: 11,
     lineHeight: 14,
-    fontWeight: '500',
+    fontWeight: '600',
+    letterSpacing: 0.2,
+    marginTop: 1,
   },
   emptyLegendNotice: {
     paddingVertical: 16,
@@ -818,5 +850,15 @@ const styles = StyleSheet.create({
   },
   pacingTextExceeded: {
     color: '#FF6B6B',
+  },
+  pacingFooterPast: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pacingPastText: {
+    color: '#8E919D',
+    fontSize: 11,
+    fontWeight: '600',
   },
 });

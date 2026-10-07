@@ -67,6 +67,7 @@ const HeroHeader = forwardRef<View, HeroHeaderProps>(function HeroHeader(
               variant="largeTitle"
               weight="700"
               color={colors.white}
+              numberOfLines={1}
             >
               {title}
             </AppText>
@@ -75,6 +76,7 @@ const HeroHeader = forwardRef<View, HeroHeaderProps>(function HeroHeader(
                 variant="subheadline"
                 color={colors.white}
                 style={{ opacity: 0.8, marginTop: spacing[4] }}
+                numberOfLines={2}
               >
                 {subtitle}
               </AppText>

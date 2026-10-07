@@ -48,9 +48,9 @@ export const AccountIcon: React.FC<AccountIconProps> = ({
     : isWallet
     ? {
         sfName: 'wallet.pass.fill' as SFSymbol,
-        tint: '#70D6BC',
+        tint: '#A9DFBF',
         bg: '#132822',
-        border: 'rgba(112, 214, 188, 0.18)',
+        border: 'rgba(169, 223, 191, 0.18)',
         LucideIcon: LucideWallet,
       }
     : {

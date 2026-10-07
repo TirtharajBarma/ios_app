@@ -90,7 +90,7 @@ export const MoneyFlowCard: React.FC = () => {
   const streakDays = useMemo(() => {
     const now = new Date();
     const currentDay = now.getDate();
-    if (currentDay <= 1) return 1;
+    if (currentDay < 1) return 0;
 
     const dailySpendMap: Record<number, number> = {};
     for (let d = 1; d <= currentDay; d++) {
@@ -112,6 +112,7 @@ export const MoneyFlowCard: React.FC = () => {
       });
 
     let streak = 0;
+    if (averageDailyLimit <= 0) return 0;
     for (let day = currentDay; day >= 1; day--) {
       const daySpend = dailySpendMap[day] || 0;
       if (daySpend <= averageDailyLimit * 1.25) {
@@ -159,7 +160,9 @@ export const MoneyFlowCard: React.FC = () => {
             </View>
             <AppText style={styles.tileLabel}>SPENT</AppText>
           </View>
-          <AppText style={styles.tileAmount}>{sym}{totalSpent.toLocaleString('en-IN')}</AppText>
+          <AppText style={styles.tileAmount} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+            {sym}{totalSpent.toLocaleString('en-IN')}
+          </AppText>
           <AppText style={styles.tileSub}>Total Outflow</AppText>
         </View>
 
@@ -171,7 +174,7 @@ export const MoneyFlowCard: React.FC = () => {
             </View>
             <AppText style={styles.tileLabel}>INCOME</AppText>
           </View>
-          <AppText style={styles.tileAmount}>
+          <AppText style={styles.tileAmount} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
             {sym}{totalIncome.toLocaleString('en-IN')}
           </AppText>
           <AppText style={styles.tileSub} numberOfLines={1}>
@@ -213,6 +216,7 @@ export const MoneyFlowCard: React.FC = () => {
       <Modal
         visible={showStreakModal}
         transparent
+        statusBarTranslucent={true}
         animationType="fade"
         onRequestClose={() => setShowStreakModal(false)}
       >
@@ -385,8 +389,8 @@ const styles = StyleSheet.create({
   tileAmount: {
     color: '#FFFFFF',
     fontSize: 22,
-    fontWeight: '800',
-    lineHeight: 26,
+    fontWeight: '500',
+    letterSpacing: -0.3,
     marginBottom: 4,
   },
   tileSub: {
@@ -451,7 +455,7 @@ const styles = StyleSheet.create({
   },
   footerAmount: {
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   ratePill: {
     paddingHorizontal: 8,

@@ -184,7 +184,7 @@ const SegmentButton = memo(function SegmentButton({
       accessibilityRole="button"
       accessibilityState={{ selected: isActive }}
     >
-      <Animated.Text style={[{ fontSize: 15 }, textStyle]}>
+      <Animated.Text style={[{ fontSize: 15 }, textStyle]} numberOfLines={1}>
         {label}
       </Animated.Text>
     </Pressable>

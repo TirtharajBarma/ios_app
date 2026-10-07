@@ -261,6 +261,27 @@ export default function AccountDetailScreen() {
     return 'Savings Account';
   };
 
+  if (!account) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: 24 }]}>
+        <StatusBar barStyle="light-content" backgroundColor="#101114" />
+        <AppText style={{ fontSize: 18, fontWeight: '700', color: '#FFFFFF', marginBottom: 8 }}>
+          Account Not Found
+        </AppText>
+        <AppText style={{ fontSize: 14, color: '#8E8E93', textAlign: 'center', marginBottom: 24 }}>
+          This account may have been deleted or does not exist.
+        </AppText>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => router.back()}
+          activeOpacity={0.8}
+        >
+          <AppText style={{ color: '#0A84FF', fontSize: 16, fontWeight: '600' }}>Go Back</AppText>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#101114" />
@@ -270,6 +291,7 @@ export default function AccountDetailScreen() {
         <TouchableOpacity
           style={styles.backBtn}
           activeOpacity={0.7}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           onPress={() => {
             Haptics.selectionAsync().catch(() => {});
             router.back();
@@ -285,6 +307,7 @@ export default function AccountDetailScreen() {
         <TouchableOpacity
           style={styles.editHeaderBtn}
           activeOpacity={0.7}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           onPress={() => {
             Haptics.selectionAsync().catch(() => {});
             setShowEditModal(true);
@@ -306,7 +329,7 @@ export default function AccountDetailScreen() {
               <AccountIcon name={account?.name} type={account?.type || 'savings'} size={24} containerSize={50} borderRadius={16} />
             </View>
             <View style={styles.heroInfoCol}>
-              <AppText style={styles.heroAccountName}>{account?.name || 'Account'}</AppText>
+              <AppText style={styles.heroAccountName} numberOfLines={1}>{account?.name || 'Account'}</AppText>
               <AppText style={styles.heroAccountType}>{getAccountTypeLabel(account?.type)}</AppText>
             </View>
             {dueStatus?.hasDueInfo && (
@@ -449,10 +472,10 @@ export default function AccountDetailScreen() {
                       amountColor = expenseColors.accentGreen;
                     } else if (isTransfer) {
                       amountPrefix = isFromAccount ? '-' : '+';
-                      amountColor = isFromAccount ? '#FF9D66' : '#70D6BC';
+                      amountColor = isFromAccount ? '#FF9D66' : expenseColors.accentGreen;
                     } else if (isDebt) {
                       amountPrefix = tx.type === 'debt_lend' ? '-' : '+';
-                      amountColor = tx.type === 'debt_lend' ? '#F48B8B' : '#70D6BC';
+                      amountColor = tx.type === 'debt_lend' ? '#F48B8B' : expenseColors.accentGreen;
                     }
 
                     const title = tx.note?.trim() || cat.name;
@@ -512,7 +535,7 @@ export default function AccountDetailScreen() {
                           </View>
 
                           <View style={styles.txAmountCol}>
-                            <AppText style={[styles.txAmountText, { color: amountColor }]}>
+                            <AppText style={[styles.txAmountText, { color: amountColor }]} numberOfLines={1}>
                               {amountPrefix}{formatAmount(tx.amount)}
                             </AppText>
                             {tx.split && (
@@ -538,6 +561,7 @@ export default function AccountDetailScreen() {
           visible={showEditModal}
           account={account}
           onClose={() => setShowEditModal(false)}
+          onDeleted={() => router.back()}
         />
       )}
 
@@ -626,6 +650,7 @@ const styles = StyleSheet.create({
   },
   heroInfoCol: {
     flex: 1,
+    minWidth: 0,
   },
   heroAccountName: {
     color: '#FFFFFF',
@@ -825,6 +850,7 @@ const styles = StyleSheet.create({
     color: expenseColors.textMuted,
     fontSize: 11,
     fontWeight: '500',
+    flexShrink: 1,
   },
   txTagBadge: {
     backgroundColor: 'rgba(255, 255, 255, 0.06)',
@@ -840,6 +866,7 @@ const styles = StyleSheet.create({
   txAmountCol: {
     alignItems: 'flex-end',
     gap: 2,
+    flexShrink: 0,
   },
   txAmountText: {
     fontSize: 15,

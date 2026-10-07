@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import { SlidersHorizontal, Plus } from 'lucide-react-native';
 import { AppText, ProfileAvatar } from '@/components/ui';
 import { useSettingsStore } from '@/store/useSettingsStore';
@@ -16,32 +16,53 @@ export const ExpenseHeader: React.FC<ExpenseHeaderProps> = ({
 }) => {
   const { userName, userAvatarId } = useSettingsStore();
 
-  const nameToUse = userName && userName.trim().length > 0 ? userName.trim() : 'Expense Tracker';
+  const hasCustomName = Boolean(userName && userName.trim().length > 0);
+  const nameToUse = hasCustomName ? userName.trim() : 'Monevo';
   const parts = nameToUse.split(/\s+/);
-  const firstName = parts[0]?.toUpperCase() || 'EXPENSE';
-  const lastName = parts.slice(1).join(' ').toUpperCase() || 'TRACKER';
+  const firstName = parts[0]?.toUpperCase() || 'MONEVO';
+  const lastName = parts.slice(1).join(' ').toUpperCase() || '';
 
   return (
     <View style={styles.container}>
       {/* Left side profile/app icon & greeting */}
       <View style={styles.leftSection}>
-        <ProfileAvatar
-          avatarId={userAvatarId}
-          name={userName}
-          size={46}
-          showBorder={true}
-        />
+        {hasCustomName ? (
+          <ProfileAvatar
+            avatarId={userAvatarId}
+            name={userName}
+            size={46}
+            showBorder={true}
+          />
+        ) : (
+          <View style={styles.logoBadgeContainer}>
+            <Image
+              source={require('@/assets/images/monevo-logo.png')}
+              style={styles.logoImage}
+              resizeMode="contain"
+            />
+          </View>
+        )}
 
         <View style={styles.nameContainer}>
-          <AppText style={styles.greetingText}>
+          <AppText
+            style={styles.greetingText}
+            numberOfLines={1}
+            adjustsFontSizeToFit={true}
+            minimumFontScale={0.8}
+          >
             HELLO, {firstName}
           </AppText>
           {lastName ? (
-            <AppText style={styles.greetingText}>
+            <AppText
+              style={styles.greetingText}
+              numberOfLines={1}
+              adjustsFontSizeToFit={true}
+              minimumFontScale={0.8}
+            >
               {lastName}
             </AppText>
           ) : null}
-          <AppText style={styles.dashboardSubtitle}>
+          <AppText style={styles.dashboardSubtitle} numberOfLines={1}>
             YOUR DASHBOARD
           </AppText>
         </View>
@@ -83,6 +104,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 14,
     flex: 1,
+  },
+  logoBadgeContainer: {
+    width: 46,
+    height: 46,
+    borderRadius: 12,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#0F1015',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+  },
+  logoImage: {
+    width: 44,
+    height: 44,
+    borderRadius: 11,
   },
   appIconContainer: {
     width: 48,

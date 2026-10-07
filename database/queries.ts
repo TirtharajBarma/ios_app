@@ -124,7 +124,7 @@ export async function updateSubscription(
 
     const now = new Date().toISOString();
     const setClause = [...keys.map((k) => `${k} = ?`), "updatedAt = ?"].join(", ");
-    const values = [...keys.map((k) => (sub as any)[k]), now, id];
+    const values = [...keys.map((k) => ((sub as any)[k] === undefined ? null : (sub as any)[k])), now, id];
 
     const sql = `UPDATE subscriptions SET ${setClause} WHERE id = ?;`;
     await db.runAsync(sql, ...values);

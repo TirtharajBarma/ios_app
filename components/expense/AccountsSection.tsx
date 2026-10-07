@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useRef } from 'react';
+import { View, StyleSheet, TouchableOpacity, Animated } from 'react-native';
 import { ChevronRight } from 'lucide-react-native';
 import { AppText } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
@@ -14,17 +14,150 @@ interface AccountsSectionProps {
   onAccountPress?: (account: ExpenseAccount) => void;
 }
 
+function SpringAccountCard({
+  acc,
+  formatAmount,
+  onPress,
+}: {
+  acc: ExpenseAccount;
+  formatAmount: (val: number) => string;
+  onPress?: () => void;
+}) {
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+
+  const handlePressIn = () => {
+    Animated.spring(scaleAnim, {
+      toValue: 0.97,
+      useNativeDriver: true,
+      speed: 30,
+      bounciness: 0,
+    }).start();
+  };
+
+  const handlePressOut = () => {
+    Animated.spring(scaleAnim, {
+      toValue: 1,
+      useNativeDriver: true,
+      speed: 20,
+      bounciness: 6,
+    }).start();
+  };
+
+  const isCredit = acc.type === 'credit';
+  const hasDue = isCredit && (acc.dueAmount || 0) > 0;
+  const typeLabel =
+    acc.type === 'credit'
+      ? 'Credit Card'
+      : acc.type === 'wallet'
+      ? 'Wallet'
+      : 'Savings';
+  const txLabel = `${acc.txnCountThisMonth} txn${acc.txnCountThisMonth !== 1 ? 's' : ''}`;
+  const dueStatus = isCredit
+    ? getCreditCardDueStatus(acc.dueDay, acc.billingDay, acc.dueAmount || 0)
+    : null;
+
+  return (
+    <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+      <TouchableOpacity
+        style={styles.accountCard}
+        activeOpacity={0.88}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        onPress={() => {
+          Haptics.selectionAsync().catch(() => {});
+          onPress?.();
+        }}
+      >
+        {/* Left side icon & info */}
+        <View style={styles.leftContent}>
+          <AccountIcon
+            name={acc.name}
+            type={acc.type || 'savings'}
+            size={17}
+            containerSize={38}
+            borderRadius={12}
+          />
+          <View style={styles.textContainer}>
+            <View style={styles.nameRow}>
+              <AppText style={[styles.accountName, { flexShrink: 1 }]} numberOfLines={1}>
+                {acc.name.toUpperCase()}
+              </AppText>
+              {dueStatus?.hasDueInfo && (
+                <View
+                  style={[
+                    styles.dueBadge,
+                    { flexShrink: 0 },
+                    dueStatus.status === 'paid'
+                      ? styles.dueBadgePaid
+                      : dueStatus.isUrgent
+                      ? styles.dueBadgeUrgent
+                      : styles.dueBadgeUpcoming,
+                  ]}
+                >
+                  <AppText
+                    style={[
+                      styles.dueBadgeText,
+                      dueStatus.status === 'paid'
+                        ? styles.dueBadgePaidText
+                        : dueStatus.isUrgent
+                        ? styles.dueBadgeUrgentText
+                        : styles.dueBadgeUpcomingText,
+                    ]}
+                  >
+                    {dueStatus.badgeLabel}
+                  </AppText>
+                </View>
+              )}
+            </View>
+            <AppText style={styles.txnSubtitle} numberOfLines={1}>
+              {typeLabel} • {txLabel}
+            </AppText>
+          </View>
+        </View>
+
+        {/* Right side clean balance */}
+        <View style={styles.rightContent}>
+          <View style={styles.balanceCol}>
+            {isCredit ? (
+              hasDue ? (
+                <AppText
+                  style={styles.dueBalanceText}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit={true}
+                  minimumFontScale={0.8}
+                >
+                  Due: {formatAmount(acc.dueAmount || 0)}
+                </AppText>
+              ) : (
+                <AppText style={styles.noDueText}>No Due</AppText>
+              )
+            ) : (
+              <AppText
+                style={styles.positiveBalanceText}
+                numberOfLines={1}
+                adjustsFontSizeToFit={true}
+                minimumFontScale={0.8}
+              >
+                {formatAmount(acc.balance)}
+              </AppText>
+            )}
+          </View>
+
+          <ChevronRight size={15} color={expenseColors.textMuted} style={styles.chevron} />
+        </View>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+}
+
 export const AccountsSection: React.FC<AccountsSectionProps> = ({ onAccountPress }) => {
   const { accounts, currencySymbol, formatAmount } = useExpenseStore(
-  useShallow((s) => ({ accounts: s.accounts, currencySymbol: s.currencySymbol, formatAmount: s.formatAmount }))
-);
-  const sym = currencySymbol || '₹';
-
-  const getAccountTypeLabel = (acc: ExpenseAccount) => {
-    if (acc.type === 'credit') return 'Credit Card';
-    if (acc.type === 'wallet') return 'Wallet';
-    return 'Savings';
-  };
+    useShallow((s) => ({
+      accounts: s.accounts,
+      currencySymbol: s.currencySymbol,
+      formatAmount: s.formatAmount,
+    }))
+  );
 
   const activeAccounts = accounts.filter((acc) => !acc.isArchived);
 
@@ -35,85 +168,14 @@ export const AccountsSection: React.FC<AccountsSectionProps> = ({ onAccountPress
 
       {/* Account Cards */}
       <View style={styles.cardsStack}>
-        {activeAccounts.map((acc) => {
-          const isCredit = acc.type === 'credit';
-          const hasDue = isCredit && (acc.dueAmount || 0) > 0;
-          const typeLabel = getAccountTypeLabel(acc);
-          const txLabel = `${acc.txnCountThisMonth} txn${acc.txnCountThisMonth !== 1 ? 's' : ''}`;
-          const dueStatus = isCredit ? getCreditCardDueStatus(acc.dueDay, acc.billingDay, acc.dueAmount || 0) : null;
-
-          return (
-            <TouchableOpacity
-              key={acc.id}
-              style={styles.accountCard}
-              activeOpacity={0.7}
-              onPress={() => onAccountPress?.(acc)}
-            >
-              {/* Left side icon & info */}
-              <View style={styles.leftContent}>
-                <AccountIcon name={acc.name} type={acc.type || 'savings'} size={17} containerSize={38} borderRadius={12} />
-                <View style={styles.textContainer}>
-                  <View style={styles.nameRow}>
-                    <AppText style={styles.accountName} numberOfLines={1}>
-                      {acc.name.toUpperCase()}
-                    </AppText>
-                    {dueStatus?.hasDueInfo && (
-                      <View
-                        style={[
-                          styles.dueBadge,
-                          dueStatus.status === 'paid'
-                            ? styles.dueBadgePaid
-                            : dueStatus.isUrgent
-                            ? styles.dueBadgeUrgent
-                            : styles.dueBadgeUpcoming,
-                        ]}
-                      >
-                        <AppText
-                          style={[
-                            styles.dueBadgeText,
-                            dueStatus.status === 'paid'
-                              ? styles.dueBadgePaidText
-                              : dueStatus.isUrgent
-                              ? styles.dueBadgeUrgentText
-                              : styles.dueBadgeUpcomingText,
-                          ]}
-                        >
-                          {dueStatus.badgeLabel}
-                        </AppText>
-                      </View>
-                    )}
-                  </View>
-                  <AppText style={styles.txnSubtitle} numberOfLines={1}>
-                    {typeLabel} • {txLabel}
-                  </AppText>
-                </View>
-              </View>
-
-              {/* Right side clean balance */}
-              <View style={styles.rightContent}>
-                <View style={styles.balanceCol}>
-                  {isCredit ? (
-                    hasDue ? (
-                      <AppText style={styles.dueBalanceText}>
-                        Due: {formatAmount(acc.dueAmount || 0)}
-                      </AppText>
-                    ) : (
-                      <AppText style={styles.noDueText}>
-                        No Due
-                      </AppText>
-                    )
-                  ) : (
-                    <AppText style={styles.positiveBalanceText}>
-                      {formatAmount(acc.balance)}
-                    </AppText>
-                  )}
-                </View>
-
-                <ChevronRight size={15} color={expenseColors.textMuted} style={styles.chevron} />
-              </View>
-            </TouchableOpacity>
-          );
-        })}
+        {activeAccounts.map((acc) => (
+          <SpringAccountCard
+            key={acc.id}
+            acc={acc}
+            formatAmount={formatAmount}
+            onPress={() => onAccountPress?.(acc)}
+          />
+        ))}
       </View>
     </View>
   );

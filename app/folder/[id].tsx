@@ -137,7 +137,10 @@ export default function FolderDetailScreen() {
   const dateGrouped = useMemo(() => {
     const groups: Record<string, ExpenseTransaction[]> = {};
     folderTxs.forEach((tx) => {
-      const dateObj = new Date(tx.date);
+      const parts = tx.date.split('T')[0].split('-');
+      const dateObj = parts.length === 3
+        ? new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10))
+        : new Date(tx.date);
       const dateHeading = dateObj
         .toLocaleDateString('en-US', {
           month: 'long',
@@ -179,20 +182,19 @@ export default function FolderDetailScreen() {
             Haptics.selectionAsync().catch(() => {});
             router.back();
           }}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           activeOpacity={0.7}
         >
-          <ChevronLeft size={22} color={expenseColors.accentPeach} />
-          <AppText style={styles.backBtnText}>The Ledger</AppText>
+          <ChevronLeft size={22} color="#FFFFFF" strokeWidth={2.4} />
         </TouchableOpacity>
 
         <AppText style={styles.headerTitle} numberOfLines={1}>
-          {folder.emoji || '🌴'} {folder.name}
+          {folder.emoji ? `${folder.emoji} ` : ''}{folder.name}
         </AppText>
 
         {/* Folder Header Actions Menu */}
         <NativeLiquidMenu
-          title={`${folder.emoji || '🌴'} ${folder.name.toUpperCase()}`}
+          title={`${folder.emoji ? `${folder.emoji} ` : ''}${folder.name.toUpperCase()}`}
           actions={[
             {
               id: 'copy',
@@ -229,13 +231,9 @@ export default function FolderDetailScreen() {
           }}
           style={styles.headerActionBtn}
         >
-          <TouchableOpacity
-            style={styles.headerMoreBtn}
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-            activeOpacity={0.7}
-          >
-            <MoreHorizontal size={20} color={expenseColors.accentPeach} />
-          </TouchableOpacity>
+          <View style={styles.headerMoreBtn}>
+            <MoreHorizontal size={20} color="#FFFFFF" />
+          </View>
         </NativeLiquidMenu>
       </View>
 
@@ -408,6 +406,7 @@ export default function FolderDetailScreen() {
                             isExpense && styles.expenseAmount,
                             isIncome && styles.incomeAmount,
                           ]}
+                          numberOfLines={1}
                         >
                           {amountDisplay}
                         </AppText>
@@ -476,22 +475,23 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(255, 255, 255, 0.05)',
   },
   backBtn: {
-    flexDirection: 'row',
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     alignItems: 'center',
-    gap: 2,
-    minWidth: 80,
-  },
-  backBtnText: {
-    color: expenseColors.accentPeach,
-    fontSize: 16,
-    fontWeight: '600',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
   },
   headerTitle: {
     color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '800',
+    fontSize: 17,
+    fontWeight: '700',
     textAlign: 'center',
-    maxWidth: 180,
+    flex: 1,
+    marginHorizontal: 10,
+    letterSpacing: -0.3,
   },
   scrollView: {
     flex: 1,
@@ -553,8 +553,9 @@ const styles = StyleSheet.create({
   },
   heroStatValue: {
     color: expenseColors.accentPeach,
-    fontSize: 17,
-    fontWeight: '800',
+    fontSize: 18,
+    fontWeight: '600',
+    letterSpacing: -0.3,
   },
   dateGroupContainer: {
     marginBottom: 20,
@@ -674,14 +675,20 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   headerActionBtn: {
-    minWidth: 80,
-    alignItems: 'flex-end',
+    width: 38,
+    height: 38,
+    alignItems: 'center',
     justifyContent: 'center',
   },
   headerMoreBtn: {
-    padding: 4,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
   },
   transactionRowInner: {
     flexDirection: 'row',

@@ -60,6 +60,7 @@ export function LiquidDropdownModal<T = string>({
     <Modal
       visible={visible}
       transparent
+      statusBarTranslucent={true}
       animationType="fade"
       onRequestClose={onClose}
     >

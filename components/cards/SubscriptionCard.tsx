@@ -143,7 +143,12 @@ function SubscriptionCard({
                 gap: spacing[8],
               }}
             >
-              <AppText variant="body" weight="700" numberOfLines={1}>
+              <AppText
+                variant="body"
+                weight="700"
+                numberOfLines={1}
+                style={{ flexShrink: 1 }}
+              >
                 {name}
               </AppText>
               {isTrial && (
@@ -153,6 +158,7 @@ function SubscriptionCard({
                     paddingHorizontal: spacing[8],
                     paddingVertical: spacing[2],
                     borderRadius: radius[4],
+                    flexShrink: 0,
                   }}
                 >
                   <AppText
@@ -180,10 +186,18 @@ function SubscriptionCard({
             flexDirection: "row",
             alignItems: "center",
             marginLeft: spacing[12],
+            flexShrink: 0,
           }}
         >
           <View style={{ alignItems: "flex-end", marginRight: spacing[8] }}>
-            <AppText variant="headline" weight="700" color={colors.white}>
+            <AppText
+              variant="headline"
+              weight="700"
+              color={colors.white}
+              numberOfLines={1}
+              adjustsFontSizeToFit={true}
+              minimumFontScale={0.8}
+            >
               {formattedPrice}
             </AppText>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 3, marginTop: 2 }}>

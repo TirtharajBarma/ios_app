@@ -79,7 +79,7 @@ export default function PersonalizationScreen() {
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
       style={[styles.container, { paddingTop: insets.top }]}
       keyboardVerticalOffset={Platform.OS === "ios" ? 24 : 0}
     >
@@ -123,9 +123,10 @@ export default function PersonalizationScreen() {
         showsVerticalScrollIndicator={false}
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets={true}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingBottom: insets.bottom + spacing[32] },
+          { paddingBottom: insets.bottom + spacing[48] },
         ]}
       >
         {/* Avatar Live Preview */}

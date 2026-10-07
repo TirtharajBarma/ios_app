@@ -1,5 +1,5 @@
 import React from "react";
-import { View, StyleSheet, TouchableOpacity } from "react-native";
+import { View, StyleSheet, TouchableOpacity, ScrollView } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ChevronLeft, Moon, Sun, Smartphone, Clock } from "lucide-react-native";
@@ -20,14 +20,17 @@ export default function AppearanceScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} activeOpacity={0.7}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
           <ChevronLeft size={22} color={colors.accent} />
         </TouchableOpacity>
         <AppText variant="headline" weight="700" color={colors.white}>Appearance</AppText>
         <View style={{ width: 44 }} />
       </View>
 
-      <View style={styles.content}>
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 16) + 20 }]}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Coming Soon Banner */}
         <View style={styles.comingSoonBanner}>
           <View style={styles.comingSoonIcon}>
@@ -77,7 +80,7 @@ export default function AppearanceScreen() {
             Tap Settings on your device to control the system-wide appearance preference.
           </AppText>
         </View>
-      </View>
+      </ScrollView>
     </View>
   );
 }

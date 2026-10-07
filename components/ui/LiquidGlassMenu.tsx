@@ -37,19 +37,17 @@ export const LiquidGlassMenu: React.FC<LiquidGlassMenuProps> = ({
   style,
 }) => {
   const handleItemPress = (item: LiquidGlassMenuItem) => {
-    if (Platform.OS === 'ios') {
-      if (item.destructive) {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
-      } else {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-      }
+    if (item.destructive) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+    } else {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     }
     onClose();
     item.onPress();
   };
 
   return (
-    <Modal visible={visible} transparent={true} animationType="fade" onRequestClose={onClose}>
+    <Modal visible={visible} transparent={true} statusBarTranslucent={true} animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.glassModalOverlay} onPress={onClose}>
         <View
           style={[
@@ -79,6 +77,7 @@ export const LiquidGlassMenu: React.FC<LiquidGlassMenuProps> = ({
                           styles.glassMenuText,
                           item.destructive && styles.deleteMenuText,
                         ]}
+                        numberOfLines={1}
                       >
                         {item.label}
                       </AppText>
@@ -104,6 +103,7 @@ export const LiquidGlassMenu: React.FC<LiquidGlassMenuProps> = ({
                           styles.glassMenuText,
                           item.destructive && styles.deleteMenuText,
                         ]}
+                        numberOfLines={1}
                       >
                         {item.label}
                       </AppText>

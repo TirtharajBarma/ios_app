@@ -129,6 +129,7 @@ function DateField({ label, value, onChange, minimumDate }: DateFieldProps) {
       <Modal
         visible={showPicker}
         transparent
+        statusBarTranslucent={true}
         animationType="slide"
         onRequestClose={handleClose}
       >
@@ -310,32 +311,32 @@ function DateField({ label, value, onChange, minimumDate }: DateFieldProps) {
   );
 }
 
-// ── Android fallback (unchanged) ──────────────────────────────────
+// ── Android fallback ──────────────────────────────────────────────
 function AndroidDateField({ label, value, onChange, minimumDate }: DateFieldProps) {
   const [show, setShow] = useState(false);
   return (
-    <View style={styles.container}>
-      <AppText variant="body" weight="600" color={colors.white}>{label}</AppText>
-      <View>
-        <Pressable onPress={() => setShow(true)} style={styles.triggerAndroid}>
-          <AppText variant="body" weight="500" color={colors.textSecondary}>
-            {format(value, "yyyy-MM-dd")}
-          </AppText>
-        </Pressable>
-        {show && (
-          <DateTimePicker
-            value={value}
-            mode="date"
-            display="default"
-            minimumDate={minimumDate}
-            onChange={(_: DateTimePickerEvent, date?: Date) => {
-              setShow(false);
-              if (date) onChange(date);
-            }}
-          />
-        )}
+    <Pressable onPress={() => setShow(true)} style={styles.row}>
+      <AppText variant="body" weight="600" color={colors.white}>
+        {label}
+      </AppText>
+      <View style={styles.triggerAndroid}>
+        <AppText variant="body" weight="500" color={colors.textSecondary}>
+          {format(value, "MMM d, yyyy")}
+        </AppText>
       </View>
-    </View>
+      {show && (
+        <DateTimePicker
+          value={value}
+          mode="date"
+          display="default"
+          minimumDate={minimumDate}
+          onChange={(_: DateTimePickerEvent, date?: Date) => {
+            setShow(false);
+            if (date) onChange(date);
+          }}
+        />
+      )}
+    </Pressable>
   );
 }
 

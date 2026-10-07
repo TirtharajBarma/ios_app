@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   View,
   TextInput,
@@ -7,6 +7,7 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
+  Animated,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -19,6 +20,55 @@ import { createExpense, localISODate } from '@/services/expense/createExpense';
 import { expenseColors } from '@/constants/expenseColors';
 
 type PickerItem = { id: string; name: string };
+
+function SpringChip({
+  item,
+  selected,
+  onSelect,
+}: {
+  item: PickerItem;
+  selected: boolean;
+  onSelect: (id: string) => void;
+}) {
+  const scaleAnim = React.useRef(new Animated.Value(1)).current;
+
+  const handlePressIn = () => {
+    Animated.spring(scaleAnim, {
+      toValue: 0.93,
+      useNativeDriver: true,
+      speed: 30,
+      bounciness: 0,
+    }).start();
+  };
+
+  const handlePressOut = () => {
+    Animated.spring(scaleAnim, {
+      toValue: 1,
+      useNativeDriver: true,
+      speed: 20,
+      bounciness: 6,
+    }).start();
+  };
+
+  return (
+    <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+      <TouchableOpacity
+        activeOpacity={0.88}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        onPress={() => {
+          Haptics.selectionAsync().catch(() => {});
+          onSelect(item.id);
+        }}
+        style={[styles.chip, selected && styles.chipSelected]}
+      >
+        <AppText style={[styles.chipText, selected && styles.chipTextSelected]}>
+          {item.name}
+        </AppText>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+}
 
 function ChipRow({
   label,
@@ -48,19 +98,12 @@ function ChipRow({
           {items.map((item) => {
             const selected = item.id === selectedId;
             return (
-              <TouchableOpacity
+              <SpringChip
                 key={item.id}
-                activeOpacity={0.7}
-                onPress={() => {
-                  Haptics.selectionAsync().catch(() => {});
-                  onSelect(item.id);
-                }}
-                style={[styles.chip, selected && styles.chipSelected]}
-              >
-                <AppText style={[styles.chipText, selected && styles.chipTextSelected]}>
-                  {item.name}
-                </AppText>
-              </TouchableOpacity>
+                item={item}
+                selected={selected}
+                onSelect={onSelect}
+              />
             );
           })}
         </ScrollView>
@@ -99,6 +142,7 @@ export default function QuickAddExpenseScreen() {
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [note, setNote] = useState(params.note ? String(params.note) : '');
   const [error, setError] = useState<string | null>(null);
+  const saveScaleAnim = useRef(new Animated.Value(1)).current;
 
   // Match initial category from query parameter if provided
   useEffect(() => {
@@ -173,9 +217,11 @@ export default function QuickAddExpenseScreen() {
         ]}
       >
         {/* iOS Modal Grabber */}
-        <View style={styles.grabberContainer}>
-          <View style={styles.grabber} />
-        </View>
+        {Platform.OS === 'ios' && (
+          <View style={styles.grabberContainer}>
+            <View style={styles.grabber} />
+          </View>
+        )}
 
         {/* Header */}
         <View style={styles.header}>
@@ -192,8 +238,10 @@ export default function QuickAddExpenseScreen() {
         </View>
 
         <ScrollView
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[styles.content, { paddingBottom: 24 }]}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+          automaticallyAdjustKeyboardInsets={true}
           showsVerticalScrollIndicator={false}
         >
           {/* Amount Card */}
@@ -209,6 +257,7 @@ export default function QuickAddExpenseScreen() {
                 value={amount}
                 onChangeText={setAmount}
                 autoFocus
+                numberOfLines={1}
               />
             </View>
           </View>
@@ -247,16 +296,38 @@ export default function QuickAddExpenseScreen() {
           {error ? <AppText style={styles.error}>{error}</AppText> : null}
         </ScrollView>
 
-        {/* Save Button */}
-        <TouchableOpacity
-          activeOpacity={canSave ? 0.85 : 1}
-          disabled={!canSave}
-          onPress={handleSave}
-          style={[styles.saveButton, !canSave && styles.saveButtonDisabled]}
-        >
-          <Check size={20} color="#101114" strokeWidth={2.8} />
-          <AppText style={styles.saveButtonText}>Save expense</AppText>
-        </TouchableOpacity>
+        {/* Save Button with Spring Physics */}
+        <Animated.View style={{ transform: [{ scale: saveScaleAnim }] }}>
+          <TouchableOpacity
+            activeOpacity={canSave ? 0.9 : 1}
+            disabled={!canSave}
+            onPressIn={() => {
+              if (canSave) {
+                Animated.spring(saveScaleAnim, {
+                  toValue: 0.96,
+                  useNativeDriver: true,
+                  speed: 30,
+                  bounciness: 0,
+                }).start();
+              }
+            }}
+            onPressOut={() => {
+              if (canSave) {
+                Animated.spring(saveScaleAnim, {
+                  toValue: 1,
+                  useNativeDriver: true,
+                  speed: 20,
+                  bounciness: 6,
+                }).start();
+              }
+            }}
+            onPress={handleSave}
+            style={[styles.saveButton, !canSave && styles.saveButtonDisabled]}
+          >
+            <Check size={20} color="#101114" strokeWidth={2.8} />
+            <AppText style={styles.saveButtonText}>Save expense</AppText>
+          </TouchableOpacity>
+        </Animated.View>
       </View>
     </KeyboardAvoidingView>
   );
@@ -336,6 +407,7 @@ const styles = StyleSheet.create({
     lineHeight: 46,
     fontWeight: '800',
     minWidth: 80,
+    flexShrink: 1,
     textAlign: 'left',
     paddingVertical: 0,
   },

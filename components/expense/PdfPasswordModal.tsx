@@ -129,6 +129,7 @@ export const PdfPasswordModal: React.FC<PdfPasswordModalProps> = ({
     <Modal
       visible={visible}
       transparent
+      statusBarTranslucent={true}
       animationType="fade"
       onRequestClose={onClose}
     >
@@ -182,7 +183,7 @@ export const PdfPasswordModal: React.FC<PdfPasswordModalProps> = ({
 
           {/* Privacy & Security Badge */}
           <View style={styles.securityBadge}>
-            <ShieldCheck size={14} color="#70D6BC" strokeWidth={2.2} />
+            <ShieldCheck size={14} color="#A9DFBF" strokeWidth={2.2} />
             <AppText style={styles.securityBadgeText}>
               100% On-Device Decryption • Zero Cloud Upload
             </AppText>
@@ -380,15 +381,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: 'rgba(112, 214, 188, 0.08)',
+    backgroundColor: 'rgba(169, 223, 191, 0.08)',
     borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderWidth: 1,
-    borderColor: 'rgba(112, 214, 188, 0.2)',
+    borderColor: 'rgba(169, 223, 191, 0.2)',
   },
   securityBadgeText: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
     fontSize: 11,
     fontWeight: '700',
     flex: 1,

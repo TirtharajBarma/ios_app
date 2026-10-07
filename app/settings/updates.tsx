@@ -1,33 +1,43 @@
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Platform,
   ActivityIndicator,
+  LayoutAnimation,
+  Platform,
+  UIManager,
+  RefreshControl,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ChevronLeft,
+  ChevronRight,
+  ChevronDown,
+  ChevronUp,
   RefreshCw,
-  Download,
   RotateCw,
+  Download,
   CheckCircle2,
   AlertCircle,
-  Clock,
-  Sparkles,
-  FileText,
-  Smartphone,
-  Layers,
-  ArrowRight,
+  Copy,
+  Check,
+  ExternalLink,
+  MessageSquare,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
+import * as Clipboard from 'expo-clipboard';
 import { AppText } from '@/components/ui';
 import { expenseColors } from '@/constants/expenseColors';
-import { AUTHOR_CREDIT } from '@/constants/version';
-import { useAppUpdateManager, getNextVersion } from '@/services/updates/updateManager';
+import { ADMIN_NAME, APP_BINARY_VERSION, AUTHOR_CREDIT } from '@/constants/version';
+import Constants from 'expo-constants';
+import { useAppUpdateManager } from '@/services/updates/updateManager';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 function formatRelativeTime(ts: number | null): string {
   if (!ts) return 'Just now';
@@ -39,8 +49,8 @@ function formatRelativeTime(ts: number | null): string {
 }
 
 function formatDate(d: Date | null): string {
-  if (!d) return 'Recent update';
-  return d.toLocaleDateString('en-US', {
+  const target = d || new Date();
+  return target.toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -50,735 +60,1004 @@ function formatDate(d: Date | null): string {
 export default function UpdatesScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const [showFullHistory, setShowFullHistory] = useState(false);
+  const [copiedHash, setCopiedHash] = useState(false);
+  const [expandedVersions, setExpandedVersions] = useState<Record<string, boolean>>({});
+  const [isRestarting, setIsRestarting] = useState(false);
 
   const {
-    isEnabled,
     isUpdateAvailable,
     isUpdatePending,
     isDownloading,
     downloadProgress,
     activeVersion,
-    releaseDescription,
-    availableVersion,
-    availableDescription,
-    bundleSize,
+    activeRelease,
+    availableRelease,
+    history,
     updateId,
     channel,
     runtimeVersion,
     isEmbeddedLaunch,
     createdAt,
     lastCheckedAt,
-    daysRemainingBeforeAutoUpdate,
     manualStatus,
     errorMessage,
     checkForUpdates,
     downloadUpdate,
     restartToApply,
+    openBuildUrl,
+    contactAdmin,
   } = useAppUpdateManager();
 
   const isChecking = manualStatus === 'checking';
+  const isNativeRequired =
+    manualStatus === 'native_required' || (availableRelease?.isNativeRequired ?? false);
   const pct = Math.round(downloadProgress * 100);
 
+  const toggleHistory = () => {
+    Haptics.selectionAsync().catch(() => {});
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setShowFullHistory((prev) => !prev);
+  };
+
+  const toggleVersionItem = (ver: string) => {
+    Haptics.selectionAsync().catch(() => {});
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setExpandedVersions((prev) => ({
+      ...prev,
+      [ver]: !prev[ver],
+    }));
+  };
+
+  const handleCopyBundleHash = useCallback(async (hash: string) => {
+    await Clipboard.setStringAsync(hash);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    setCopiedHash(true);
+    setTimeout(() => setCopiedHash(false), 2000);
+  }, []);
+
+  const handleRestart = async () => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    setIsRestarting(true);
+    setTimeout(() => {
+      restartToApply();
+    }, 250);
+  };
+
+  const displayVersion = activeVersion.startsWith('v') ? activeVersion.slice(1) : activeVersion;
+  const nativeBuildDisplay = Constants.nativeAppVersion
+    ? `v${Constants.nativeAppVersion} (Build ${Constants.nativeBuildVersion || '1'})`
+    : APP_BINARY_VERSION;
+
   return (
-    <View style={[styles.screenContainer, { paddingTop: insets.top }]}>
-      {/* ── Top Bar ── */}
-      <View style={styles.header}>
+    <View style={[styles.screen, { paddingTop: insets.top }]}>
+      {/* ── Apple iOS Standard Navigation Header ── */}
+      <View style={styles.navBar}>
         <TouchableOpacity
           onPress={() => {
             Haptics.selectionAsync().catch(() => {});
             router.back();
           }}
-          style={styles.backBtn}
-          activeOpacity={0.7}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          style={styles.backButton}
+          activeOpacity={0.65}
+          hitSlop={{ top: 12, bottom: 12, left: 16, right: 16 }}
         >
           <ChevronLeft size={22} color={expenseColors.accentPeach} strokeWidth={2.4} />
+          <AppText style={styles.backButtonText}>Settings</AppText>
         </TouchableOpacity>
-        <AppText style={styles.headerTitle}>Software Update</AppText>
-        <View style={styles.channelHeaderPill}>
-          <AppText style={styles.channelHeaderPillText}>{channel}</AppText>
-        </View>
+
+        <AppText style={styles.navTitle} numberOfLines={1}>
+          Software Update
+        </AppText>
+
+        <View style={styles.navRightPlaceholder} />
       </View>
 
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
-          styles.scrollContent,
+          styles.scrollContainer,
           { paddingBottom: insets.bottom + 40 },
         ]}
+        refreshControl={
+          <RefreshControl
+            refreshing={isChecking}
+            onRefresh={checkForUpdates}
+            tintColor={expenseColors.accentPeach}
+          />
+        }
       >
-        {/* ══════════════════════════════════════════════════
-            CASE 1: UPDATE READY TO APPLY
-        ══════════════════════════════════════════════════ */}
-        {(isUpdatePending || manualStatus === 'downloaded') ? (
-          <View style={styles.stateContainer}>
-            <View style={styles.heroCard}>
-              <View style={[styles.heroIconCircle, styles.iconCircleGreen]}>
-                <RotateCw size={26} color="#70D6BC" strokeWidth={2.4} />
-              </View>
-              <View style={[styles.statusBadge, styles.badgeGreen]}>
-                <AppText style={[styles.statusBadgeText, { color: '#70D6BC' }]}>Ready to Install</AppText>
-              </View>
-              <AppText style={styles.heroTitle}>Update Ready to Apply</AppText>
-              <AppText style={styles.heroSubtitle}>
-                {availableVersion ? `Version ${availableVersion}` : 'The latest update package'} has been downloaded and verified on your device.
-              </AppText>
-            </View>
+        {/* ════════════════════════════════════════════════════
+            HERO UPDATE STAGE (STATUS / AVAILABLE / RESTART)
+        ════════════════════════════════════════════════════ */}
+        {isUpdatePending || manualStatus === 'downloaded' ? (
+          /* ── CASE 1: UPDATE READY TO INSTALL (RESTART TO UPDATE) ── */
+          <View style={styles.sectionWrap}>
+            <View style={styles.cardGroup}>
+              <View style={styles.cardPadding}>
+                <View style={styles.updateTitleRow}>
+                  <View style={{ flex: 1 }}>
+                    <AppText style={styles.heroVersionTitle}>
+                      Monevo {availableRelease?.cleanVersion || 'Update'}
+                    </AppText>
+                    <AppText style={styles.heroSubText}>
+                      Monevo Inc. · Ready to Install
+                    </AppText>
+                  </View>
+                  <View style={styles.badgeSuccess}>
+                    <AppText style={styles.badgeSuccessText}>Downloaded</AppText>
+                  </View>
+                </View>
 
-            {/* Instruction Card */}
-            <View style={styles.guidanceCard}>
-              <View style={styles.guidanceIconCircle}>
-                <Smartphone size={18} color="#70D6BC" strokeWidth={2.2} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <AppText style={styles.guidanceTitle}>To finish updating:</AppText>
-                <AppText style={styles.guidanceBody}>
-                  Tap <AppText style={styles.guidanceBodyHighlight}>Restart App Now</AppText> below, or swipe this app away from your phone's <AppText style={styles.guidanceBodyHighlight}>Recent Apps / App Switcher</AppText> and reopen it.
+                <View style={styles.separator} />
+
+                <AppText style={styles.bodyDescription}>
+                  The update has finished downloading and is ready to apply. Restart Monevo to complete the installation.
                 </AppText>
+
+                {availableRelease?.notes && availableRelease.notes.length > 0 && (
+                  <View style={styles.releaseNotesBox}>
+                    <AppText style={styles.releaseNotesTitle}>What's New</AppText>
+                    {availableRelease.notes.map((note, idx) => (
+                      <View key={idx} style={styles.bulletRow}>
+                        <View style={styles.bulletDot} />
+                        <AppText style={styles.bulletText}>{note}</AppText>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                <TouchableOpacity
+                  style={[styles.primaryButton, { marginTop: 18 }]}
+                  activeOpacity={0.8}
+                  onPress={handleRestart}
+                  disabled={isRestarting}
+                >
+                  {isRestarting ? (
+                    <ActivityIndicator size="small" color="#000000" />
+                  ) : (
+                    <>
+                      <RotateCw size={17} color="#000000" strokeWidth={2.4} />
+                      <AppText style={styles.primaryButtonText}>Restart to Update</AppText>
+                    </>
+                  )}
+                </TouchableOpacity>
               </View>
             </View>
-
-            {/* Primary Action Button */}
-            <TouchableOpacity
-              style={[styles.primaryActionBtn, styles.restartBtn]}
-              activeOpacity={0.82}
-              onPress={() => {
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-                restartToApply();
-              }}
-            >
-              <RotateCw size={18} color="#0D1117" strokeWidth={2.4} />
-              <AppText style={[styles.primaryActionBtnText, { color: '#0D1117' }]}>
-                Restart App Now
-              </AppText>
-            </TouchableOpacity>
           </View>
         ) : isDownloading ? (
-          /* ══════════════════════════════════════════════════
-              CASE 2: DOWNLOADING IN PROGRESS
-          ══════════════════════════════════════════════════ */
-          <View style={styles.stateContainer}>
-            <View style={styles.heroCard}>
-              <View style={[styles.heroIconCircle, styles.iconCircleBlue]}>
-                <Download size={26} color="#9DC6EB" strokeWidth={2.4} />
-              </View>
-              <View style={[styles.statusBadge, styles.badgeBlue]}>
-                <AppText style={[styles.statusBadgeText, { color: '#9DC6EB' }]}>{pct}% Downloaded</AppText>
-              </View>
-              <AppText style={styles.heroTitle}>Downloading Update</AppText>
-              <AppText style={styles.heroSubtitle}>
-                Fetching bundle assets and code ({bundleSize})...
-              </AppText>
+          /* ── CASE 2: DOWNLOADING IN PROGRESS ── */
+          <View style={styles.sectionWrap}>
+            <View style={styles.cardGroup}>
+              <View style={styles.cardPadding}>
+                <View style={styles.updateTitleRow}>
+                  <View style={{ flex: 1 }}>
+                    <AppText style={styles.heroVersionTitle}>
+                      Monevo {availableRelease?.cleanVersion || 'Update'}
+                    </AppText>
+                    <AppText style={styles.heroSubText}>
+                      Downloading update package…
+                    </AppText>
+                  </View>
+                  <AppText style={styles.progressPercentText}>{pct}%</AppText>
+                </View>
 
-              <View style={styles.progressContainer}>
                 <View style={styles.progressTrack}>
                   <View style={[styles.progressFill, { width: `${Math.max(pct, 6)}%` }]} />
                 </View>
-              </View>
-            </View>
-          </View>
-        ) : (isUpdateAvailable || manualStatus === 'available') ? (
-          /* ══════════════════════════════════════════════════
-              CASE 3: NEW UPDATE AVAILABLE
-          ══════════════════════════════════════════════════ */
-          <View style={styles.stateContainer}>
-            {/* Version Transition Hero Card */}
-            <View style={styles.heroCard}>
-              <View style={[styles.heroIconCircle, styles.iconCirclePeach]}>
-                <Sparkles size={26} color={expenseColors.accentPeach} strokeWidth={2.2} />
-              </View>
-              <View style={[styles.statusBadge, styles.badgePeach]}>
-                <AppText style={[styles.statusBadgeText, { color: expenseColors.accentPeach }]}>New Release Available</AppText>
-              </View>
 
-              <AppText style={styles.heroTitle}>Software Update Ready</AppText>
-
-              {/* Version Jump Graphic */}
-              <View style={styles.versionTransitionWrap}>
-                <View style={styles.versionFromBox}>
-                  <AppText style={styles.versionFromText}>{activeVersion}</AppText>
-                </View>
-                <ArrowRight size={16} color={expenseColors.accentPeach} strokeWidth={2.4} />
-                <View style={styles.versionToBox}>
-                  <AppText style={styles.versionToText}>{availableVersion || getNextVersion(activeVersion)}</AppText>
-                </View>
-              </View>
-
-              <AppText style={styles.heroSubtitle}>
-                Download Size: {bundleSize} · Release Channel: {channel}
-              </AppText>
-            </View>
-
-            {/* What's New / Description Card */}
-            <View style={styles.releaseNotesCard}>
-              <View style={styles.releaseNotesHeader}>
-                <FileText size={15} color={expenseColors.accentPeach} />
-                <AppText style={styles.releaseNotesTitle}>
-                  What's in {availableVersion || 'this release'}
+                <AppText style={styles.progressFootnote}>
+                  Please keep Monevo open while files are verified.
                 </AppText>
               </View>
-              <AppText style={styles.releaseNotesBody}>
-                {availableDescription || 'Includes performance optimizations, UI polish, and bug fixes.'}
-              </AppText>
             </View>
+          </View>
+        ) : isNativeRequired ? (
+          /* ── CASE 3: NATIVE BUILD REQUIRED (.APK / .IPA) ── */
+          <View style={styles.sectionWrap}>
+            <View style={styles.cardGroup}>
+              <View style={styles.cardPadding}>
+                <View style={styles.updateTitleRow}>
+                  <View style={{ flex: 1 }}>
+                    <AppText style={styles.heroVersionTitle}>
+                      {availableRelease?.version || 'New Build'}
+                    </AppText>
+                    <AppText style={styles.heroSubText}>
+                      Native Installer Required (.apk / .ipa)
+                    </AppText>
+                  </View>
+                  <View style={styles.badgeNotice}>
+                    <AppText style={styles.badgeNoticeText}>New Build</AppText>
+                  </View>
+                </View>
 
-            {/* 48-Hour Auto-Apply Notice */}
-            {daysRemainingBeforeAutoUpdate !== null && (
-              <View style={styles.autoUpdateNoticeCard}>
-                <Clock size={16} color="#F4CD89" />
-                <View style={{ flex: 1 }}>
-                  <AppText style={styles.autoUpdateNoticeTitle}>Automatic Update</AppText>
-                  <AppText style={styles.autoUpdateNoticeBody}>
-                    Will automatically activate in {daysRemainingBeforeAutoUpdate <= 1 ? 'less than 24 hours' : `${daysRemainingBeforeAutoUpdate} days`} if unapplied.
-                  </AppText>
+                <View style={styles.separator} />
+
+                <AppText style={styles.bodyDescription}>
+                  This release contains native engine upgrades. Contact the developer ({ADMIN_NAME}) to receive the latest installer.
+                </AppText>
+
+                <View style={{ gap: 10, marginTop: 16 }}>
+                  <TouchableOpacity
+                    style={styles.primaryButton}
+                    activeOpacity={0.8}
+                    onPress={() => contactAdmin(availableRelease?.version)}
+                  >
+                    <MessageSquare size={17} color="#000000" strokeWidth={2.2} />
+                    <AppText style={styles.primaryButtonText}>
+                      Request Installer via WhatsApp
+                    </AppText>
+                  </TouchableOpacity>
+
+                  {availableRelease?.buildUrl && (
+                    <TouchableOpacity
+                      style={styles.secondaryButton}
+                      activeOpacity={0.8}
+                      onPress={() => openBuildUrl()}
+                    >
+                      <ExternalLink size={16} color={expenseColors.accentPeach} />
+                      <AppText style={styles.secondaryButtonText}>
+                        Download Directly
+                      </AppText>
+                    </TouchableOpacity>
+                  )}
                 </View>
               </View>
-            )}
-
-            {/* Download Action Button */}
-            <TouchableOpacity
-              style={styles.primaryActionBtn}
-              activeOpacity={0.82}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-                downloadUpdate();
-              }}
-            >
-              <Download size={18} color="#FFFFFF" strokeWidth={2.4} />
-              <AppText style={styles.primaryActionBtnText}>
-                Download & Install Update ({bundleSize})
-              </AppText>
-            </TouchableOpacity>
-          </View>
-        ) : (manualStatus === 'error' || errorMessage) ? (
-          /* ══════════════════════════════════════════════════
-              CASE 4: ERROR / OFFLINE
-          ══════════════════════════════════════════════════ */
-          <View style={styles.stateContainer}>
-            <View style={styles.heroCard}>
-              <View style={[styles.heroIconCircle, styles.iconCircleRed]}>
-                <AlertCircle size={28} color="#FF6B6B" strokeWidth={2.4} />
-              </View>
-              <View style={[styles.statusBadge, styles.badgeRed]}>
-                <AppText style={[styles.statusBadgeText, { color: '#FF6B6B' }]}>Connection Error</AppText>
-              </View>
-              <AppText style={styles.heroTitle}>Unable to Check Updates</AppText>
-              <AppText style={styles.heroSubtitle}>
-                {errorMessage || 'Could not connect to update servers. Check your connection.'}
-              </AppText>
             </View>
+          </View>
+        ) : isUpdateAvailable || manualStatus === 'available' ? (
+          /* ── CASE 4: UPDATE AVAILABLE TO DOWNLOAD ── */
+          <View style={styles.sectionWrap}>
+            <View style={styles.cardGroup}>
+              <View style={styles.cardPadding}>
+                <View style={styles.updateTitleRow}>
+                  <View style={{ flex: 1 }}>
+                    <AppText style={styles.heroVersionTitle}>
+                      Monevo {availableRelease?.cleanVersion || 'Update'}
+                    </AppText>
+                    <AppText style={styles.heroSubText}>
+                      Monevo Inc. · Over-the-Air Update
+                    </AppText>
+                  </View>
+                  <View style={styles.badgeAccent}>
+                    <AppText style={styles.badgeAccentText}>Available</AppText>
+                  </View>
+                </View>
 
-            <TouchableOpacity
-              style={[styles.primaryActionBtn, styles.checkAgainBtn]}
-              activeOpacity={0.8}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-                checkForUpdates();
-              }}
-            >
-              <RefreshCw size={17} color={expenseColors.accentPeach} strokeWidth={2.2} />
-              <AppText style={[styles.primaryActionBtnText, { color: expenseColors.accentPeach }]}>
-                Try Again
-              </AppText>
-            </TouchableOpacity>
+                <View style={styles.separator} />
+
+                <AppText style={styles.bodyDescription}>
+                  {availableRelease?.summary ||
+                    'This update includes verified performance optimizations, bug fixes, and user interface enhancements.'}
+                </AppText>
+
+                {availableRelease?.notes && availableRelease.notes.length > 0 && (
+                  <View style={styles.releaseNotesBox}>
+                    <AppText style={styles.releaseNotesTitle}>What's New</AppText>
+                    {availableRelease.notes.map((note, idx) => (
+                      <View key={idx} style={styles.bulletRow}>
+                        <View style={styles.bulletDot} />
+                        <AppText style={styles.bulletText}>{note}</AppText>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                <TouchableOpacity
+                  style={[styles.primaryButton, { marginTop: 18 }]}
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                    downloadUpdate();
+                  }}
+                >
+                  <Download size={17} color="#000000" strokeWidth={2.4} />
+                  <AppText style={styles.primaryButtonText}>Download and Install</AppText>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        ) : manualStatus === 'error' || errorMessage ? (
+          /* ── CASE 5: ERROR STATE ── */
+          <View style={styles.sectionWrap}>
+            <View style={styles.cardGroup}>
+              <View style={styles.cardPadding}>
+                <View style={styles.centeredBlock}>
+                  <AlertCircle size={36} color="#FF453A" strokeWidth={2} />
+                  <AppText style={[styles.centeredTitle, { color: '#FF453A' }]}>
+                    Unable to Check for Updates
+                  </AppText>
+                  <AppText style={styles.centeredSubtitle}>
+                    {errorMessage || 'An error occurred while checking for updates. Check your internet connection.'}
+                  </AppText>
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.secondaryButton, { marginTop: 12 }]}
+                  activeOpacity={0.7}
+                  onPress={checkForUpdates}
+                >
+                  <RefreshCw size={15} color={expenseColors.accentPeach} />
+                  <AppText style={styles.secondaryButtonText}>Try Again</AppText>
+                </TouchableOpacity>
+              </View>
+            </View>
           </View>
         ) : (
-          /* ══════════════════════════════════════════════════
-              CASE 5: UP TO DATE (DEFAULT RESTING STATE)
-          ══════════════════════════════════════════════════ */
-          <View style={styles.stateContainer}>
-            {/* Status Hero Card */}
-            <View style={styles.heroCard}>
-              <View style={[styles.heroIconCircle, styles.iconCircleGreen]}>
+          /* ── CASE 6: UP TO DATE (APPLE CLEAN SERENE HERO) ── */
+          <View style={styles.sectionWrap}>
+            <View style={styles.upToDateHeroContainer}>
+              <View style={styles.checkCircleIcon}>
+                <CheckCircle2 size={44} color="#30D158" strokeWidth={2.2} />
+              </View>
+
+              <AppText style={styles.upToDateVersionNumber}>
+                Monevo {displayVersion}
+              </AppText>
+              <AppText style={styles.upToDateStatusLabel}>
+                Monevo is up to date
+              </AppText>
+              <AppText style={styles.upToDateTimestamp}>
+                Last checked: {formatRelativeTime(lastCheckedAt)}
+              </AppText>
+            </View>
+
+            {/* Apple Inset Action Row: Check for Updates */}
+            <View style={styles.cardGroup}>
+              <TouchableOpacity
+                style={styles.checkActionRow}
+                activeOpacity={0.7}
+                disabled={isChecking}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                  checkForUpdates();
+                }}
+              >
                 {isChecking ? (
-                  <ActivityIndicator size="small" color="#70D6BC" />
+                  <ActivityIndicator size="small" color={expenseColors.accentPeach} />
                 ) : (
-                  <CheckCircle2 size={30} color="#70D6BC" strokeWidth={2.2} />
+                  <RefreshCw size={16} color={expenseColors.accentPeach} strokeWidth={2.2} />
                 )}
-              </View>
-
-              <View style={[styles.statusBadge, styles.badgeGreen]}>
-                <AppText style={[styles.statusBadgeText, { color: '#70D6BC' }]}>Latest Version</AppText>
-              </View>
-
-              <AppText style={styles.heroTitle}>
-                {isChecking ? 'Checking for Updates...' : 'App is Up to Date'}
-              </AppText>
-              <AppText style={styles.heroSubtitle}>
-                Version {activeVersion} {isEmbeddedLaunch ? '· Base Binary' : '· Over-the-Air'}
-              </AppText>
-
-              {/* Timestamp Metadata */}
-              <View style={styles.metadataMetaRow}>
-                <Clock size={12} color="#656A7A" />
-                <AppText style={styles.lastCheckedSubtext}>
-                  Last checked: {formatRelativeTime(lastCheckedAt)} · Installed: {formatDate(createdAt)}
+                <AppText style={styles.checkActionRowText}>
+                  {isChecking ? 'Checking for Updates…' : 'Check for Updates'}
                 </AppText>
-              </View>
+              </TouchableOpacity>
             </View>
-
-            {/* What's New in This Version Card */}
-            {releaseDescription && (
-              <View style={styles.releaseNotesCard}>
-                <View style={styles.releaseNotesHeader}>
-                  <FileText size={15} color={expenseColors.accentPeach} />
-                  <AppText style={styles.releaseNotesTitle}>
-                    What's New in {activeVersion}
-                  </AppText>
-                </View>
-                <AppText style={styles.releaseNotesBody}>
-                  {releaseDescription}
-                </AppText>
-              </View>
-            )}
-
-            {/* Build & System Details Grouped Card */}
-            <View style={styles.sectionHeaderWrap}>
-              <Layers size={13} color="#6F7485" />
-              <AppText style={styles.sectionCategoryHeader}>SYSTEM INFORMATION</AppText>
-            </View>
-
-            <View style={styles.groupedTableCard}>
-              <InfoRow
-                label="Active Version"
-                value={`${activeVersion} (${isEmbeddedLaunch ? 'Base' : 'OTA'})`}
-                valueColor="#70D6BC"
-              />
-              <View style={styles.tableDivider} />
-              <InfoRow label="Binary Build" value="v1.0.0 (Build 1)" />
-              <View style={styles.tableDivider} />
-              <InfoRow label="Release Channel" value={channel} />
-              <View style={styles.tableDivider} />
-              <InfoRow label="Runtime Target" value={`Version ${runtimeVersion}`} />
-              <View style={styles.tableDivider} />
-              <InfoRow
-                label="Active Update Hash"
-                value={updateId ? `#${updateId.slice(0, 8)}` : isEmbeddedLaunch ? 'Embedded Base' : 'Live Bundle'}
-                isMonospace={true}
-              />
-              <View style={styles.tableDivider} />
-              <InfoRow
-                label="Code Source"
-                value={isEmbeddedLaunch ? 'Embedded Base APK' : 'Over-The-Air Live Bundle'}
-              />
-            </View>
-
-            {/* Check for Updates Action Button */}
-            <TouchableOpacity
-              style={[styles.primaryActionBtn, styles.checkAgainBtn]}
-              activeOpacity={0.8}
-              disabled={isChecking}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-                checkForUpdates();
-              }}
-            >
-              {isChecking ? (
-                <ActivityIndicator size="small" color={expenseColors.accentPeach} />
-              ) : (
-                <RefreshCw size={17} color={expenseColors.accentPeach} strokeWidth={2.2} />
-              )}
-              <AppText style={[styles.primaryActionBtnText, { color: expenseColors.accentPeach }]}>
-                {isChecking ? 'Checking for Updates...' : 'Check for Update'}
-              </AppText>
-            </TouchableOpacity>
           </View>
         )}
 
-        {/* ── Footer ── */}
-        <View style={styles.footerWrap}>
-          <AppText style={styles.footerAuthorText}>
-            {AUTHOR_CREDIT}
-          </AppText>
+        {/* ════════════════════════════════════════════════════
+            SECTION 2: ABOUT THIS BUILD (INSTALLATION INFO)
+        ════════════════════════════════════════════════════ */}
+        <View style={styles.sectionWrap}>
+          <AppText style={styles.sectionHeaderTitle}>ABOUT THIS BUILD</AppText>
+
+          <View style={styles.cardGroup}>
+            <View style={styles.tableRow}>
+              <AppText style={styles.rowLabel}>Version</AppText>
+              <AppText style={styles.rowValueHighlight}>{activeVersion}</AppText>
+            </View>
+
+            <View style={styles.tableDivider} />
+
+            <View style={styles.tableRow}>
+              <AppText style={styles.rowLabel}>Build</AppText>
+              <AppText style={styles.rowValue}>{nativeBuildDisplay}</AppText>
+            </View>
+
+            <View style={styles.tableDivider} />
+
+            <View style={styles.tableRow}>
+              <AppText style={styles.rowLabel}>Channel</AppText>
+              <AppText style={styles.rowValue}>{channel}</AppText>
+            </View>
+
+            <View style={styles.tableDivider} />
+
+            <View style={styles.tableRow}>
+              <AppText style={styles.rowLabel}>Installation</AppText>
+              <AppText style={styles.rowValue}>
+                {isEmbeddedLaunch ? 'Embedded Base' : 'Over-the-Air (OTA)'}
+              </AppText>
+            </View>
+
+            <View style={styles.tableDivider} />
+
+            <View style={styles.tableRow}>
+              <AppText style={styles.rowLabel}>Runtime Target</AppText>
+              <AppText style={styles.rowValue}>Runtime {runtimeVersion}</AppText>
+            </View>
+
+            <View style={styles.tableDivider} />
+
+            <TouchableOpacity
+              style={styles.tableRow}
+              activeOpacity={0.7}
+              onPress={() => {
+                if (updateId) handleCopyBundleHash(updateId);
+              }}
+            >
+              <AppText style={styles.rowLabel}>Bundle ID</AppText>
+              <View style={styles.rowValueWithIcon}>
+                <AppText style={[styles.rowValue, styles.monospaceText]}>
+                  {updateId ? `#${updateId.slice(0, 10)}…` : isEmbeddedLaunch ? 'Embedded' : 'Live Bundle'}
+                </AppText>
+                {updateId && (
+                  copiedHash ? (
+                    <Check size={14} color="#30D158" strokeWidth={2.4} />
+                  ) : (
+                    <Copy size={13} color="#8E8E93" />
+                  )
+                )}
+              </View>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* ════════════════════════════════════════════════════
+            SECTION 3: WHAT'S NEW IN THIS VERSION
+        ════════════════════════════════════════════════════ */}
+        {activeRelease?.notes && activeRelease.notes.length > 0 && (
+          <View style={styles.sectionWrap}>
+            <AppText style={styles.sectionHeaderTitle}>
+              WHAT'S NEW IN {activeVersion}
+            </AppText>
+
+            <View style={styles.cardGroup}>
+              <View style={styles.cardPadding}>
+                {activeRelease.notes.map((note, idx) => (
+                  <View key={idx} style={styles.bulletRow}>
+                    <View style={styles.bulletDot} />
+                    <AppText style={styles.bulletText}>{note}</AppText>
+                  </View>
+                ))}
+              </View>
+            </View>
+          </View>
+        )}
+
+        {/* ════════════════════════════════════════════════════
+            SECTION 4: VERSION HISTORY ARCHIVE (APP STORE / TESTFLIGHT)
+        ════════════════════════════════════════════════════ */}
+        {history && history.length > 0 && (
+          <View style={styles.sectionWrap}>
+            <AppText style={styles.sectionHeaderTitle}>VERSION HISTORY</AppText>
+
+            <View style={styles.cardGroup}>
+              {(showFullHistory ? history : history.slice(0, 3)).map((item, idx, arr) => {
+                const isCurrent = item.version === activeVersion;
+                const isExpanded = expandedVersions[item.version] ?? (idx === 0);
+                const isLast = idx === arr.length - 1;
+
+                return (
+                  <View key={item.version + idx}>
+                    <TouchableOpacity
+                      style={styles.historyItemHeader}
+                      activeOpacity={0.7}
+                      onPress={() => toggleVersionItem(item.version)}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <View style={styles.historyVersionRow}>
+                          <AppText style={styles.historyVersionLabel}>{item.version}</AppText>
+                          {isCurrent && (
+                            <View style={styles.currentIndicator}>
+                              <AppText style={styles.currentIndicatorText}>Current</AppText>
+                            </View>
+                          )}
+                          <View style={styles.installTypeIndicator}>
+                            <AppText style={styles.installTypeIndicatorText}>
+                              {item.isNativeBuild ? 'Native' : 'OTA'}
+                            </AppText>
+                          </View>
+                        </View>
+                        <AppText style={styles.historyDateLabel}>{item.date}</AppText>
+                      </View>
+
+                      {isExpanded ? (
+                        <ChevronUp size={16} color="#8E8E93" />
+                      ) : (
+                        <ChevronDown size={16} color="#8E8E93" />
+                      )}
+                    </TouchableOpacity>
+
+                    {isExpanded && item.notes && item.notes.length > 0 && (
+                      <View style={styles.historyNotesWrap}>
+                        {item.notes.map((note: string, nIdx: number) => (
+                          <View key={nIdx} style={styles.historyBulletRow}>
+                            <View style={styles.historyBulletDot} />
+                            <AppText style={styles.historyBulletText}>{note}</AppText>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+
+                    {!isLast && <View style={styles.tableDivider} />}
+                  </View>
+                );
+              })}
+
+              {history.length > 3 && (
+                <>
+                  <View style={styles.tableDivider} />
+                  <TouchableOpacity
+                    style={styles.expandHistoryRow}
+                    activeOpacity={0.7}
+                    onPress={toggleHistory}
+                  >
+                    <AppText style={styles.expandHistoryRowText}>
+                      {showFullHistory ? 'Show Recent Only' : `View All ${history.length} Releases`}
+                    </AppText>
+                    {showFullHistory ? (
+                      <ChevronUp size={15} color={expenseColors.accentPeach} />
+                    ) : (
+                      <ChevronDown size={15} color={expenseColors.accentPeach} />
+                    )}
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+          </View>
+        )}
+
+        {/* ════════════════════════════════════════════════════
+            SECTION 5: DEVELOPER & FEEDBACK
+        ════════════════════════════════════════════════════ */}
+        <View style={styles.sectionWrap}>
+          <AppText style={styles.sectionHeaderTitle}>DEVELOPER</AppText>
+
+          <View style={styles.cardGroup}>
+            <View style={styles.tableRow}>
+              <AppText style={styles.rowLabel}>Developer</AppText>
+              <AppText style={styles.rowValue}>{ADMIN_NAME}</AppText>
+            </View>
+
+            <View style={styles.tableDivider} />
+
+            <TouchableOpacity
+              style={styles.disclosureRow}
+              activeOpacity={0.7}
+              onPress={() => contactAdmin()}
+            >
+              <AppText style={styles.disclosureRowText}>Send Feedback / Report Issue</AppText>
+              <ChevronRight size={17} color="#8E8E93" />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* ── Apple-styled Muted Footer ── */}
+        <View style={styles.footerContainer}>
+          <AppText style={styles.footerBrandText}>MONEVO</AppText>
+          <AppText style={styles.footerAuthorText}>{AUTHOR_CREDIT}</AppText>
         </View>
       </ScrollView>
     </View>
   );
 }
 
-function InfoRow({
-  label,
-  value,
-  isMonospace,
-  valueColor,
-}: {
-  label: string;
-  value: string;
-  isMonospace?: boolean;
-  valueColor?: string;
-}) {
-  return (
-    <View style={styles.tableRow}>
-      <AppText style={styles.tableLabel}>{label}</AppText>
-      <AppText
-        style={[
-          styles.tableValue,
-          valueColor ? { color: valueColor } : undefined,
-          isMonospace && styles.tableValueMonospace,
-        ]}
-        numberOfLines={1}
-      >
-        {value}
-      </AppText>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  screenContainer: {
+  screen: {
     flex: 1,
-    backgroundColor: '#101114',
+    backgroundColor: '#000000',
   },
-  header: {
+  navBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
   },
-  backBtn: {
-    width: 40,
-    height: 40,
+  backButton: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 157, 102, 0.1)',
+    gap: 2,
+    minWidth: 80,
   },
-  headerTitle: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '700',
-    letterSpacing: 0.2,
-  },
-  channelHeaderPill: {
-    backgroundColor: 'rgba(255, 157, 102, 0.1)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 157, 102, 0.2)',
-  },
-  channelHeaderPillText: {
+  backButtonText: {
     color: expenseColors.accentPeach,
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 0.3,
+    fontSize: 17,
+    fontWeight: '400',
   },
-  scrollContent: {
-    paddingHorizontal: 16,
+  navTitle: {
+    flex: 1,
+    textAlign: 'center',
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '600',
+    letterSpacing: -0.3,
+  },
+  navRightPlaceholder: {
+    minWidth: 80,
+  },
+
+  scrollContainer: {
     paddingTop: 16,
   },
-  stateContainer: {
-    gap: 16,
+  sectionWrap: {
+    marginBottom: 28,
+    paddingHorizontal: 16,
   },
-  heroCard: {
-    backgroundColor: expenseColors.bgCard,
-    borderRadius: 22,
-    paddingVertical: 24,
-    paddingHorizontal: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.07)',
-    alignItems: 'center',
-    textAlign: 'center',
-  },
-  heroIconCircle: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1.5,
-    marginBottom: 14,
-  },
-  iconCircleGreen: {
-    backgroundColor: 'rgba(112, 214, 188, 0.12)',
-    borderColor: 'rgba(112, 214, 188, 0.3)',
-  },
-  iconCircleBlue: {
-    backgroundColor: 'rgba(157, 198, 235, 0.12)',
-    borderColor: 'rgba(157, 198, 235, 0.3)',
-  },
-  iconCirclePeach: {
-    backgroundColor: 'rgba(255, 157, 102, 0.12)',
-    borderColor: 'rgba(255, 157, 102, 0.3)',
-  },
-  iconCircleRed: {
-    backgroundColor: 'rgba(255, 107, 107, 0.12)',
-    borderColor: 'rgba(255, 107, 107, 0.3)',
-  },
-  statusBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 3.5,
-    borderRadius: 8,
-    borderWidth: 1,
-    marginBottom: 10,
-  },
-  badgeGreen: {
-    backgroundColor: 'rgba(112, 214, 188, 0.12)',
-    borderColor: 'rgba(112, 214, 188, 0.25)',
-  },
-  badgeBlue: {
-    backgroundColor: 'rgba(157, 198, 235, 0.12)',
-    borderColor: 'rgba(157, 198, 235, 0.25)',
-  },
-  badgePeach: {
-    backgroundColor: 'rgba(255, 157, 102, 0.12)',
-    borderColor: 'rgba(255, 157, 102, 0.25)',
-  },
-  badgeRed: {
-    backgroundColor: 'rgba(255, 107, 107, 0.12)',
-    borderColor: 'rgba(255, 107, 107, 0.25)',
-  },
-  statusBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.4,
-  },
-  heroTitle: {
-    color: '#FFFFFF',
-    fontSize: 19,
-    fontWeight: '700',
-    letterSpacing: 0.1,
-    textAlign: 'center',
-    marginBottom: 4,
-  },
-  heroSubtitle: {
-    color: '#9EABB8',
-    fontSize: 13,
-    lineHeight: 19,
-    fontWeight: '500',
-    textAlign: 'center',
-    paddingHorizontal: 10,
-  },
-  versionTransitionWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginTop: 10,
-    marginBottom: 8,
-  },
-  versionFromBox: {
-    backgroundColor: '#1E212B',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  versionFromText: {
-    color: '#8E919D',
+  sectionHeaderTitle: {
     fontSize: 13,
     fontWeight: '600',
+    color: '#8E8E93',
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
+    marginBottom: 8,
+    marginLeft: 16,
   },
-  versionToBox: {
-    backgroundColor: 'rgba(255, 157, 102, 0.15)',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 157, 102, 0.3)',
+
+  /* ── Apple Inset Card Group ── */
+  cardGroup: {
+    backgroundColor: '#1C1C1E',
+    borderRadius: 12,
+    overflow: 'hidden',
   },
-  versionToText: {
-    color: expenseColors.accentPeach,
-    fontSize: 13,
-    fontWeight: '700',
+  cardPadding: {
+    padding: 18,
   },
-  metadataMetaRow: {
-    flexDirection: 'row',
+  tableDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    marginLeft: 16,
+  },
+  separator: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    marginVertical: 14,
+  },
+
+  /* ── Up to Date Hero ── */
+  upToDateHeroContainer: {
     alignItems: 'center',
-    gap: 6,
+    paddingTop: 24,
+    paddingBottom: 28,
+    paddingHorizontal: 16,
+  },
+  checkCircleIcon: {
+    marginBottom: 14,
+  },
+  upToDateVersionNumber: {
+    fontSize: 26,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: -0.5,
+  },
+  upToDateStatusLabel: {
+    fontSize: 16,
+    color: '#8E8E93',
+    fontWeight: '400',
+    marginTop: 4,
+  },
+  upToDateTimestamp: {
+    fontSize: 13,
+    color: '#636366',
     marginTop: 8,
   },
-  lastCheckedSubtext: {
-    color: '#656A7A',
-    fontSize: 11,
-    fontWeight: '500',
+
+  checkActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
   },
-  progressContainer: {
-    width: '100%',
-    marginTop: 18,
-    paddingTop: 10,
+  checkActionRowText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: expenseColors.accentPeach,
+  },
+
+  /* ── Hero Update Available / Downloaded Stage ── */
+  updateTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  heroVersionTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: -0.5,
+  },
+  heroSubText: {
+    fontSize: 13,
+    color: '#8E8E93',
+    marginTop: 3,
+  },
+  bodyDescription: {
+    fontSize: 14,
+    color: '#E5E5EA',
+    lineHeight: 20,
+  },
+  releaseNotesBox: {
+    marginTop: 14,
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    borderRadius: 10,
+    padding: 14,
+  },
+  releaseNotesTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    marginBottom: 8,
+  },
+  bulletRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginBottom: 6,
+  },
+  bulletDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: expenseColors.accentPeach,
+    marginTop: 7,
+  },
+  bulletText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#D1D1D6',
+    lineHeight: 18,
+  },
+
+  /* ── Badges ── */
+  badgeSuccess: {
+    backgroundColor: 'rgba(48, 209, 88, 0.16)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  badgeSuccessText: {
+    color: '#30D158',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  badgeAccent: {
+    backgroundColor: 'rgba(255, 157, 102, 0.16)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  badgeAccentText: {
+    color: expenseColors.accentPeach,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  badgeNotice: {
+    backgroundColor: 'rgba(255, 214, 10, 0.16)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  badgeNoticeText: {
+    color: '#FFD60A',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+
+  /* ── Apple Rounded Action Buttons ── */
+  primaryButton: {
+    backgroundColor: expenseColors.accentPeach,
+    height: 48,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  primaryButtonText: {
+    color: '#000000',
+    fontSize: 16,
+    fontWeight: '600',
+    letterSpacing: -0.2,
+  },
+  secondaryButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    height: 46,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  secondaryButtonText: {
+    color: expenseColors.accentPeach,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+
+  /* ── Downloading Progress ── */
+  progressPercentText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: expenseColors.accentPeach,
   },
   progressTrack: {
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#1E212B',
+    height: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 3,
+    marginTop: 16,
     overflow: 'hidden',
   },
   progressFill: {
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#9DC6EB',
-  },
-  guidanceCard: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-    backgroundColor: 'rgba(112, 214, 188, 0.08)',
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(112, 214, 188, 0.25)',
-  },
-  guidanceIconCircle: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: 'rgba(112, 214, 188, 0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 1,
-  },
-  guidanceTitle: {
-    color: '#70D6BC',
-    fontSize: 13,
-    fontWeight: '700',
-    marginBottom: 3,
-  },
-  guidanceBody: {
-    color: '#D1EAE2',
-    fontSize: 12,
-    lineHeight: 18,
-    fontWeight: '500',
-  },
-  guidanceBodyHighlight: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-  },
-  releaseNotesCard: {
-    backgroundColor: '#171920',
-    borderRadius: 18,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 157, 102, 0.2)',
-  },
-  releaseNotesHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
-  },
-  releaseNotesTitle: {
-    color: expenseColors.accentPeach,
-    fontSize: 13,
-    fontWeight: '700',
-    letterSpacing: 0.3,
-  },
-  releaseNotesBody: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    lineHeight: 20,
-    fontWeight: '500',
-  },
-  autoUpdateNoticeCard: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-    backgroundColor: 'rgba(244, 205, 137, 0.08)',
-    borderRadius: 16,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(244, 205, 137, 0.2)',
-  },
-  autoUpdateNoticeTitle: {
-    color: '#F4CD89',
-    fontSize: 12,
-    fontWeight: '700',
-    marginBottom: 2,
-  },
-  autoUpdateNoticeBody: {
-    color: '#C4CCD8',
-    fontSize: 12,
-    lineHeight: 17,
-    fontWeight: '500',
-  },
-  sectionHeaderWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 4,
-    marginTop: 4,
-  },
-  sectionCategoryHeader: {
-    color: '#6F7485',
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.6,
-  },
-  primaryActionBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
+    height: '100%',
     backgroundColor: expenseColors.accentPeach,
-    height: 52,
-    borderRadius: 16,
-    shadowColor: expenseColors.accentPeach,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-    elevation: 4,
+    borderRadius: 3,
   },
-  restartBtn: {
-    backgroundColor: '#70D6BC',
-    shadowColor: '#70D6BC',
+  progressFootnote: {
+    fontSize: 12,
+    color: '#8E8E93',
+    marginTop: 10,
+    textAlign: 'center',
   },
-  checkAgainBtn: {
-    backgroundColor: 'rgba(255, 157, 102, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 157, 102, 0.25)',
-    shadowOpacity: 0,
-    elevation: 0,
+
+  /* ── Centered Error ── */
+  centeredBlock: {
+    alignItems: 'center',
+    paddingVertical: 10,
   },
-  primaryActionBtnText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '700',
-    letterSpacing: 0.2,
+  centeredTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    marginTop: 10,
   },
-  groupedTableCard: {
-    backgroundColor: expenseColors.bgCard,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
-    overflow: 'hidden',
+  centeredSubtitle: {
+    fontSize: 13,
+    color: '#8E8E93',
+    textAlign: 'center',
+    lineHeight: 18,
+    marginTop: 6,
   },
+
+  /* ── Inset Table Rows (Apple HIG) ── */
   tableRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 13,
+    minHeight: 48,
   },
-  tableLabel: {
-    color: '#8E919D',
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  tableValue: {
+  rowLabel: {
+    fontSize: 16,
     color: '#FFFFFF',
-    fontSize: 13,
+    fontWeight: '400',
+  },
+  rowValue: {
+    fontSize: 15,
+    color: '#8E8E93',
+    fontWeight: '400',
+  },
+  rowValueHighlight: {
+    fontSize: 15,
+    color: '#30D158',
     fontWeight: '600',
   },
-  tableValueMonospace: {
-    fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }),
+  rowValueWithIcon: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  monospaceText: {
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    fontSize: 13,
+  },
+
+  /* ── Disclosure Row ── */
+  disclosureRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  disclosureRowText: {
+    fontSize: 16,
+    color: expenseColors.accentPeach,
+    fontWeight: '400',
+  },
+
+  /* ── Version History Rows ── */
+  historyItemHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+  },
+  historyVersionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  historyVersionLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  currentIndicator: {
+    backgroundColor: 'rgba(255, 157, 102, 0.18)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  currentIndicatorText: {
+    fontSize: 10,
+    fontWeight: '700',
     color: expenseColors.accentPeach,
   },
-  tableDivider: {
-    height: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
-    marginLeft: 16,
+  installTypeIndicator: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 5,
   },
-  footerWrap: {
+  installTypeIndicatorText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#8E8E93',
+  },
+  historyDateLabel: {
+    fontSize: 12,
+    color: '#8E8E93',
+    marginTop: 2,
+  },
+  historyNotesWrap: {
+    paddingHorizontal: 16,
+    paddingBottom: 14,
+    paddingTop: 2,
+  },
+  historyBulletRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginBottom: 4,
+  },
+  historyBulletDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#8E8E93',
+    marginTop: 7,
+  },
+  historyBulletText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#8E8E93',
+    lineHeight: 18,
+  },
+  expandHistoryRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 20,
-    marginBottom: 8,
+    justifyContent: 'center',
+    gap: 4,
+    paddingVertical: 12,
+  },
+  expandHistoryRowText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: expenseColors.accentPeach,
+  },
+
+  /* ── Apple Footer ── */
+  footerContainer: {
+    alignItems: 'center',
+    marginTop: 10,
+    marginBottom: 20,
+  },
+  footerBrandText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#48484A',
+    letterSpacing: 1.5,
   },
   footerAuthorText: {
-    color: 'rgba(255, 255, 255, 0.3)',
     fontSize: 11,
-    fontWeight: '500',
+    color: '#48484A',
+    marginTop: 2,
   },
 });

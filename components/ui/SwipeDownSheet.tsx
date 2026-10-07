@@ -97,7 +97,7 @@ export default function SwipeDownSheet({
   }, [animateClose]);
 
   const pan = Gesture.Pan()
-    .activeOffsetY(6)
+    .activeOffsetY([10, 500])
     .onUpdate((e) => {
       "worklet";
       translateY.value = Math.max(0, e.translationY);
@@ -141,19 +141,21 @@ export default function SwipeDownSheet({
         <Animated.View style={[styles.backdrop, backdropStyle]} />
       </GestureDetector>
 
-      <GestureDetector gesture={pan}>
-        <Animated.View
-          style={[
-            styles.sheet,
-            heightRatio ? { height: `${heightRatio * 100}%` } : undefined,
-            sheetStyle,
-            containerStyle,
-          ]}
-        >
-          <Animated.View style={styles.handle} />
-          {children}
-        </Animated.View>
-      </GestureDetector>
+      <Animated.View
+        style={[
+          styles.sheet,
+          heightRatio ? { height: `${heightRatio * 100}%` } : undefined,
+          sheetStyle,
+          containerStyle,
+        ]}
+      >
+        <GestureDetector gesture={pan}>
+          <View style={styles.handleContainer}>
+            <View style={styles.handle} />
+          </View>
+        </GestureDetector>
+        {children}
+      </Animated.View>
     </View>
   );
 }
@@ -172,7 +174,14 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
+    paddingTop: 0,
+  },
+  handleContainer: {
+    width: "100%",
     paddingTop: spacing[8],
+    paddingBottom: spacing[12],
+    alignItems: "center",
+    justifyContent: "center",
   },
   handle: {
     width: 36,
@@ -180,6 +189,5 @@ const styles = StyleSheet.create({
     borderRadius: 2.5,
     backgroundColor: "#3A3A3C",
     alignSelf: "center",
-    marginBottom: spacing[12],
   },
 });

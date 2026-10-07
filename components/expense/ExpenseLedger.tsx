@@ -35,8 +35,10 @@ import {
   ChevronDown,
   Building2,
   Folder,
+  Target,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
+import { BlurView } from 'expo-blur';
 import * as Clipboard from 'expo-clipboard';
 import { AppText, NativeLiquidMenu } from '@/components/ui';
 import type { MenuAction } from '@/components/ui';
@@ -78,6 +80,7 @@ export const ExpenseLedger: React.FC = () => {
   accounts,
   categories,
   transactions,
+  savingsVaults,
   eventFolders,
   activeAccountFilter,
   smartSearchQuery,
@@ -99,6 +102,7 @@ export const ExpenseLedger: React.FC = () => {
     accounts: s.accounts,
     categories: s.categories,
     transactions: s.transactions,
+    savingsVaults: s.savingsVaults,
     eventFolders: s.eventFolders,
     activeAccountFilter: s.activeAccountFilter,
     smartSearchQuery: s.smartSearchQuery,
@@ -438,6 +442,7 @@ export const ExpenseLedger: React.FC = () => {
     });
 
     const isTransfer = tx.type === 'transfer';
+    const isGoal = tx.type === 'vault_deposit' || tx.type === 'vault_withdraw' || tx.categoryId === 'cat_goal' || cat.id === 'cat_goal';
     const isDebtLend = tx.type === 'debt_lend';
     const isDebtBorrow = tx.type === 'debt_borrow';
     const isDebt = isDebtLend || isDebtBorrow;
@@ -456,6 +461,10 @@ export const ExpenseLedger: React.FC = () => {
       amountDisplay = isSettled
         ? `✓ ${formattedVal}`
         : `+${formattedVal}`;
+    } else if (tx.type === 'vault_deposit' || tx.categoryId === 'cat_goal') {
+      amountDisplay = formattedVal;
+    } else if (tx.type === 'vault_withdraw') {
+      amountDisplay = `+${formattedVal}`;
     } else if (isExpense) {
       amountDisplay = `-${formattedVal}`;
     } else if (isIncome) {
@@ -548,7 +557,21 @@ export const ExpenseLedger: React.FC = () => {
         };
       }
 
-      // 2. Explicit Merchant field
+      // 2. Savings Goal / Vault Transactions (Strip redundant "Saved to" / "Withdrawn from" prefixes)
+      if (isGoal || tx.vaultId) {
+        const cleanNote = tx.note?.trim() || '';
+        const matchGoal = /^(?:Saved to|Withdrawn from|Refund from deleted goal:?)\s*(.+)$/i.exec(cleanNote);
+        const vault = tx.vaultId ? (savingsVaults || []).find((v) => v.id === tx.vaultId) : null;
+        const fallbackName = matchGoal ? matchGoal[1].trim() : cleanNote || 'SAVINGS GOAL';
+        const title = vault ? `${vault.emoji ? vault.emoji + ' ' : ''}${vault.name}`.trim() : fallbackName;
+
+        return {
+          displayTitle: title.toUpperCase(),
+          displayContext: null,
+        };
+      }
+
+      // 3. Explicit Merchant field
       if (tx.merchant && tx.merchant.trim()) {
         return {
           displayTitle: tx.merchant.trim().toUpperCase(),
@@ -646,12 +669,14 @@ export const ExpenseLedger: React.FC = () => {
           </TouchableOpacity>
         )}
 
-        {/* Left: Category / Transfer / Debt Icon Squircle */}
+        {/* Left: Category / Transfer / Debt / Goal Icon Squircle */}
         <View
           style={[
             styles.categoryIconCircle,
             {
-              backgroundColor: isTransfer
+              backgroundColor: isGoal
+                ? 'rgba(112, 214, 188, 0.15)'
+                : isTransfer
                 ? 'rgba(96, 165, 250, 0.15)'
                 : isDebtLend
                 ? isSettled
@@ -669,12 +694,14 @@ export const ExpenseLedger: React.FC = () => {
             },
           ]}
         >
-          {isTransfer ? (
+          {isGoal ? (
+            <Target size={16} color={expenseColors.accentGreen} />
+          ) : isTransfer ? (
             <ArrowRightLeft size={16} color="#9DC6EB" />
           ) : isDebtLend ? (
-            <HandCoins size={16} color={isSettled ? '#70D6BC' : '#F48B8B'} />
+            <HandCoins size={16} color={isSettled ? expenseColors.accentGreen : '#F48B8B'} />
           ) : isDebtBorrow ? (
-            <HandCoins size={16} color={isSettled ? '#70D6BC' : '#F4CD89'} />
+            <HandCoins size={16} color={isSettled ? expenseColors.accentGreen : '#F4CD89'} />
           ) : (
             renderCategoryIcon(cat)
           )}
@@ -688,7 +715,13 @@ export const ExpenseLedger: React.FC = () => {
 
           {/* Badges / Flow details */}
           <View style={styles.badgeRow}>
-            {isTransfer ? (
+            {isGoal ? (
+              <View style={styles.goalPill}>
+                <AppText style={styles.goalPillText} numberOfLines={1} ellipsizeMode="tail">
+                  {tx.type === 'vault_withdraw' ? 'GOAL WITHDRAWAL' : 'GOALS'}
+                </AppText>
+              </View>
+            ) : isTransfer ? (
               <View style={styles.transferFlowPill}>
                 <AppText style={styles.transferFlowText} numberOfLines={1} ellipsizeMode="tail">
                   {getAccountName(tx.accountId, tx.accountName).toUpperCase()} ➔ {getAccountName(tx.toAccountId, tx.toAccountName).toUpperCase()}
@@ -804,11 +837,12 @@ export const ExpenseLedger: React.FC = () => {
           <AppText
             style={[
               styles.transactionAmountText,
-              isDebtLend && (isSettled ? styles.settledAmount : styles.debtLendPendingAmount),
-              isDebtBorrow && (isSettled ? styles.settledAmount : styles.debtBorrowPendingAmount),
-              !isDebt && isExpense && styles.expenseAmount,
-              !isDebt && isIncome && styles.incomeAmount,
-              isTransfer && styles.transferAmount,
+              isGoal && (tx.type === 'vault_withdraw' ? styles.incomeAmount : styles.goalDepositAmount),
+              !isGoal && isDebtLend && (isSettled ? styles.settledAmount : styles.debtLendPendingAmount),
+              !isGoal && isDebtBorrow && (isSettled ? styles.settledAmount : styles.debtBorrowPendingAmount),
+              !isGoal && !isDebt && isExpense && styles.expenseAmount,
+              !isGoal && !isDebt && isIncome && styles.incomeAmount,
+              !isGoal && isTransfer && styles.transferAmount,
             ]}
             numberOfLines={1}
           >
@@ -846,18 +880,30 @@ export const ExpenseLedger: React.FC = () => {
       );
     }
 
-    const rowTouchable = (
+    const handleTxPress = () => {
+      if (isSelectMode) {
+        toggleSelectTransaction(tx.id);
+      } else {
+        Haptics.selectionAsync().catch(() => {});
+        router.push(`/transaction/${tx.id}`);
+      }
+    };
+
+    const rowContent = (
+      <View style={[styles.transactionRow, !isLast && styles.rowDivider, rowBgStyle]}>
+        {rowInner}
+      </View>
+    );
+
+    const rowTouchable = Platform.OS === 'ios' ? (
       <TouchableOpacity
         style={[styles.transactionRow, !isLast && styles.rowDivider, rowBgStyle]}
         activeOpacity={0.75}
-        onPress={() => {
-          Haptics.selectionAsync().catch(() => {});
-          router.push(`/transaction/${tx.id}`);
-        }}
+        onPress={handleTxPress}
       >
         {rowInner}
       </TouchableOpacity>
-    );
+    ) : rowContent;
 
     return (
       <NativeLiquidMenu
@@ -865,6 +911,7 @@ export const ExpenseLedger: React.FC = () => {
         title={(tx.note || (isTransfer ? 'Account Transfer' : cat.name)).toUpperCase()}
         actions={txActions}
         shouldOpenOnLongPress={true}
+        onPress={handleTxPress}
         onSelect={(actionId) => {
           if (actionId === 'details') {
             Haptics.selectionAsync().catch(() => {});
@@ -970,22 +1017,22 @@ export const ExpenseLedger: React.FC = () => {
 
         {/* Center Info */}
         <View style={styles.folderInfoCol}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <AppText style={styles.folderTitleText} numberOfLines={1}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
+            <AppText style={[styles.folderTitleText, { flexShrink: 1 }]} numberOfLines={1}>
               {folderName.toUpperCase()}
             </AppText>
-            <View style={styles.tripFolderPill}>
+            <View style={[styles.tripFolderPill, { flexShrink: 0 }]}>
               <AppText style={styles.tripFolderPillText}>TRIP FOLDER</AppText>
             </View>
           </View>
-          <AppText style={styles.folderSubText}>
+          <AppText style={styles.folderSubText} numberOfLines={1}>
             {folderTxs.length} ITEM{folderTxs.length !== 1 ? 'S' : ''} • TAP TO VIEW FOLDER
           </AppText>
         </View>
 
         {/* Right Amount & Push Chevron */}
         <View style={styles.folderRightCol}>
-          <AppText style={styles.folderTotalText}>
+          <AppText style={styles.folderTotalText} numberOfLines={1}>
             -{sym}{folderTotal.toLocaleString('en-IN')}
           </AppText>
           <ChevronRight size={15} color="#7E8394" />
@@ -1019,25 +1066,41 @@ export const ExpenseLedger: React.FC = () => {
       );
     }
 
-    const folderTouchable = (
+    const handleFolderPress = () => {
+      if (isSelectMode) {
+        folderTxs.forEach((t) => {
+          if (!selectedTransactionIds.includes(t.id)) {
+            toggleSelectTransaction(t.id);
+          }
+        });
+      } else {
+        Haptics.selectionAsync().catch(() => {});
+        router.push({
+          pathname: '/folder/[id]',
+          params: {
+            id: folderKey,
+            name: folderName,
+            emoji: folderEmoji,
+          },
+        });
+      }
+    };
+
+    const folderContent = (
+      <View style={[styles.folderRowContainer, !isLast && styles.rowDivider]}>
+        {folderRowInner}
+      </View>
+    );
+
+    const folderTouchable = Platform.OS === 'ios' ? (
       <TouchableOpacity
         style={[styles.folderRowContainer, !isLast && styles.rowDivider]}
         activeOpacity={0.75}
-        onPress={() => {
-          Haptics.selectionAsync().catch(() => {});
-          router.push({
-            pathname: '/folder/[id]',
-            params: {
-              id: folderKey,
-              name: folderName,
-              emoji: folderEmoji,
-            },
-          });
-        }}
+        onPress={handleFolderPress}
       >
         {folderRowInner}
       </TouchableOpacity>
-    );
+    ) : folderContent;
 
     return (
       <NativeLiquidMenu
@@ -1045,6 +1108,7 @@ export const ExpenseLedger: React.FC = () => {
         title={`${folderEmoji || '📁'} ${folderName.toUpperCase()}`}
         actions={folderActions}
         shouldOpenOnLongPress={true}
+        onPress={handleFolderPress}
         onSelect={(actionId) => {
           if (actionId === 'details') {
             Haptics.selectionAsync().catch(() => {});
@@ -1368,7 +1432,7 @@ export const ExpenseLedger: React.FC = () => {
         </View>
 
         {/* Prominent Active Account Filter Banner */}
-        {activeAccountFilter !== 'All' && (
+        {/* {activeAccountFilter !== 'All' && (
           <View style={styles.activeAccountFilterBanner}>
             <View style={styles.activeAccountFilterLeft}>
               <Building2 size={13} color="#FF9D66" />
@@ -1390,7 +1454,7 @@ export const ExpenseLedger: React.FC = () => {
               <X size={11} color="#FF9D66" />
             </TouchableOpacity>
           </View>
-        )}
+        )} */}
 
       </View>
 
@@ -1402,7 +1466,7 @@ export const ExpenseLedger: React.FC = () => {
           styles.transactionsScrollContent,
           {
             paddingTop: 8,
-            paddingBottom: insets.bottom + (isSelectMode ? 100 : 70),
+            paddingBottom: insets.bottom + (isSelectMode ? 150 : 80),
           },
         ]}
         keyboardDismissMode="on-drag"
@@ -1479,8 +1543,16 @@ export const ExpenseLedger: React.FC = () => {
           ) : (
             dateGroups.map(({ dateKey, dateHeading, items }) => (
               <View key={dateKey} style={styles.dateGroupContainer}>
-                {/* Centered Date Header */}
-                <AppText style={styles.dateHeadingText}>{dateHeading}</AppText>
+                {/* Apple Frosted Glass Floating Date Header Pill */}
+                <View style={styles.dateHeaderPillWrapper}>
+                  <BlurView
+                    intensity={28}
+                    tint="systemUltraThinMaterialDark"
+                    style={styles.dateHeaderPill}
+                  >
+                    <AppText style={styles.dateHeadingText}>{dateHeading}</AppText>
+                  </BlurView>
+                </View>
 
                 {/* Group Card */}
                 <View style={styles.groupCard}>
@@ -1509,7 +1581,7 @@ export const ExpenseLedger: React.FC = () => {
 
       {/* ── FIXED BOTTOM ACTION BAR IN SELECTION MODE ── */}
       {isSelectMode && (
-        <View style={[styles.bottomActionBarContainer, { bottom: Math.max(insets.bottom, 16) + 12 }]}>
+        <View style={[styles.bottomActionBarContainer, { bottom: insets.bottom + 64 }]}>
           {/* Left: Selected Count */}
           <AppText style={styles.selectedCountText}>
             {selectedTransactionIds.length} Selected
@@ -1951,19 +2023,31 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  // ── Date Group Header (Centered, matching exact reference) ──
+  // ── Date Group Header (Apple Frosted Glass Floating Pill) ──
   dateGroupContainer: {
     marginBottom: 20,
   },
+  dateHeaderPillWrapper: {
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  dateHeaderPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.07)',
+    overflow: 'hidden',
+  },
   dateHeadingText: {
-    color: '#7E8394',
-    fontSize: 11,
-    lineHeight: 15,
-    fontWeight: '700',
-    letterSpacing: 0.8,
+    color: '#8E93A4',
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: '800',
+    letterSpacing: 0.9,
     textTransform: 'uppercase',
     textAlign: 'center',
-    marginBottom: 12,
   },
 
   groupCard: {
@@ -1975,6 +2059,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   transactionRow: {
+    width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
@@ -2015,7 +2100,9 @@ const styles = StyleSheet.create({
   },
   folderInfoCol: {
     flex: 1,
+    minWidth: 0,
     justifyContent: 'center',
+    marginRight: 8,
   },
   folderTitleText: {
     color: '#FFFFFF',
@@ -2042,6 +2129,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    flexShrink: 0,
   },
   folderTotalText: {
     color: expenseColors.accentPeach,
@@ -2214,21 +2302,21 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   splitSettledPill: {
-    backgroundColor: 'rgba(112, 214, 188, 0.15)',
+    backgroundColor: 'rgba(169, 223, 191, 0.15)',
   },
   splitSettledPillText: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
   },
   splitReturnPill: {
     maxWidth: '100%',
     flexShrink: 1,
-    backgroundColor: 'rgba(112, 214, 188, 0.12)',
+    backgroundColor: 'rgba(169, 223, 191, 0.12)',
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 6,
   },
   splitReturnPillText: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
     fontSize: 11,
     fontWeight: '700',
   },
@@ -2325,7 +2413,8 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     gap: 2,
     marginTop: 2,
-    maxWidth: 105,
+    maxWidth: 135,
+    flexShrink: 1,
   },
   splitSubAmountText: {
     color: '#7E8394',
@@ -2341,11 +2430,12 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
     marginTop: 2,
     textAlign: 'right',
-    maxWidth: 105,
+    maxWidth: 140,
+    flexShrink: 1,
   },
   categoryPill: {
-    maxWidth: 110,
-    flexShrink: 0,
+    maxWidth: 145,
+    flexShrink: 1,
     backgroundColor: '#232633',
     paddingHorizontal: 6,
     paddingVertical: 1.5,
@@ -2365,15 +2455,16 @@ const styles = StyleSheet.create({
   amountCol: {
     alignItems: 'flex-end',
     justifyContent: 'center',
-    marginLeft: 8,
+    marginLeft: 6,
     flexShrink: 0,
+    minWidth: 70,
   },
   transactionAmountText: {
     fontSize: 15,
     lineHeight: 19,
-    fontWeight: '800',
+    fontWeight: '600',
     textAlign: 'right',
-    letterSpacing: 0,
+    letterSpacing: -0.2,
     fontVariant: ['tabular-nums'],
     flexShrink: 0,
     paddingRight: 2,
@@ -2383,6 +2474,23 @@ const styles = StyleSheet.create({
   },
   incomeAmount: {
     color: expenseColors.accentGreen,
+  },
+  goalDepositAmount: {
+    color: '#A9DFBF',
+  },
+  goalPill: {
+    maxWidth: '100%',
+    flexShrink: 1,
+    backgroundColor: 'rgba(169, 223, 191, 0.12)',
+    paddingHorizontal: 7,
+    paddingVertical: 1.5,
+    borderRadius: 6,
+  },
+  goalPillText: {
+    color: '#A9DFBF',
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: '700',
   },
   transferAmount: {
     color: '#9DC6EB',

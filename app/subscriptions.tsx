@@ -31,9 +31,110 @@ import { LinearGradient } from "expo-linear-gradient";
 
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
-import { AppText, SubscriptionLogo, Loading } from "@/components/ui";
+import { AppText, SubscriptionLogo, Loading, NativeLiquidMenu, type MenuAction } from "@/components/ui";
 import { colors, spacing, radius, getCurrencySymbol } from "@/constants";
 import { toMonthly, getSubscriptionActivePrice } from "@/utils/date";
+
+function SpringSubscriptionRow({
+  sub,
+  isLast,
+  currencySymbol,
+  getRenewalStatusText,
+  formatCycleLabel,
+  onPress,
+  onLongPress,
+}: {
+  sub: any;
+  isLast: boolean;
+  currencySymbol: string;
+  getRenewalStatusText: (sub: any) => string;
+  formatCycleLabel: (raw?: string, cycle?: string) => string;
+  onPress: () => void;
+  onLongPress: () => void;
+}) {
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+
+  const handlePressIn = () => {
+    Animated.spring(scaleAnim, {
+      toValue: 0.98,
+      useNativeDriver: true,
+      speed: 30,
+      bounciness: 0,
+    }).start();
+  };
+
+  const handlePressOut = () => {
+    Animated.spring(scaleAnim, {
+      toValue: 1,
+      useNativeDriver: true,
+      speed: 20,
+      bounciness: 6,
+    }).start();
+  };
+
+  return (
+    <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+      <TouchableOpacity
+        activeOpacity={0.88}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        onPress={onPress}
+        onLongPress={onLongPress}
+        style={[
+          styles.listItemRow,
+          !isLast && styles.listItemBorder,
+          sub.isPaused && { opacity: 0.55 },
+        ]}
+        accessibilityLabel={`Subscription ${sub.name}`}
+        accessibilityRole="button"
+        accessibilityHint="Tap to view details, long press for actions"
+      >
+        <View style={styles.listItemLeft}>
+          <SubscriptionLogo
+            fields={sub}
+            name={sub.name}
+            color={sub.color}
+            size={40}
+          />
+          <View style={styles.listItemTextContainer}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: spacing[8] }}>
+              <AppText style={styles.listItemTitle} numberOfLines={1}>
+                {sub.name}
+              </AppText>
+              {sub.isPaused && (
+                <View style={styles.pausedPill}>
+                  <AppText style={styles.pausedPillText}>PAUSED</AppText>
+                </View>
+              )}
+            </View>
+            <AppText style={styles.listItemSubtitle} numberOfLines={1}>
+              {sub.isPaused ? "Billing paused" : getRenewalStatusText(sub)}
+            </AppText>
+          </View>
+        </View>
+
+        <View style={styles.listItemRight}>
+          <AppText style={styles.listItemPrice}>
+            {sub.isTrial
+              ? "Free"
+              : `${currencySymbol}${getSubscriptionActivePrice(sub).toFixed(2)}`}
+          </AppText>
+          <View style={styles.listItemCycleRow}>
+            {sub.splitEnabled && (
+              <Users size={11} color={colors.accent} style={{ marginRight: 2 }} />
+            )}
+            <AppText style={styles.listItemCycle}>
+              {sub.isTrial
+                ? "Trial"
+                : formatCycleLabel(sub.rawBillingCycle, sub.billingCycle)}
+            </AppText>
+            {!sub.isTrial && <Repeat size={11} color={colors.textMuted} />}
+          </View>
+        </View>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+}
 
 export default function SubscriptionsListScreen() {
   const router = useRouter();
@@ -46,13 +147,6 @@ export default function SubscriptionsListScreen() {
   const [hideExpired, setHideExpired] = useState(true);
   const [hideCancelled, setHideCancelled] = useState(false);
   const [hideEnding, setHideEnding] = useState(false);
-
-  // Popover Menu State
-  const [menuVisible, setMenuVisible] = useState(false);
-  const [sortMenuOpen, setSortMenuOpen] = useState(false);
-  const [groupMenuOpen, setGroupMenuOpen] = useState(false);
-
-  const menuAnim = useRef(new Animated.Value(0)).current;
 
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const searchBarBottom = useRef(new Animated.Value(insets.bottom + 12)).current;
@@ -96,25 +190,85 @@ export default function SubscriptionsListScreen() {
     loadSubscriptions();
   }, [loadSubscriptions]);
 
-  useEffect(() => {
-    if (menuVisible) {
-      Animated.spring(menuAnim, {
-        toValue: 1,
-        tension: 100,
-        friction: 12,
-        useNativeDriver: true,
-      }).start();
-    } else {
-      Animated.timing(menuAnim, {
-        toValue: 0,
-        duration: 150,
-        useNativeDriver: true,
-      }).start(() => {
-        setSortMenuOpen(false);
-        setGroupMenuOpen(false);
-      });
-    }
-  }, [menuVisible]);
+  const menuActions = useMemo<MenuAction[]>(
+    () => [
+      {
+        id: "sort_menu",
+        title: "Sort By",
+        image: "arrow.up.arrow.down",
+        subactions: [
+          {
+            id: "sort_date",
+            title: "Renewal Date",
+            image: "calendar",
+            state: sortBy === "date" ? "on" : "off",
+          },
+          {
+            id: "sort_name",
+            title: "Name (A-Z)",
+            image: "textformat",
+            state: sortBy === "name" ? "on" : "off",
+          },
+          {
+            id: "sort_price",
+            title: "Price (High to Low)",
+            image: "banknote",
+            state: sortBy === "price" ? "on" : "off",
+          },
+        ],
+      },
+      {
+        id: "group_menu",
+        title: "Group By",
+        image: "square.grid.2x2",
+        subactions: [
+          {
+            id: "group_category",
+            title: "Category",
+            image: "folder",
+            state: groupBy === "category" ? "on" : "off",
+          },
+          {
+            id: "group_none",
+            title: "None",
+            image: "list.bullet",
+            state: groupBy === "none" ? "on" : "off",
+          },
+        ],
+      },
+      {
+        id: "filter_expired",
+        title: "Hide Expired",
+        image: "clock.badge.xmark",
+        state: hideExpired ? "on" : "off",
+      },
+      {
+        id: "filter_cancelled",
+        title: "Hide Cancelled",
+        image: "xmark.circle",
+        state: hideCancelled ? "on" : "off",
+      },
+      {
+        id: "filter_ending",
+        title: "Hide Ending Soon",
+        image: "hourglass",
+        state: hideEnding ? "on" : "off",
+      },
+    ],
+    [sortBy, groupBy, hideExpired, hideCancelled, hideEnding]
+  );
+
+  const handleMenuSelect = (actionId: string) => {
+    Haptics.selectionAsync().catch(() => {});
+    if (actionId === "sort_date") setSortBy("date");
+    else if (actionId === "sort_name") setSortBy("name");
+    else if (actionId === "sort_price") setSortBy("price");
+    else if (actionId === "group_category") setGroupBy("category");
+    else if (actionId === "group_none") setGroupBy("none");
+    else if (actionId === "filter_expired") setHideExpired((p) => !p);
+    else if (actionId === "filter_cancelled") setHideCancelled((p) => !p);
+    else if (actionId === "filter_ending") setHideEnding((p) => !p);
+  };
 
   const { currencyCode } = useSettingsStore();
   const currencySymbol = getCurrencySymbol(currencyCode);
@@ -253,6 +407,7 @@ export default function SubscriptionsListScreen() {
           activeOpacity={0.8}
           onPress={() => router.back()}
           style={styles.backBtn}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           accessibilityLabel="Go back"
           accessibilityRole="button"
           accessibilityHint="Navigates to the previous screen"
@@ -279,19 +434,20 @@ export default function SubscriptionsListScreen() {
             <Plus size={18} color={colors.white} strokeWidth={2.5} />
           </TouchableOpacity>
           <View style={styles.pillDivider} />
-          <TouchableOpacity
-            activeOpacity={0.7}
-            onPress={() => {
-              Haptics.selectionAsync();
-              setMenuVisible(!menuVisible);
-            }}
-            style={styles.pillIconBtn}
-            accessibilityLabel="Open menu"
-            accessibilityRole="button"
-            accessibilityHint="Shows sorting, grouping, and filter options"
+          <NativeLiquidMenu
+            title="Options"
+            actions={menuActions}
+            onSelect={handleMenuSelect}
           >
-            <MoreHorizontal size={18} color={colors.white} strokeWidth={2.5} />
-          </TouchableOpacity>
+            <View
+              style={styles.pillIconBtn}
+              accessibilityLabel="Open menu"
+              accessibilityRole="button"
+              accessibilityHint="Shows sorting, grouping, and filter options"
+            >
+              <MoreHorizontal size={18} color={colors.white} strokeWidth={2.5} />
+            </View>
+          </NativeLiquidMenu>
         </View>
       </View>
 
@@ -341,74 +497,18 @@ export default function SubscriptionsListScreen() {
                   end={{ x: 1, y: 1 }}
                   style={styles.groupedListContainer}
                 >
-                  {group.items.map((sub, idx) => {
-                    const isLast = idx === group.items.length - 1;
-
-                    return (
-                      <TouchableOpacity
-                        key={sub.id}
-                        activeOpacity={0.8}
-                        onPress={() => handleCardPress(sub)}
-                        onLongPress={() => handleLongPress(sub)}
-                        style={[
-                          styles.listItemRow,
-                          !isLast && styles.listItemBorder,
-                          sub.isPaused && { opacity: 0.55 },
-                        ]}
-                        accessibilityLabel={`Subscription ${sub.name}`}
-                        accessibilityRole="button"
-                        accessibilityHint="Tap to view details, long press for actions"
-                      >
-                        <View style={styles.listItemLeft}>
-                          <SubscriptionLogo
-                            fields={sub}
-                            name={sub.name}
-                            color={sub.color}
-                            size={40}
-                          />
-                          <View style={styles.listItemTextContainer}>
-                            <View style={{ flexDirection: "row", alignItems: "center", gap: spacing[8] }}>
-                              <AppText style={styles.listItemTitle} numberOfLines={1}>
-                                {sub.name}
-                              </AppText>
-                              {sub.isPaused && (
-                                <View style={styles.pausedPill}>
-                                  <AppText style={styles.pausedPillText}>PAUSED</AppText>
-                                </View>
-                              )}
-                            </View>
-                            <AppText style={styles.listItemSubtitle} numberOfLines={1}>
-                              {sub.isPaused ? "Billing paused" : getRenewalStatusText(sub)}
-                            </AppText>
-                          </View>
-                        </View>
-
-                        <View style={styles.listItemRight}>
-                          <AppText style={styles.listItemPrice}>
-                            {sub.isTrial
-                              ? "Free"
-                              : `${currencySymbol}${getSubscriptionActivePrice(sub).toFixed(2)}`}
-                          </AppText>
-                          <View style={styles.listItemCycleRow}>
-                            {sub.splitEnabled && (
-                              <Users size={11} color={colors.accent} style={{ marginRight: 2 }} />
-                            )}
-                            <AppText style={styles.listItemCycle}>
-                              {sub.isTrial
-                                ? "Trial"
-                                : formatCycleLabel(
-                                    sub.rawBillingCycle,
-                                    sub.billingCycle,
-                                  )}
-                            </AppText>
-                            {!sub.isTrial && (
-                              <Repeat size={11} color={colors.textMuted} />
-                            )}
-                          </View>
-                        </View>
-                      </TouchableOpacity>
-                    );
-                  })}
+                  {group.items.map((sub, idx) => (
+                    <SpringSubscriptionRow
+                      key={sub.id}
+                      sub={sub}
+                      isLast={idx === group.items.length - 1}
+                      currencySymbol={currencySymbol}
+                      getRenewalStatusText={getRenewalStatusText}
+                      formatCycleLabel={formatCycleLabel}
+                      onPress={() => handleCardPress(sub)}
+                      onLongPress={() => handleLongPress(sub)}
+                    />
+                  ))}
                 </LinearGradient>
               </View>
             );
@@ -464,251 +564,6 @@ export default function SubscriptionsListScreen() {
             </AppText>
           </TouchableOpacity>
         </Animated.View>
-      )}
-
-      {/* Popover Menu Dropdown */}
-      {menuVisible && (
-        <>
-          <TouchableOpacity
-            style={StyleSheet.absoluteFill}
-            activeOpacity={1}
-            onPress={() => setMenuVisible(false)}
-          />
-
-          <Animated.View
-            style={[
-              styles.menuCard,
-              {
-                top: insets.top + 60,
-                right: 16,
-                opacity: menuAnim,
-                transform: [
-                  {
-                    scale: menuAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [0.94, 1],
-                    }),
-                  },
-                ],
-              },
-            ]}
-          >
-            {!sortMenuOpen && !groupMenuOpen ? (
-              <>
-                <TouchableOpacity
-                  style={styles.menuRow}
-                  activeOpacity={0.7}
-                  onPress={() => setSortMenuOpen(true)}
-                  accessibilityLabel="Open sort menu"
-                  accessibilityRole="button"
-                  accessibilityHint="Shows sorting options"
-                >
-                  <View style={styles.menuRowLeft}>
-                    <ArrowUpDown size={15} color={colors.white} />
-                    <AppText style={styles.menuText}>Sort By</AppText>
-                  </View>
-                  <ChevronRight size={14} color="rgba(255,255,255,0.4)" />
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.menuRow}
-                  activeOpacity={0.7}
-                  onPress={() => setGroupMenuOpen(true)}
-                  accessibilityLabel="Open group menu"
-                  accessibilityRole="button"
-                  accessibilityHint="Shows grouping options"
-                >
-                  <View style={styles.menuRowLeft}>
-                    <LayoutGrid size={15} color={colors.white} />
-                    <AppText style={styles.menuText}>Group by</AppText>
-                  </View>
-                  <ChevronRight size={14} color="rgba(255,255,255,0.4)" />
-                </TouchableOpacity>
-
-                <View style={styles.menuDivider} />
-
-                <AppText style={styles.menuSectionHeader}>Filter</AppText>
-
-                <TouchableOpacity
-                  style={styles.menuRow}
-                  activeOpacity={0.7}
-                  onPress={() => {
-                    Haptics.selectionAsync();
-                    setHideCancelled(!hideCancelled);
-                  }}
-                  accessibilityLabel="Toggle hide cancelled"
-                  accessibilityRole="switch"
-                  accessibilityState={{ checked: hideCancelled }}
-                  accessibilityHint="Shows or hides cancelled subscriptions"
-                >
-                  <View style={styles.menuRowLeft}>
-                    {hideCancelled && <Check size={14} color={colors.accent} style={{ marginRight: 6 }} />}
-                    <AppText style={[styles.menuText, { marginLeft: hideCancelled ? 0 : 20 }]}>
-                      Hide cancelled
-                    </AppText>
-                  </View>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.menuRow}
-                  activeOpacity={0.7}
-                  onPress={() => {
-                    Haptics.selectionAsync();
-                    setHideExpired(!hideExpired);
-                  }}
-                  accessibilityLabel="Toggle hide expired"
-                  accessibilityRole="switch"
-                  accessibilityState={{ checked: hideExpired }}
-                  accessibilityHint="Shows or hides expired subscriptions"
-                >
-                  <View style={styles.menuRowLeft}>
-                    {hideExpired && <Check size={14} color={colors.accent} style={{ marginRight: 6 }} />}
-                    <AppText style={[styles.menuText, { marginLeft: hideExpired ? 0 : 20 }]}>
-                      Hide expired
-                    </AppText>
-                  </View>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.menuRow}
-                  activeOpacity={0.7}
-                  onPress={() => {
-                    Haptics.selectionAsync();
-                    setHideEnding(!hideEnding);
-                  }}
-                  accessibilityLabel="Toggle hide ending"
-                  accessibilityRole="switch"
-                  accessibilityState={{ checked: hideEnding }}
-                  accessibilityHint="Shows or hides subscriptions ending soon"
-                >
-                  <View style={styles.menuRowLeft}>
-                    {hideEnding && <Check size={14} color={colors.accent} style={{ marginRight: 6 }} />}
-                    <AppText style={[styles.menuText, { marginLeft: hideEnding ? 0 : 20 }]}>
-                      Hide ending
-                    </AppText>
-                  </View>
-                </TouchableOpacity>
-              </>
-            ) : sortMenuOpen ? (
-              <>
-                <TouchableOpacity
-                  style={styles.menuSubHeader}
-                  activeOpacity={0.7}
-                  onPress={() => setSortMenuOpen(false)}
-                >
-                  <ChevronLeft size={14} color={colors.accent} />
-                  <AppText style={styles.menuSubTitle}>Sort By</AppText>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.menuRow}
-                  activeOpacity={0.7}
-                  onPress={() => {
-                    Haptics.selectionAsync();
-                    setSortBy("date");
-                    setSortMenuOpen(false);
-                    setMenuVisible(false);
-                  }}
-                  accessibilityLabel="Sort by renewal date"
-                  accessibilityRole="button"
-                  accessibilityHint="Sorts subscriptions by next renewal date"
-                >
-                  <AppText style={[styles.menuText, { color: sortBy === "date" ? colors.accent : colors.white }]}>
-                    Renewal Date
-                  </AppText>
-                  {sortBy === "date" && <Check size={14} color={colors.accent} />}
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.menuRow}
-                  activeOpacity={0.7}
-                  onPress={() => {
-                    Haptics.selectionAsync();
-                    setSortBy("name");
-                    setSortMenuOpen(false);
-                    setMenuVisible(false);
-                  }}
-                  accessibilityLabel="Sort by name"
-                  accessibilityRole="button"
-                  accessibilityHint="Sorts subscriptions alphabetically"
-                >
-                  <AppText style={[styles.menuText, { color: sortBy === "name" ? colors.accent : colors.white }]}>
-                    Name (A-Z)
-                  </AppText>
-                  {sortBy === "name" && <Check size={14} color={colors.accent} />}
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.menuRow}
-                  activeOpacity={0.7}
-                  onPress={() => {
-                    Haptics.selectionAsync();
-                    setSortBy("price");
-                    setSortMenuOpen(false);
-                    setMenuVisible(false);
-                  }}
-                  accessibilityLabel="Sort by price"
-                  accessibilityRole="button"
-                  accessibilityHint="Sorts subscriptions by price, high to low"
-                >
-                  <AppText style={[styles.menuText, { color: sortBy === "price" ? colors.accent : colors.white }]}>
-                    Price (High to Low)
-                  </AppText>
-                  {sortBy === "price" && <Check size={14} color={colors.accent} />}
-                </TouchableOpacity>
-              </>
-            ) : (
-              <>
-                <TouchableOpacity
-                  style={styles.menuSubHeader}
-                  activeOpacity={0.7}
-                  onPress={() => setGroupMenuOpen(false)}
-                >
-                  <ChevronLeft size={14} color={colors.accent} />
-                  <AppText style={styles.menuSubTitle}>Group By</AppText>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.menuRow}
-                  activeOpacity={0.7}
-                  onPress={() => {
-                    Haptics.selectionAsync();
-                    setGroupBy("category");
-                    setGroupMenuOpen(false);
-                    setMenuVisible(false);
-                  }}
-                  accessibilityLabel="Group by category"
-                  accessibilityRole="button"
-                  accessibilityHint="Groups subscriptions by their category"
-                >
-                  <AppText style={[styles.menuText, { color: groupBy === "category" ? colors.accent : colors.white }]}>
-                    Category
-                  </AppText>
-                  {groupBy === "category" && <Check size={14} color={colors.accent} />}
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.menuRow}
-                  activeOpacity={0.7}
-                  onPress={() => {
-                    Haptics.selectionAsync();
-                    setGroupBy("none");
-                    setGroupMenuOpen(false);
-                    setMenuVisible(false);
-                  }}
-                  accessibilityLabel="Remove grouping"
-                  accessibilityRole="button"
-                  accessibilityHint="Shows all subscriptions in a single list"
-                >
-                  <AppText style={[styles.menuText, { color: groupBy === "none" ? colors.accent : colors.white }]}>
-                    None
-                  </AppText>
-                  {groupBy === "none" && <Check size={14} color={colors.accent} />}
-                </TouchableOpacity>
-              </>
-            )}
-          </Animated.View>
-        </>
       )}
     </View>
   );

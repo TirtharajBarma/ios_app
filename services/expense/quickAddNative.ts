@@ -137,10 +137,14 @@ export async function drainPendingQuickAdds(): Promise<number> {
 
   for (const op of ops) {
     if (!known.has(op.transactionId)) {
+      const state = useExpenseStore.getState();
+      const accountExists = state.accounts.some((a) => a.id === op.accountId);
+      const targetAccountId = accountExists ? op.accountId : (state.accounts[0]?.id || 'acc_primary');
+
       const result = createExpense({
         amount: op.amount,
         categoryId: op.categoryId,
-        accountId: op.accountId,
+        accountId: targetAccountId,
         date: op.date,
         note: op.note,
       });
@@ -150,9 +154,17 @@ export async function drainPendingQuickAdds(): Promise<number> {
         await setQuickAddTransactionId(op.opId, result.transactionId);
         known.add(result.transactionId);
         applied += 1;
+        await ackQuickAdd(op.opId);
+      } else {
+        console.warn(`[quickAddNative] Failed to apply op ${op.opId}: ${result.error}`);
+        // Only ack unrecoverable errors to prevent dropping transactions
+        if (op.amount <= 0 || isNaN(op.amount)) {
+          await ackQuickAdd(op.opId);
+        }
       }
+    } else {
+      await ackQuickAdd(op.opId);
     }
-    await ackQuickAdd(op.opId);
   }
 
   return applied;

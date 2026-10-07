@@ -185,6 +185,7 @@ export const SetOpeningBalancesModal: React.FC<SetOpeningBalancesModalProps> = (
       visible={visible}
       animationType="slide"
       presentationStyle="pageSheet"
+      statusBarTranslucent={true}
       onRequestClose={() => {
         Keyboard.dismiss();
         onClose();
@@ -192,7 +193,7 @@ export const SetOpeningBalancesModal: React.FC<SetOpeningBalancesModalProps> = (
     >
       <KeyboardAvoidingView
         style={[styles.container, { paddingTop: androidTopPadding }]}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
       >
         {/* iOS Drag Handle */}
@@ -225,10 +226,11 @@ export const SetOpeningBalancesModal: React.FC<SetOpeningBalancesModalProps> = (
 
         <ScrollView
           style={styles.scroll}
-          contentContainerStyle={[styles.scrollContent, { paddingBottom: 60 }]}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: Math.max(insets.bottom, 24) + 80 }]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
+          automaticallyAdjustKeyboardInsets={true}
         >
           {/* Guidance Notice */}
           <View style={styles.infoCard}>

@@ -64,9 +64,12 @@ function SummaryCard({
         {/* Amount */}
         <AppText
           variant="title2"
-          weight="800"
+          weight="600"
           color={colors.white}
-          style={{ letterSpacing: 0.25 }}
+          style={{ letterSpacing: -0.3 }}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.75}
         >
           {amount}
         </AppText>

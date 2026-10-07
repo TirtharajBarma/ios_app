@@ -10,8 +10,8 @@ export const expenseColors = {
   textMuted: '#696C75',
 
   accentPeach: '#F8B195',
-  accentGreen: '#70D6BC',
-  accentGreenBg: 'rgba(112, 214, 188, 0.15)',
+  accentGreen: '#A9DFBF',
+  accentGreenBg: 'rgba(169, 223, 191, 0.15)',
   accentRed: '#F48B8B',
   accentRedBg: 'rgba(244, 139, 139, 0.15)',
   accentBlue: '#90CAF9',

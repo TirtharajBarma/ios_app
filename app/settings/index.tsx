@@ -19,6 +19,8 @@ import {
   Users,
   RefreshCw,
   Zap,
+  Lock,
+  Database,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { colors, spacing, radius, getCurrencySymbol, AUTHOR_CREDIT } from "@/constants";
@@ -64,7 +66,7 @@ function Row({ iconBg, icon, label, value, badge, onPress }: RowProps) {
             </AppText>
           </View>
         ) : value ? (
-          <AppText variant="body" color={colors.textMuted} style={{ marginRight: spacing[4] }}>
+          <AppText variant="body" color={colors.textMuted} numberOfLines={1} style={{ marginRight: spacing[4], flexShrink: 1 }}>
             {value}
           </AppText>
         ) : null}
@@ -102,6 +104,7 @@ export default function SettingsIndex() {
           onPress={() => { Haptics.selectionAsync(); router.back(); }}
           style={styles.closeBtn}
           activeOpacity={0.7}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
         >
           <X size={18} color={colors.white} />
         </TouchableOpacity>
@@ -157,14 +160,14 @@ export default function SettingsIndex() {
           </SectionCard>
         </View>
 
-        {/* Section 2 — System & Automation */}
+        {/* Section 2 — System & Security */}
         <View>
           <SectionCard>
             <Row
-              iconBg="#F8B195"
-              icon={<Bell size={18} color="#fff" />}
-              label="Notifications"
-              onPress={() => router.push("/settings/notifications")}
+              iconBg="#5E5CE6"
+              icon={<Lock size={18} color="#fff" />}
+              label="Biometrics & Security"
+              onPress={() => router.push("/settings/privacy")}
             />
             <Divider />
             <Row
@@ -176,8 +179,8 @@ export default function SettingsIndex() {
             <Divider />
             <Row
               iconBg="#8E8E93"
-              icon={<ShieldCheck size={18} color="#fff" />}
-              label="Data & Privacy"
+              icon={<Database size={18} color="#fff" />}
+              label="Data & Storage"
               onPress={() => router.push("/settings/data")}
             />
           </SectionCard>

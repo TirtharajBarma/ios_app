@@ -457,7 +457,28 @@ export function parsePdfDocument(uint8Data: Uint8Array, password?: string): Pars
 
   function decodeHex(hex: string, cmap?: Record<number, string>): string {
     let res = '';
+    const has2ByteCMap = cmap && Object.keys(cmap).some((k) => Number(k) > 255);
+    if (has2ByteCMap && hex.length % 4 === 0) {
+      for (let i = 0; i < hex.length; i += 4) {
+        const code = parseInt(hex.substring(i, i + 4), 16);
+        if (cmap && cmap[code] !== undefined) {
+          res += cmap[code];
+        } else {
+          res += String.fromCharCode(code);
+        }
+      }
+      return res;
+    }
+
     for (let i = 0; i < hex.length; i += 2) {
+      if (cmap && i + 4 <= hex.length) {
+        const code4 = parseInt(hex.substring(i, i + 4), 16);
+        if (cmap[code4] !== undefined) {
+          res += cmap[code4];
+          i += 2;
+          continue;
+        }
+      }
       const code = parseInt(hex.substring(i, i + 2), 16);
       if (cmap && cmap[code] !== undefined) {
         res += cmap[code];

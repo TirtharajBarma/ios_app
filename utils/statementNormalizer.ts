@@ -70,6 +70,55 @@ export function generateCompositeHash(
   return `hash_${Math.abs(hash).toString(36)}_${Math.round(amount)}`;
 }
 
+/**
+ * Parses numeric amounts supporting both US/UK (1,234.56) and European/International (1.234,56) formats
+ */
+export function parseInternationalAmount(str: string): number {
+  if (!str) return 0;
+  // Remove currency symbols and surrounding whitespace
+  let clean = str.replace(/[₹$€£¥Rs.]/gi, (m) => (m === '.' ? '.' : '')).replace(/\s+/g, '').trim();
+  if (!clean) return 0;
+
+  const hasComma = clean.includes(',');
+  const hasDot = clean.includes('.');
+
+  if (hasComma && hasDot) {
+    const lastComma = clean.lastIndexOf(',');
+    const lastDot = clean.lastIndexOf('.');
+    if (lastComma > lastDot) {
+      // European format e.g. 1.234,56
+      clean = clean.replace(/\./g, '').replace(',', '.');
+    } else {
+      // US format e.g. 1,234.56
+      clean = clean.replace(/,/g, '');
+    }
+  } else if (hasComma && !hasDot) {
+    const commaCount = (clean.match(/,/g) || []).length;
+    if (commaCount === 1) {
+      const parts = clean.split(',');
+      if (parts[1].length === 2) {
+        // e.g. 1234,56 -> decimal
+        clean = parts[0] + '.' + parts[1];
+      } else if (parts[1].length === 3) {
+        // e.g. 1,000 -> thousands
+        clean = parts[0] + parts[1];
+      } else {
+        clean = parts[0] + '.' + parts[1];
+      }
+    } else {
+      clean = clean.replace(/,/g, '');
+    }
+  } else if (hasDot && !hasComma) {
+    const dotCount = (clean.match(/\./g) || []).length;
+    if (dotCount > 1) {
+      clean = clean.replace(/\./g, '');
+    }
+  }
+
+  const val = parseFloat(clean);
+  return isNaN(val) ? 0 : val;
+}
+
 // Convert various date formats into standardized ISO "YYYY-MM-DD"
 export function normalizeDateToISO(dateStr: string): string {
   const clean = dateStr.trim();
@@ -492,24 +541,24 @@ export function normalizeStatementData(
         const amountValues: number[] = [];
         for (let i = 0; i < row.items.length; i++) {
           const it = row.items[i];
-          if (it.text.includes('₹') || it.text.includes('$') || it.text.includes('Rs')) {
-            let numStr = it.text.replace(/[₹$,Rs.\s]/g, '').trim();
+          if (it.text.includes('₹') || it.text.includes('$') || it.text.includes('€') || it.text.includes('£') || it.text.includes('Rs')) {
+            let numStr = it.text.replace(/₹|\$|€|£|Rs\.?|INR/gi, '').trim();
             // Handle split tokens e.g. "₹1", ",", "016"
             let nextIdx = i + 1;
             while (
               nextIdx < row.items.length &&
-              (row.items[nextIdx].text === ',' || /^[0-9]+(?:\.[0-9]+)?$/.test(row.items[nextIdx].text))
+              (row.items[nextIdx].text === ',' || /^[0-9]+([.,][0-9]+)?$/.test(row.items[nextIdx].text))
             ) {
               numStr += row.items[nextIdx].text;
               nextIdx++;
             }
-            const val = parseFloat(numStr.replace(/,/g, ''));
-            if (!isNaN(val)) amountValues.push(val);
+            const val = parseInternationalAmount(numStr);
+            if (val > 0) amountValues.push(val);
           } else {
-            const cleanNum = it.text.replace(/,/g, '').trim();
-            if (/^[0-9]+(?:\.[0-9]+)?$/.test(cleanNum)) {
-              const val = parseFloat(cleanNum);
-              if (!isNaN(val) && val < 100000000) {
+            const trimmed = it.text.trim();
+            if (/^[0-9]+([.,][0-9]+)?$/.test(trimmed) && !/^\d{4}$/.test(trimmed)) {
+              const val = parseInternationalAmount(trimmed);
+              if (val > 0 && val < 100000000) {
                 amountValues.push(val);
               }
             }
@@ -532,19 +581,33 @@ export function normalizeStatementData(
         const nonZeroAmounts = amountValues.filter((v) => v > 0);
 
         if (amountValues.length >= 3) {
-          // Format [Col1, Col2, Balance] e.g. [Credit, Debit, Balance] or [Debit, Credit, Balance]
+          // Standard Bank Format: [Col1: Debit/Withdrawal, Col2: Credit/Deposit, Col3: Balance]
           parsedBalance = amountValues[amountValues.length - 1];
           const col1 = amountValues[0];
           const col2 = amountValues[1];
 
           if (col1 > 0 && col2 === 0) {
+            // Col 1 is Debit
             parsedAmount = col1;
-            if (!isExplicitDebit) isIncome = isExplicitCredit || true;
+            isIncome = isExplicitCredit ? true : false;
           } else if (col2 > 0 && col1 === 0) {
+            // Col 2 is Credit
             parsedAmount = col2;
-            if (!isExplicitCredit) isIncome = false;
+            isIncome = isExplicitDebit ? false : true;
+          } else if (col1 > 0 && col2 > 0) {
+            if (isExplicitCredit) {
+              parsedAmount = col2;
+              isIncome = true;
+            } else {
+              parsedAmount = col1;
+              isIncome = false;
+            }
           } else if (col1 > 0) {
             parsedAmount = col1;
+            isIncome = isExplicitCredit ? true : false;
+          } else if (col2 > 0) {
+            parsedAmount = col2;
+            isIncome = isExplicitDebit ? false : true;
           }
         } else if (amountValues.length === 2) {
           parsedAmount = nonZeroAmounts[0] || amountValues[0];
@@ -642,8 +705,15 @@ export function normalizeStatementData(
         // Deduplication signature check
         const compositeHash = generateCompositeHash(isoDate, parsedAmount, txnType, rawNarration);
         const isDuplicate = existingTransactions.some((tx) => {
-          const txHash = generateCompositeHash(tx.date, tx.amount, tx.type, tx.note || '');
-          return txHash === compositeHash;
+          const txHashNote = generateCompositeHash(tx.date, tx.amount, tx.type, tx.note || '');
+          const txHashMerchant = generateCompositeHash(tx.date, tx.amount, tx.type, tx.merchant || '');
+          if (txHashNote === compositeHash || txHashMerchant === compositeHash) return true;
+          if (tx.date === isoDate && Math.abs(tx.amount - parsedAmount) < 0.01 && tx.type === txnType) {
+            const rawLower = rawNarration.toLowerCase();
+            if (tx.merchant && rawLower.includes(tx.merchant.toLowerCase())) return true;
+            if (tx.note && rawLower.includes(tx.note.toLowerCase())) return true;
+          }
+          return false;
         });
 
         const targetAccId = resolveAccountId(rowAccountName);
@@ -703,7 +773,7 @@ export function normalizeStatementData(
 
       if (isAppHeader && cleanParts.length >= 5) {
         dateStr = cleanParts[1] || dateStr;
-        amount = Math.abs(parseFloat(cleanParts[2])) || 0;
+        amount = Math.abs(parseInternationalAmount(cleanParts[2])) || 0;
         isIncome = cleanParts[3]?.toLowerCase() === 'income';
         const catMatch = existingCategories.find(
           (c) => c.id === cleanParts[4] || c.name.toLowerCase() === cleanParts[4]?.toLowerCase()
@@ -728,10 +798,10 @@ export function normalizeStatementData(
         );
         const numbers =
           lineWithoutDate.match(
-            /(?:₹|\$|INR)?\s*(?:-|\()?\s*([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]{1,2})?|[0-9]+(?:\.[0-9]{1,2})?)\)?/g
+            /(?:₹|\$|€|£|INR)?\s*(?:-|\()?\s*([0-9]{1,3}(?:[.,][0-9]{3})+(?:[.,][0-9]{1,2})?|[0-9]+(?:[.,][0-9]{1,2})?)\)?/g
           ) || [];
         const cleanNums = numbers
-          .map((n) => parseFloat(n.replace(/[₹$, INR()\s]/g, '').replace(/^-/, '')))
+          .map((n) => parseInternationalAmount(n))
           .filter((n) => !isNaN(n) && n > 0 && n < 10000000);
 
         const isSalaryOrIncome = /salary|payroll|dividend|refund|cashback|bonus|stipend|interest credit/i.test(line);
@@ -760,8 +830,15 @@ export function normalizeStatementData(
         const txnType: TransactionType = isIncome ? 'income' : 'expense';
         const compositeHash = generateCompositeHash(dateStr, amount, txnType, narration);
         const isDuplicate = existingTransactions.some((tx) => {
-          const txHash = generateCompositeHash(tx.date, tx.amount, tx.type, tx.note || '');
-          return txHash === compositeHash;
+          const txHashNote = generateCompositeHash(tx.date, tx.amount, tx.type, tx.note || '');
+          const txHashMerchant = generateCompositeHash(tx.date, tx.amount, tx.type, tx.merchant || '');
+          if (txHashNote === compositeHash || txHashMerchant === compositeHash) return true;
+          if (tx.date === dateStr && Math.abs(tx.amount - amount) < 0.01 && tx.type === txnType) {
+            const nLower = narration.toLowerCase();
+            if (tx.merchant && nLower.includes(tx.merchant.toLowerCase())) return true;
+            if (tx.note && nLower.includes(tx.note.toLowerCase())) return true;
+          }
+          return false;
         });
 
         stagedTxs.push({

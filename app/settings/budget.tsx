@@ -152,13 +152,14 @@ export default function MonthlyBudgetScreen() {
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
       >
         <ScrollView
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
+          automaticallyAdjustKeyboardInsets={true}
           contentContainerStyle={[
             styles.scrollContent,
             { paddingBottom: insets.bottom + 90 },
@@ -236,7 +237,7 @@ export default function MonthlyBudgetScreen() {
                   <TextInput
                     value={budgetInput}
                     onChangeText={setBudgetInput}
-                    keyboardType="numeric"
+                    keyboardType="decimal-pad"
                     returnKeyType="done"
                     onSubmitEditing={() => Keyboard.dismiss()}
                     style={styles.largeAmountInput}
@@ -369,11 +370,11 @@ export default function MonthlyBudgetScreen() {
                         >
                           {renderCategoryIcon(cat.iconName, cat.id, cat.color)}
                         </View>
-                        <View>
-                          <AppText style={styles.catNameText}>
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <AppText style={styles.catNameText} numberOfLines={1}>
                             {cat.name.toUpperCase()}
                           </AppText>
-                          <AppText style={styles.catSubText}>
+                          <AppText style={styles.catSubText} numberOfLines={1}>
                             {currentBudget > 0
                               ? `${currencySymbol}${currentBudget.toLocaleString('en-IN')} budget`
                               : 'No budget set'}
@@ -386,6 +387,7 @@ export default function MonthlyBudgetScreen() {
                         <TouchableOpacity
                           style={styles.stepperBtn}
                           activeOpacity={0.7}
+                          hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
                           onPress={() => handleAdjustCategory(cat.id, -100)}
                         >
                           <Minus size={14} color="#FFFFFF" />
@@ -412,6 +414,7 @@ export default function MonthlyBudgetScreen() {
                         <TouchableOpacity
                           style={styles.stepperBtn}
                           activeOpacity={0.7}
+                          hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
                           onPress={() => handleAdjustCategory(cat.id, 100)}
                         >
                           <Plus size={14} color="#FFFFFF" />
@@ -452,7 +455,6 @@ export default function MonthlyBudgetScreen() {
           </View>
         )}
       </ScrollView>
-      </KeyboardAvoidingView>
 
       {/* Save Button Fixed at Bottom */}
       <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
@@ -464,6 +466,7 @@ export default function MonthlyBudgetScreen() {
           <AppText style={styles.saveBtnText}>Save Budget Goal</AppText>
         </TouchableOpacity>
       </View>
+      </KeyboardAvoidingView>
     </View>
   );
 }
@@ -710,6 +713,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     flex: 1,
+    minWidth: 0,
   },
   catIconBox: {
     width: 38,
@@ -732,11 +736,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flexShrink: 0,
   },
   stepperBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: '#22242F',
     alignItems: 'center',
     justifyContent: 'center',

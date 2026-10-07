@@ -52,7 +52,7 @@ const SectionHeader = forwardRef<View, SectionHeaderProps>(function SectionHeade
       ]}
     >
       <View style={{ flex: 1 }}>
-        <AppText variant="title3" weight="700">
+        <AppText variant="title3" weight="700" numberOfLines={1}>
           {title}
         </AppText>
         {subtitle && (
@@ -60,6 +60,7 @@ const SectionHeader = forwardRef<View, SectionHeaderProps>(function SectionHeade
             variant="subheadline"
             color={colors.textSecondary}
             style={{ marginTop: 2 }}
+            numberOfLines={2}
           >
             {subtitle}
           </AppText>

@@ -302,8 +302,8 @@ export default function SharedScreen() {
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === "android" ? "height" : undefined}
-        keyboardVerticalOffset={0}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 12 : 0}
       >
         <ScrollView
           ref={scrollRef}
@@ -517,6 +517,7 @@ export default function SharedScreen() {
       <Modal
         visible={!!createdGroup}
         transparent
+        statusBarTranslucent={true}
         animationType="fade"
         onRequestClose={() => setCreatedGroup(null)}
       >

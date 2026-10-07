@@ -286,12 +286,13 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
       visible={visible}
       animationType="slide"
       presentationStyle="pageSheet"
+      statusBarTranslucent={true}
       onRequestClose={onClose}
     >
       <View style={[styles.container, { paddingTop: androidTopPadding }]}>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={onClose} style={styles.headerBtn}>
+          <TouchableOpacity onPress={onClose} style={styles.headerBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
             <X size={22} color="#A0A5B5" />
           </TouchableOpacity>
 
@@ -322,14 +323,14 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity onPress={handleOpenAdd} style={styles.addBtn}>
+          <TouchableOpacity onPress={handleOpenAdd} style={styles.addBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
             <Plus size={18} color="#FFFFFF" strokeWidth={2.4} />
           </TouchableOpacity>
         </View>
 
         <ScrollView
           style={styles.scroll}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 40 }]}
           showsVerticalScrollIndicator={false}
         >
           {activeTab === 'accounts' ? (
@@ -511,7 +512,7 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
               {showSurplusBanner && (
                 <View style={styles.surplusBanner}>
                   <View style={styles.surplusBannerHeader}>
-                    <Sparkles size={14} color="#70D6BC" />
+                    <Sparkles size={14} color="#A9DFBF" />
                     <AppText style={styles.surplusBannerTitle}>MONTHLY LEFTOVER BUDGET</AppText>
                   </View>
                   <AppText style={styles.surplusBannerDesc}>
@@ -754,7 +755,7 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
                     style={styles.amountInput}
                     placeholder="0"
                     placeholderTextColor="#555866"
-                    keyboardType="numeric"
+                    keyboardType="decimal-pad"
                     returnKeyType="done"
                     onSubmitEditing={Keyboard.dismiss}
                     value={actionAmount}
@@ -925,7 +926,7 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
                     style={styles.formInput}
                     placeholder="e.g. 50000"
                     placeholderTextColor="#555866"
-                    keyboardType="numeric"
+                    keyboardType="decimal-pad"
                     returnKeyType="done"
                     onSubmitEditing={Keyboard.dismiss}
                     value={goalTarget}
@@ -1144,17 +1145,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    minWidth: 0,
   },
   accountName: {
     color: '#FFFFFF',
     fontSize: 15,
     lineHeight: 20,
     fontWeight: '700',
+    flexShrink: 1,
   },
   dueBadge: {
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 6,
+    flexShrink: 0,
   },
   dueBadgeUpcoming: {
     backgroundColor: 'rgba(255, 157, 102, 0.15)',
@@ -1163,7 +1167,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 107, 107, 0.15)',
   },
   dueBadgePaid: {
-    backgroundColor: 'rgba(112, 214, 188, 0.12)',
+    backgroundColor: 'rgba(169, 223, 191, 0.12)',
   },
   dueBadgeText: {
     fontSize: 9,
@@ -1652,7 +1656,7 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: 'rgba(112, 214, 188, 0.3)',
+    borderColor: 'rgba(169, 223, 191, 0.3)',
     gap: 8,
   },
   surplusBannerHeader: {
@@ -1661,7 +1665,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   surplusBannerTitle: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
     fontSize: 11,
     fontWeight: '800',
     letterSpacing: 0.8,
@@ -1678,15 +1682,15 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   surplusActionBtn: {
-    backgroundColor: 'rgba(112, 214, 188, 0.15)',
+    backgroundColor: 'rgba(169, 223, 191, 0.15)',
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: 'rgba(112, 214, 188, 0.3)',
+    borderColor: 'rgba(169, 223, 191, 0.3)',
   },
   surplusActionBtnText: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
     fontSize: 11,
     fontWeight: '700',
   },

@@ -38,7 +38,7 @@ export const DisciplineScoreCard: React.FC = () => {
   const streakDays = useMemo(() => {
     const now = new Date();
     const currentDay = now.getDate();
-    if (currentDay <= 1) return 1;
+    if (currentDay < 1) return 0;
 
     // Check expense transactions in the current month
     const dailySpendMap: Record<number, number> = {};
@@ -68,7 +68,8 @@ export const DisciplineScoreCard: React.FC = () => {
         }
       });
 
-    const averageDailyLimit = monthlyBudget > 0 ? Math.round(monthlyBudget / 30) : 1000;
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const averageDailyLimit = monthlyBudget > 0 ? Math.round(monthlyBudget / daysInMonth) : 1000;
     let streak = 0;
 
     for (let day = currentDay; day >= 1; day--) {
@@ -81,7 +82,7 @@ export const DisciplineScoreCard: React.FC = () => {
       }
     }
 
-    return Math.max(1, streak);
+    return streak;
   }, [transactions, monthlyBudget]);
 
   // 2. Compute 0-100 Financial Health Score
@@ -125,14 +126,14 @@ export const DisciplineScoreCard: React.FC = () => {
     score = Math.min(100, Math.max(0, score));
 
     let label = 'Strong';
-    let color = '#70D6BC';
+    let color = '#A9DFBF';
 
     if (score >= 90) {
       label = 'Elite';
-      color = '#70D6BC';
+      color = '#A9DFBF';
     } else if (score >= 75) {
       label = 'Healthy';
-      color = '#70D6BC';
+      color = '#A9DFBF';
     } else if (score >= 50) {
       label = 'Moderate';
       color = '#FF9D66';
@@ -181,7 +182,7 @@ export const DisciplineScoreCard: React.FC = () => {
         <View style={styles.pillar}>
           <View style={styles.pillarHeader}>
             <View style={styles.iconCircleMint}>
-              <ShieldCheck size={13} color="#70D6BC" />
+              <ShieldCheck size={13} color="#A9DFBF" />
             </View>
             <AppText style={styles.pillarTitle}>HEALTH</AppText>
           </View>
@@ -241,7 +242,7 @@ const styles = StyleSheet.create({
     width: 18,
     height: 18,
     borderRadius: 9,
-    backgroundColor: 'rgba(112, 214, 188, 0.12)',
+    backgroundColor: 'rgba(169, 223, 191, 0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },

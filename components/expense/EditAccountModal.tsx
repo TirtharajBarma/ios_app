@@ -45,6 +45,7 @@ interface EditAccountModalProps {
   visible: boolean;
   account: ExpenseAccount | null; // null = Add Account mode
   onClose: () => void;
+  onDeleted?: () => void;
 }
 
 type AccountType = 'savings' | 'credit' | 'wallet' | 'cash';
@@ -53,6 +54,7 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
   visible,
   account,
   onClose,
+  onDeleted,
 }) => {
   const {
   addAccount,
@@ -266,6 +268,7 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
           onPress: () => {
             deleteAccount(account.id);
             onClose();
+            onDeleted?.();
           },
         },
       ]
@@ -280,11 +283,12 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
       visible={visible}
       animationType="slide"
       presentationStyle="pageSheet"
+      statusBarTranslucent={true}
       onRequestClose={onClose}
     >
       <KeyboardAvoidingView
         style={[styles.container, { paddingTop: androidTopPadding }]}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
       >
         {/* Header */}
@@ -306,10 +310,11 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
 
         <ScrollView
           style={styles.scroll}
-          contentContainerStyle={[styles.scrollContent, { paddingBottom: 40 }]}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: Math.max(insets.bottom, 24) + 80 }]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
+          automaticallyAdjustKeyboardInsets={true}
         >
           {/* ACCOUNT NAME */}
           <View style={styles.section}>
@@ -641,7 +646,7 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
                     style={styles.textInput}
                     placeholder="0"
                     placeholderTextColor="#555866"
-                    keyboardType="numeric"
+                    keyboardType="decimal-pad"
                     value={openingBalance}
                     onChangeText={setOpeningBalance}
                     returnKeyType="done"
@@ -661,7 +666,7 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
                       style={styles.textInput}
                       placeholder="e.g. 400"
                       placeholderTextColor="#555866"
-                      keyboardType="numeric"
+                      keyboardType="decimal-pad"
                       value={currentBalanceInput}
                       onChangeText={setCurrentBalanceInput}
                       returnKeyType="done"

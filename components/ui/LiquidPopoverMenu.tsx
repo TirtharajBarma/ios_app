@@ -64,7 +64,7 @@ export const LiquidPopoverMenu: React.FC<LiquidPopoverMenuProps> = ({
   }
 
   return (
-    <Modal visible={visible} transparent={true} animationType="fade" onRequestClose={onClose}>
+    <Modal visible={visible} transparent={true} statusBarTranslucent={true} animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.overlay} onPress={onClose}>
         <View style={[styles.menuWrapper, { top, left, width: MENU_WIDTH }]}>
           <BlurView intensity={95} tint="dark" style={styles.blurContainer}>
@@ -130,7 +130,7 @@ export const LiquidPopoverMenu: React.FC<LiquidPopoverMenuProps> = ({
                       }}
                     >
                       {footerAction.icon || <Plus size={14} color="#FF9D66" />}
-                      <AppText style={styles.footerBtnText}>{footerAction.label}</AppText>
+                      <AppText style={styles.footerBtnText} numberOfLines={1}>{footerAction.label}</AppText>
                     </TouchableOpacity>
                   </>
                 )}

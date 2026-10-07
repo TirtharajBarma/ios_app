@@ -32,8 +32,6 @@ function getClient(): SupabaseClient | null {
   }
   client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: {
-      // Persist the anonymous session so the SAME device identity (and its
-      // group memberships) survives app restarts at the OS level.
       storage: AsyncStorage,
       persistSession: true,
       autoRefreshToken: true,
@@ -146,6 +144,19 @@ export async function renameShareGroup(groupId: string, name: string): Promise<v
     p_name: name,
   });
   if (error) rpcError(error.message);
+}
+
+export async function rotateShareGroupCode(groupId: string): Promise<string | null> {
+  const supabase = await ensureSession();
+  if (!supabase) return null;
+  const { data, error } = await supabase.rpc("rotate_group_code", {
+    p_group_id: groupId,
+  });
+  if (error) {
+    rpcError(error.message);
+    return null;
+  }
+  return data as string;
 }
 
 /**

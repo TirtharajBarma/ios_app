@@ -194,6 +194,7 @@ export const SplitDetailsModal: React.FC<SplitDetailsModalProps> = ({
       visible={visible}
       animationType="slide"
       presentationStyle="pageSheet"
+      statusBarTranslucent={true}
       onRequestClose={onClose}
     >
       <View style={[styles.modalContainer, { paddingTop: androidTopPadding }]}>
@@ -434,7 +435,7 @@ export const SplitDetailsModal: React.FC<SplitDetailsModalProps> = ({
                     </View>
 
                     {/* Friend Name & Share Info */}
-                    <View style={styles.participantInfo}>
+                    <View style={[styles.participantInfo, { flex: 1 }]}>
                       <AppText
                         style={[
                           styles.participantName,
@@ -464,6 +465,7 @@ export const SplitDetailsModal: React.FC<SplitDetailsModalProps> = ({
                         <TouchableOpacity
                           style={styles.settlePersonBtn}
                           activeOpacity={0.8}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                           onPress={() => handleSettleFriend(friend)}
                         >
                           <Check size={11} color={expenseColors.accentGreen} strokeWidth={3} />
@@ -854,11 +856,13 @@ const styles = StyleSheet.create({
   settlePersonBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
+    justifyContent: 'center',
+    minHeight: 32,
+    gap: 4,
     backgroundColor: 'rgba(112, 214, 188, 0.12)',
-    paddingHorizontal: 8,
-    paddingVertical: 3.5,
-    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: 'rgba(112, 214, 188, 0.3)',
   },

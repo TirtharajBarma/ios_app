@@ -44,6 +44,10 @@ yarn-error.*
 
 # build artifacts
 *.apk
+*.ipa
+*.aab
+build/
+/build
 
 eas.json
 

@@ -26,6 +26,7 @@ import {
   Receipt,
   Wallet,
   FileText,
+  Sparkles,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { AppText } from '@/components/ui';
@@ -49,6 +50,7 @@ export default function TransactionDetailScreen() {
     transactions,
     categories,
     accounts,
+    savingsVaults,
     currencySymbol,
     formatAmount,
     removeTransactions,
@@ -59,6 +61,7 @@ export default function TransactionDetailScreen() {
       transactions: s.transactions,
       categories: s.categories,
       accounts: s.accounts,
+      savingsVaults: s.savingsVaults,
       currencySymbol: s.currencySymbol,
       formatAmount: s.formatAmount,
       removeTransactions: s.removeTransactions,
@@ -143,6 +146,7 @@ export default function TransactionDetailScreen() {
   const isExpense = transaction?.type === 'expense';
   const isIncome = transaction?.type === 'income';
   const isTransfer = transaction?.type === 'transfer';
+  const isGoal = transaction?.type === 'vault_deposit' || transaction?.type === 'vault_withdraw' || transaction?.categoryId === 'cat_goal';
   const isDebtLend = transaction?.type === 'debt_lend';
   const isDebtBorrow = transaction?.type === 'debt_borrow';
   const isDebt = isDebtLend || isDebtBorrow;
@@ -150,16 +154,26 @@ export default function TransactionDetailScreen() {
 
   const displayTitle = useMemo(() => {
     if (!transaction) return '';
+    if (isGoal || transaction.vaultId) {
+      const cleanNote = transaction.note?.trim() || '';
+      const matchGoal = /^(?:Saved to|Withdrawn from|Refund from deleted goal:?)\s*(.+)$/i.exec(cleanNote);
+      const vault = transaction.vaultId ? (savingsVaults || []).find((v) => v.id === transaction.vaultId) : null;
+      const fallbackName = matchGoal ? matchGoal[1].trim() : cleanNote || 'Savings Goal';
+      return vault ? `${vault.emoji ? vault.emoji + ' ' : ''}${vault.name}`.trim() : fallbackName;
+    }
     if (transaction.merchant) return transaction.merchant;
     if (transaction.note) {
       return transaction.note.includes(' - ') ? transaction.note.split(' - ')[0] : transaction.note;
     }
     if (isTransfer) return 'Account Transfer';
     return category.name;
-  }, [transaction, isTransfer, category]);
+  }, [transaction, isTransfer, category, isGoal, savingsVaults]);
 
   const displayMemo = useMemo(() => {
     if (!transaction) return null;
+    if (isGoal) {
+      return transaction.note?.trim() || null;
+    }
     if (transaction.merchant && transaction.note && transaction.note.trim()) {
       return transaction.note.trim();
     }
@@ -168,7 +182,7 @@ export default function TransactionDetailScreen() {
       return parts.slice(1).join(' - ').trim() || null;
     }
     return null;
-  }, [transaction]);
+  }, [transaction, isGoal]);
 
   const handleDelete = () => {
     if (!transaction) return;
@@ -236,11 +250,16 @@ export default function TransactionDetailScreen() {
   let typeLabel = 'EXPENSE';
   let typeBadgeBg = 'rgba(248, 177, 149, 0.15)';
 
-  if (isIncome) {
+  if (isGoal) {
+    amountPrefix = transaction.type === 'vault_withdraw' ? '+' : '';
+    amountColor = expenseColors.accentGreen;
+    typeLabel = transaction.type === 'vault_withdraw' ? 'GOAL WITHDRAWAL' : 'GOAL';
+    typeBadgeBg = expenseColors.accentGreenBg;
+  } else if (isIncome) {
     amountPrefix = '+';
     amountColor = expenseColors.accentGreen;
     typeLabel = 'INCOME';
-    typeBadgeBg = 'rgba(112, 214, 188, 0.15)';
+    typeBadgeBg = expenseColors.accentGreenBg;
   } else if (isTransfer) {
     amountPrefix = '⇄ ';
     amountColor = '#9DC6EB';
@@ -248,14 +267,14 @@ export default function TransactionDetailScreen() {
     typeBadgeBg = 'rgba(157, 198, 235, 0.15)';
   } else if (isDebtLend) {
     amountPrefix = '-';
-    amountColor = transaction.isSettled ? '#70D6BC' : '#F48B8B';
+    amountColor = transaction.isSettled ? expenseColors.accentGreen : '#F48B8B';
     typeLabel = transaction.isSettled ? 'LENT · SETTLED' : 'LENT (RECEIVABLE)';
-    typeBadgeBg = transaction.isSettled ? 'rgba(112, 214, 188, 0.15)' : 'rgba(244, 139, 139, 0.15)';
+    typeBadgeBg = transaction.isSettled ? expenseColors.accentGreenBg : 'rgba(244, 139, 139, 0.15)';
   } else if (isDebtBorrow) {
     amountPrefix = '+';
-    amountColor = transaction.isSettled ? '#70D6BC' : '#F4CD89';
+    amountColor = transaction.isSettled ? expenseColors.accentGreen : '#F4CD89';
     typeLabel = transaction.isSettled ? 'BORROWED · SETTLED' : 'BORROWED (PAYABLE)';
-    typeBadgeBg = transaction.isSettled ? 'rgba(112, 214, 188, 0.15)' : 'rgba(244, 205, 137, 0.15)';
+    typeBadgeBg = transaction.isSettled ? expenseColors.accentGreenBg : 'rgba(244, 205, 137, 0.15)';
   }
 
   const splitAllSettled = Boolean(
@@ -455,7 +474,7 @@ export default function TransactionDetailScreen() {
                     <AppText style={styles.fieldValue}>{fromAccount?.name || transaction.accountName || 'Account'}</AppText>
                     {fromAccount && (
                       <AppText style={styles.fieldSubtext}>
-                        {fromAccount.type === 'credit' ? 'Credit Card' : 'Bank / Wallet'} • Balance: {sym}{fromAccount.balance.toLocaleString('en-IN')}
+                        {fromAccount.type === 'credit' ? 'Credit Card' : 'Bank / Wallet'} • Balance: {sym}{(fromAccount.balance ?? 0).toLocaleString('en-IN')}
                       </AppText>
                     )}
                   </View>
@@ -562,6 +581,27 @@ export default function TransactionDetailScreen() {
               </TouchableOpacity>
             </>
           )}
+
+          {/* Budget Month Allocation */}
+          {transaction.allocatedMonth && (
+            <>
+              <View style={styles.groupedRowDivider} />
+              <View style={styles.groupedRowItem}>
+                <View style={styles.iconRowLeft}>
+                  <View style={[styles.tileIconCircle, { backgroundColor: 'rgba(112, 214, 188, 0.16)' }]}>
+                    <Sparkles size={16} color={expenseColors.accentGreen} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <AppText style={styles.fieldLabel}>BUDGET CYCLE ALLOCATION</AppText>
+                    <AppText style={styles.fieldValue}>{transaction.allocatedMonth}</AppText>
+                    <AppText style={styles.fieldSubtext}>
+                      Funds {transaction.allocatedMonth} cash flow & leftover
+                    </AppText>
+                  </View>
+                </View>
+              </View>
+            </>
+          )}
         </View>
 
         {/* ══════════════════════════════════════════════
@@ -588,7 +628,7 @@ export default function TransactionDetailScreen() {
                 </View>
                 <View style={styles.splitKpiBox}>
                   <AppText style={styles.splitKpiLabel}>FRIENDS OWE</AppText>
-                  <AppText style={[styles.splitKpiValue, { color: '#70D6BC' }]}>
+                  <AppText style={[styles.splitKpiValue, { color: expenseColors.accentGreen }]}>
                     {formatAmount(transaction.split.friendsShare)}
                   </AppText>
                 </View>
@@ -605,8 +645,8 @@ export default function TransactionDetailScreen() {
                   {transaction.split.friends.map((f, idx) => (
                     <View key={f.id || idx} style={styles.friendRowItem}>
                       <View style={{ flex: 1 }}>
-                        <AppText style={styles.friendNameText}>{f.name}</AppText>
-                        <AppText style={styles.friendAmountText}>{formatAmount(f.amount)}</AppText>
+                        <AppText style={styles.friendNameText} numberOfLines={1}>{f.name}</AppText>
+                        <AppText style={styles.friendAmountText} numberOfLines={1}>{formatAmount(f.amount)}</AppText>
                       </View>
 
                       {f.settled ? (
@@ -882,6 +922,8 @@ const styles = StyleSheet.create({
   },
   receiptMetaCol: {
     flex: 1,
+    minWidth: 0,
+    paddingHorizontal: 2,
     alignItems: 'center',
   },
   receiptMetaLabel: {

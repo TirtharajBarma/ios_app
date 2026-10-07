@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, TouchableOpacity, Animated, LayoutAnimation, Platform, UIManager } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Animated, LayoutAnimation, Platform, UIManager, PanResponder, Easing } from 'react-native';
+import { Zap, ArrowLeftRight } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { AppText } from '@/components/ui';
 import { useExpenseStore } from '@/store/useExpenseStore';
@@ -13,14 +14,14 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 }
 
 const customSpringLayout = {
-  duration: 320,
+  duration: 250,
   create: {
     type: LayoutAnimation.Types.easeInEaseOut,
     property: LayoutAnimation.Properties.opacity,
   },
   update: {
     type: LayoutAnimation.Types.spring,
-    springDamping: 0.72,
+    springDamping: 0.76,
   },
   delete: {
     type: LayoutAnimation.Types.easeInEaseOut,
@@ -34,46 +35,45 @@ interface MonthSummaryProps {
 
 export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) => {
   const {
-  selectedMonth,
-  currencySymbol,
-  monthlyBudget,
-  getTotalBalance,
-  getTotalSpent,
-  getRemainingBudget,
-  getCategoryBreakdown,
-  accounts,
-  transactions,
-  formatAmount,
-} = useExpenseStore(
-  useShallow((s) => ({
-    selectedMonth: s.selectedMonth,
-    currencySymbol: s.currencySymbol,
-    monthlyBudget: s.monthlyBudget,
-    getTotalBalance: s.getTotalBalance,
-    getTotalSpent: s.getTotalSpent,
-    getRemainingBudget: s.getRemainingBudget,
-    getCategoryBreakdown: s.getCategoryBreakdown,
-    accounts: s.accounts,
-    transactions: s.transactions,
-    formatAmount: s.formatAmount,
-  }))
-);
+    selectedMonth,
+    currencySymbol,
+    monthlyBudget,
+    savingsVaults,
+    getTotalBalance,
+    getTotalSpent,
+    getRemainingBudget,
+    getCategoryBreakdown,
+    accounts,
+    transactions,
+    formatAmount,
+  } = useExpenseStore(
+    useShallow((s) => ({
+      selectedMonth: s.selectedMonth,
+      currencySymbol: s.currencySymbol,
+      monthlyBudget: s.monthlyBudget,
+      savingsVaults: s.savingsVaults,
+      getTotalBalance: s.getTotalBalance,
+      getTotalSpent: s.getTotalSpent,
+      getRemainingBudget: s.getRemainingBudget,
+      getCategoryBreakdown: s.getCategoryBreakdown,
+      accounts: s.accounts,
+      transactions: s.transactions,
+      formatAmount: s.formatAmount,
+    }))
+  );
 
   const sym = currencySymbol || '₹';
   const [selectedCatId, setSelectedCatId] = useState<string | null>(null);
+  const [heroMode, setHeroMode] = useState<'budget' | 'total_balance'>('budget');
+  const isBudgetMode = heroMode === 'budget';
 
   // Left column entrance. Once per mount, never re-armed by a store flag.
   const balanceAnim = useRef(new Animated.Value(0)).current;
   const chipFadeAnim = useRef(new Animated.Value(0)).current;
+  const heroFlipAnim = useRef(new Animated.Value(1)).current;
+  const dotAnim = useRef(new Animated.Value(0)).current; // 0 = budget, 1 = total_balance
 
   // Per-category entrance values, keyed by category id.
-  //
-  // This used to be a positional array indexed by render order, while
-  // `categoriesWithSpend` is sorted by amount descending. Adding a transaction
-  // therefore reshuffled which category sat at each index, and any value created
-  // after the entrance effect had already run was left at 0 forever — invisible.
-  // Keying by id means a value belongs to its category for the component's
-  // lifetime, and the effect below can animate in exactly the ones that are new.
   const arcAnimMap = useRef(new Map<string, Animated.Value>()).current;
   const knownArcIds = useRef(new Set<string>());
   const hasRunArcEntrance = useRef(false);
@@ -86,17 +86,62 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
   // Active accounts breakdown for transparent net balance explanation
   const bankCash = accounts
     .filter((a) => a.type !== 'credit' && !a.isArchived)
-    .reduce((sum, a) => sum + Math.max(0, a.balance), 0);
+    .reduce((sum, a) => sum + (a.balance || 0), 0);
   const cardDues = accounts
     .filter((a) => a.type === 'credit' && !a.isArchived)
     .reduce((sum, a) => sum + (a.dueAmount || 0), 0);
 
-  // ── Predictive Runway Algorithm ──
-  const now = new Date();
-  const currentDay = Math.max(now.getDate(), 1);
-  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  const remainingDays = Math.max(daysInMonth - currentDay, 1);
-  const safeDailyAllowance = remainingBudget > 0 ? Math.round(remainingBudget / remainingDays) : 0;
+  // ── HERO SWITCH SPEED CONTROLS ───────────────────────────────────────────
+  // Adjust `tension` (higher = faster) and `friction` (lower = bouncier) below.
+  const HERO_SPRING_TENSION = 280; // Try 200 (medium) -> 350 (ultra fast)
+  const HERO_SPRING_FRICTION = 18; // Try 14 (bouncier) -> 22 (tighter)
+
+  const switchHeroMode = (targetMode: 'budget' | 'total_balance') => {
+    if (targetMode === heroMode) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+
+    // Instant state swap on the exact same frame (zero lag)
+    setHeroMode(targetMode);
+
+    // Micro-spring transition
+    heroFlipAnim.setValue(0.5);
+    Animated.parallel([
+      Animated.spring(heroFlipAnim, {
+        toValue: 1,
+        tension: HERO_SPRING_TENSION,
+        friction: HERO_SPRING_FRICTION,
+        useNativeDriver: true,
+      }),
+      Animated.spring(dotAnim, {
+        toValue: targetMode === 'budget' ? 0 : 1,
+        tension: HERO_SPRING_TENSION,
+        friction: HERO_SPRING_FRICTION,
+        useNativeDriver: false,
+      }),
+    ]).start();
+  };
+
+  const toggleHeroMode = () => {
+    const nextMode = heroMode === 'budget' ? 'total_balance' : 'budget';
+    switchHeroMode(nextMode);
+  };
+
+  // Smooth swipe gestures on hero
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        return Math.abs(gestureState.dx) > 12 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.5;
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dx < -25) {
+          switchHeroMode('total_balance');
+        } else if (gestureState.dx > 25) {
+          switchHeroMode('budget');
+        }
+      },
+    })
+  ).current;
 
   // Filter categories excluding income, prioritizing categories with spend sorted descending
   const categoriesWithSpend = breakdown
@@ -145,10 +190,6 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
   const currentSelectedId = currentCategoryInfo?.category.id || null;
   const totalArcCount = arcItems.length;
 
-  // Idempotent cache fill so the very first paint already has a value bound to
-  // every arc. Mutating a ref here is safe because it is keyed by a stable id
-  // and only ever adds — unlike the positional array it replaces, it can never
-  // hand a category someone else's animation value.
   for (const item of arcItems) {
     if (!arcAnimMap.has(item.category.id)) {
       arcAnimMap.set(item.category.id, new Animated.Value(0));
@@ -159,9 +200,6 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
     const isFirstRun = !hasRunArcEntrance.current;
     hasRunArcEntrance.current = true;
 
-    // Animate only the arcs that are new since the previous run. On mount that
-    // is every arc (the staggered cascade); afterwards it is just a category
-    // that has newly appeared because a transaction was added to it.
     const enteringIds = arcItems
       .map((item) => item.category.id)
       .filter((id) => !knownArcIds.current.has(id));
@@ -170,8 +208,6 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
     if (enteringIds.length === 0) return;
 
     if (!isFirstRun) {
-      // A category that dropped out of the breakdown and came back is already
-      // sitting at 1, so rewind it to replay the entrance.
       enteringIds.forEach((id) => arcAnimMap.get(id)?.setValue(0));
     }
 
@@ -179,9 +215,9 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
       enteringIds.map((id, i) =>
         Animated.spring(arcAnimMap.get(id) as Animated.Value, {
           toValue: 1,
-          tension: 55,
-          friction: 7,
-          delay: isFirstRun ? i * 45 : 0,
+          tension: 140,
+          friction: 10,
+          delay: isFirstRun ? i * 20 : 0,
           useNativeDriver: true,
         })
       )
@@ -196,13 +232,13 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
     Animated.parallel([
       Animated.timing(balanceAnim, {
         toValue: 1,
-        duration: 500,
+        duration: 220,
         useNativeDriver: true,
       }),
       Animated.timing(chipFadeAnim, {
         toValue: 1,
-        duration: 400,
-        delay: 200,
+        duration: 180,
+        delay: 60,
         useNativeDriver: true,
       }),
     ]).start();
@@ -227,18 +263,18 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
     onCategorySelect?.(catId);
 
     // Quick chip bump
-    chipFadeAnim.setValue(0.3);
+    chipFadeAnim.setValue(0.65);
     Animated.spring(chipFadeAnim, {
       toValue: 1,
-      tension: 70,
-      friction: 8,
+      tension: 180,
+      friction: 12,
       useNativeDriver: true,
     }).start();
   };
 
   return (
     <View style={styles.container}>
-      {/* Left Column: Date, Total Liquid Balance, Budget Runway, Category Highlight */}
+      {/* Left Column: Date, Interactive Hero (Safe to Spend ⇄ Total Balance), Category Highlight */}
       <Animated.View
         style={[
           styles.leftColumn,
@@ -249,41 +285,145 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
               {
                 translateY: balanceAnim.interpolate({
                   inputRange: [0, 1],
-                  outputRange: [14, 0],
+                  outputRange: [6, 0],
                 }),
               },
             ],
           },
         ]}
       >
-        {/* Month Label */}
-        <AppText style={styles.monthLabel}>{selectedMonth}</AppText>
+        {/* Clean, Uniform Month Label */}
+        <AppText style={styles.monthLabel}>
+          {(selectedMonth || '').toUpperCase()}
+        </AppText>
 
-        {/* Primary Focus: Total Net Balance Across Accounts */}
-        <View style={styles.balanceSection}>
-          <AppText style={styles.balanceTitle}>TOTAL BALANCE</AppText>
-
-          <AppText
-            style={styles.balanceAmount}
-            numberOfLines={1}
-            adjustsFontSizeToFit={true}
-            minimumFontScale={0.7}
+        {/* Primary Focus: Tap / Swipe Hero (Safe to Spend ⇄ Total Balance) */}
+        <View {...panResponder.panHandlers}>
+          <TouchableOpacity
+            style={styles.balanceSection}
+            onPress={toggleHeroMode}
+            activeOpacity={0.8}
           >
-            {formatAmount(totalBalance)}
-          </AppText>
+            <Animated.View
+              style={{
+                opacity: heroFlipAnim,
+                transform: [
+                  {
+                    translateY: heroFlipAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [5, 0],
+                    }),
+                  },
+                ],
+              }}
+            >
+              <AppText style={styles.balanceTitle}>
+                {isBudgetMode
+                  ? monthlyBudget > 0
+                    ? remainingBudget < 0
+                      ? 'Over budget'
+                      : 'Safe to spend'
+                    : 'Total spent'
+                  : 'Total balance'}
+              </AppText>
 
-          {/* Clean, separated breakdown badges */}
-          <View style={styles.accountChipsRow}>
-            <View style={styles.accountChip}>
-              <AppText style={styles.accountChipLabel}>Bank </AppText>
-              <AppText style={styles.accountChipVal}>{formatAmount(bankCash)}</AppText>
-            </View>
-            {cardDues > 0 ? (
-              <View style={[styles.accountChip, styles.accountChipDue]}>
-                <AppText style={styles.accountChipDueLabel}>Bills </AppText>
-                <AppText style={styles.accountChipDueVal}>{formatAmount(cardDues)}</AppText>
+              <AppText
+                numberOfLines={1}
+                style={[
+                  styles.balanceAmount,
+                  isBudgetMode && monthlyBudget > 0 && remainingBudget < 0 && styles.negativeAmount,
+                  !isBudgetMode && totalBalance < 0 && styles.negativeAmount,
+                ]}
+              >
+                {isBudgetMode
+                  ? monthlyBudget > 0
+                    ? remainingBudget < 0
+                      ? `+${formatAmount(Math.abs(remainingBudget))}`
+                      : formatAmount(remainingBudget)
+                    : formatAmount(totalSpent)
+                  : formatAmount(totalBalance)}
+              </AppText>
+
+              {/* Symmetrical Context Badges Row (Same height, zero jump) */}
+              <View style={styles.chipsRowContainer}>
+                {isBudgetMode ? (
+                  <View style={styles.accountChipsRow}>
+                    <View style={styles.accountChip}>
+                      <AppText style={styles.accountChipLabel}>Budget </AppText>
+                      <AppText style={styles.accountChipVal}>
+                        {monthlyBudget > 0 ? formatAmount(monthlyBudget) : 'No limit'}
+                      </AppText>
+                    </View>
+                    <View style={styles.accountChip}>
+                      <AppText style={styles.accountChipLabel}>Spent </AppText>
+                      <AppText style={styles.accountChipVal}>{formatAmount(totalSpent)}</AppText>
+                    </View>
+                  </View>
+                ) : (
+                  <View style={styles.accountChipsRow}>
+                    <View style={styles.accountChip}>
+                      <AppText style={styles.accountChipLabel}>Bank </AppText>
+                      <AppText style={styles.accountChipVal}>{formatAmount(bankCash)}</AppText>
+                    </View>
+                    {cardDues > 0 && (
+                      <View style={[styles.accountChip, styles.accountChipDue]}>
+                        <AppText style={styles.accountChipDueLabel}>Bills </AppText>
+                        <AppText style={styles.accountChipDueVal}>{formatAmount(cardDues)}</AppText>
+                      </View>
+                    )}
+                  </View>
+                )}
               </View>
-            ) : null}
+            </Animated.View>
+          </TouchableOpacity>
+
+          {/* Interactive Pagination Indicator Dots */}
+          <View style={styles.dotsRow}>
+            <TouchableOpacity
+              style={styles.dotTouch}
+              onPress={() => switchHeroMode('budget')}
+              activeOpacity={0.7}
+              hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+            >
+              <Animated.View
+                style={[
+                  styles.dot,
+                  {
+                    width: dotAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [16, 5],
+                    }),
+                    backgroundColor: dotAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: ['#FFFFFF', 'rgba(255, 255, 255, 0.25)'],
+                    }),
+                  },
+                ]}
+              />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.dotTouch}
+              onPress={() => switchHeroMode('total_balance')}
+              activeOpacity={0.7}
+              hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+            >
+              <Animated.View
+                style={[
+                  styles.dot,
+                  {
+                    width: dotAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [5, 16],
+                    }),
+                    backgroundColor: dotAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: ['rgba(255, 255, 255, 0.25)', '#FFFFFF'],
+                    }),
+                  },
+                ]}
+              />
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -325,7 +465,7 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
         ) : null}
       </Animated.View>
 
-      {/* Right Column: Dynamic Floating Overlapping Category Arc */}
+      {/* Right Column: Dynamic Floating Overlapping Category Arc (Preserved!) */}
       {arcItems.length > 0 && (
         <View style={styles.floatingMenuContainer}>
           {arcItems.map((item, index) => {
@@ -406,8 +546,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    marginTop: 18,
-    marginBottom: 32,
+    marginTop: 45,
+    marginBottom: 45,
   },
   leftColumn: {
     flex: 1,
@@ -415,70 +555,112 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   monthLabel: {
-    color: '#9CA3AF',
-    fontSize: 15,
-    lineHeight: 20,
-    fontWeight: '800',
-    letterSpacing: 1.2,
-    marginBottom: 10,
-    textTransform: 'uppercase',
-  },
-  balanceSection: {
-    marginBottom: 14,
-  },
-  balanceTitle: {
     color: '#8E95A5',
     fontSize: 12,
     lineHeight: 16,
     fontWeight: '700',
-    letterSpacing: 0.8,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    marginBottom: 8,
+  },
+  balanceSection: {
+    marginBottom: 0,
+  },
+  balanceHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
+  },
+  balanceTitle: {
+    color: '#8E95A5',
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '500',
+    letterSpacing: 0,
     marginBottom: 4,
   },
   balanceAmount: {
     color: expenseColors.textPrimary,
-    fontSize: 34,
-    lineHeight: 40,
-    fontWeight: '800',
+    fontSize: 38,
+    lineHeight: 44,
+    fontWeight: '400',
     letterSpacing: -0.5,
+  },
+  negativeAmount: {
+    color: '#FF6B6B',
+  },
+  chipsRowContainer: {
+    minHeight: 28,
+    justifyContent: 'center',
+    marginTop: 10,
+    marginBottom: 2,
+  },
+  dotsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 6,
+    marginBottom: 0,
+  },
+  dotTouch: {
+    paddingVertical: 4,
+    paddingHorizontal: 2,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  dot: {
+    height: 4.5,
+    borderRadius: 2.5,
   },
   accountChipsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginTop: 6,
+    gap: 8,
+    flexWrap: 'wrap',
   },
   accountChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.07)',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 14,
   },
   accountChipLabel: {
-    color: '#8E919D',
-    fontSize: 11,
-    fontWeight: '600',
+    color: '#8E95A5',
+    fontSize: 12,
+    fontWeight: '500',
   },
   accountChipVal: {
-    color: '#E1E4EA',
-    fontSize: 11,
+    color: '#FFFFFF',
+    fontSize: 12,
     fontWeight: '700',
   },
   accountChipDue: {
-    backgroundColor: 'rgba(244, 139, 139, 0.08)',
-    borderColor: 'rgba(244, 139, 139, 0.18)',
+    backgroundColor: 'rgba(244, 139, 139, 0.1)',
   },
   accountChipDueLabel: {
     color: '#F48B8B',
-    fontSize: 11,
-    fontWeight: '600',
+    fontSize: 12,
+    fontWeight: '500',
   },
   accountChipDueVal: {
     color: '#F48B8B',
-    fontSize: 11,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  accountChipVault: {
+    backgroundColor: 'rgba(169, 223, 191, 0.1)',
+  },
+  accountChipVaultLabel: {
+    color: '#A9DFBF',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  accountChipVaultVal: {
+    color: '#A9DFBF',
+    fontSize: 12,
     fontWeight: '700',
   },
   categoryChip: {
@@ -502,6 +684,7 @@ const styles = StyleSheet.create({
     color: '#D1D5DB',
     fontSize: 12,
     fontWeight: '600',
+    flexShrink: 1,
   },
   categoryChipAmount: {
     color: '#FFFFFF',

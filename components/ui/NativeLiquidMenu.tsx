@@ -38,6 +38,7 @@ export interface NativeLiquidMenuProps {
   title?: string;
   actions: MenuAction[];
   onSelect: (actionId: string) => void;
+  onPress?: () => void;
   children: React.ReactNode;
   shouldOpenOnLongPress?: boolean;
   style?: StyleProp<ViewStyle>;
@@ -54,6 +55,7 @@ export const NativeLiquidMenu: React.FC<NativeLiquidMenuProps> = ({
   title,
   actions,
   onSelect,
+  onPress,
   children,
   shouldOpenOnLongPress,
   style,
@@ -86,7 +88,7 @@ export const NativeLiquidMenu: React.FC<NativeLiquidMenuProps> = ({
             list.push({
               id: sub.id ?? sub.title,
               label: sub.title,
-              subLabel: sub.subLabel,
+              subLabel: sub.subLabel || (action.title ? `${action.title.toUpperCase()}` : undefined),
               disabled: sub.attributes?.disabled,
               color: sub.attributes?.destructive
                 ? expenseColors.accentRed
@@ -109,10 +111,16 @@ export const NativeLiquidMenu: React.FC<NativeLiquidMenuProps> = ({
     return list;
   }, [visibleActions]);
 
-  const selectedId = useMemo(
-    () => visibleActions.find((action) => action.state === 'on')?.id,
-    [visibleActions]
-  );
+  const selectedId = useMemo(() => {
+    for (const action of visibleActions) {
+      if (action.state === 'on') return action.id;
+      if (action.subactions) {
+        const activeSub = action.subactions.find((s) => s.state === 'on');
+        if (activeSub) return activeSub.id;
+      }
+    }
+    return undefined;
+  }, [visibleActions]);
 
   const handleSelect = useCallback(
     (option: LiquidDropdownOption<string>) => {
@@ -159,7 +167,7 @@ export const NativeLiquidMenu: React.FC<NativeLiquidMenuProps> = ({
     <View style={[isFullWidth ? { width: '100%', alignSelf: 'stretch' } : { alignSelf: 'flex-start' }, style]}>
       <Pressable
         style={isFullWidth ? { width: '100%', alignSelf: 'stretch' } : { alignSelf: 'flex-start' }}
-        onPress={shouldOpenOnLongPress ? undefined : openMenu}
+        onPress={shouldOpenOnLongPress ? (onPress ?? undefined) : openMenu}
         onLongPress={
           shouldOpenOnLongPress
             ? () => {

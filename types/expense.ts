@@ -82,6 +82,7 @@ export interface ExpenseTransaction {
   settledTxId?: string; // ID of the auto-generated settlement transaction for this debt/split
   settlementTxId?: string; // ID of the debt/split transaction this settlement resolves
   subscriptionId?: string; // Linked subscription ID in useSubscriptionStore
+  allocatedMonth?: string; // Optional budget month allocation override (e.g. "NOVEMBER 2026")
   createdAt?: number | string; // Creation timestamp for accurate time-wise reverse-chronological ordering
 }
 

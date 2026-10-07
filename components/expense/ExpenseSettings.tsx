@@ -15,6 +15,7 @@ import {
   LayoutAnimation,
   UIManager,
   Keyboard,
+  Image,
 } from 'react-native';
 import { useRouter, useNavigation, useFocusEffect, useScrollToTop } from 'expo-router';
 import { handleTabFocus } from '@/services/navigation/tabTracker';
@@ -157,7 +158,7 @@ const AVAILABLE_COLORS = [
   '#82D0D8', // Seafoam Teal
   '#8CD9C8', // Warm Mint
   '#A3D6B2', // Sage Celadon
-  '#70D6BC', // Emerald Mint
+  '#A9DFBF', // Emerald Mint
   '#F4CD89', // Warm Buttercream
   '#F4A261', // Warm Amber
   '#E5B299', // Warm Sand
@@ -628,7 +629,7 @@ export const ExpenseSettings: React.FC = () => {
                 showBorder={true}
               />
               <View style={styles.avatarPrivateBadge}>
-                <ShieldCheck size={10} color="#70D6BC" strokeWidth={2.5} />
+                <ShieldCheck size={10} color="#A9DFBF" strokeWidth={2.5} />
               </View>
             </View>
 
@@ -647,12 +648,12 @@ export const ExpenseSettings: React.FC = () => {
                 {userEmail.trim() || '100% on-device encrypted'}
               </AppText>
 
-              <View style={styles.profileActionPromptRow}>
+              {/* <View style={styles.profileActionPromptRow}>
                 <Sparkles size={11} color={expenseColors.accentPeach} />
                 <AppText style={styles.profileActionPromptText}>
                   Personalization & Avatar
                 </AppText>
-              </View>
+              </View> */}
             </View>
 
             {/* Subtle Chevron Action Affordance */}
@@ -733,6 +734,8 @@ export const ExpenseSettings: React.FC = () => {
                 setIsEditingCategories(!isEditingCategories);
               }}
               activeOpacity={0.7}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={styles.editActionTouch}
             >
               <AppText
                 style={[
@@ -976,6 +979,12 @@ export const ExpenseSettings: React.FC = () => {
 
         {/* Footer Credit & Version */}
         <View style={styles.footerCreditWrap}>
+          <Image
+            source={require('@/assets/images/monevo-logo.png')}
+            style={styles.footerBrandLogo}
+            resizeMode="contain"
+          />
+          <AppText style={styles.footerBrandTitle}>MONEVO</AppText>
           <AppText style={styles.footerVersionText}>
             Version {updateInfo.activeVersion || CURRENT_RELEASE_VERSION} {updateInfo.isEmbeddedLaunch ? '· Base' : '· OTA'}
           </AppText>
@@ -991,6 +1000,7 @@ export const ExpenseSettings: React.FC = () => {
       <Modal
         visible={isCategoryModalVisible}
         transparent
+        statusBarTranslucent={true}
         animationType="none"
         onRequestClose={closeCategoryModal}
       >
@@ -1023,7 +1033,7 @@ export const ExpenseSettings: React.FC = () => {
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="on-drag"
               showsVerticalScrollIndicator={false}
-              automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+              automaticallyAdjustKeyboardInsets={true}
               style={{ backgroundColor: '#1A1D23' }}
               contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 24) + 40, backgroundColor: '#1A1D23' }}
             >
@@ -1143,6 +1153,7 @@ export const ExpenseSettings: React.FC = () => {
       <Modal
         visible={isCurrencyModalVisible}
         transparent
+        statusBarTranslucent={true}
         animationType="none"
         onRequestClose={closeCurrencyModal}
       >
@@ -1185,6 +1196,8 @@ export const ExpenseSettings: React.FC = () => {
                 onChangeText={setCurrencySearch}
                 placeholder="Search currency..."
                 placeholderTextColor="#5A5E6D"
+                autoCapitalize="none"
+                autoCorrect={false}
                 style={styles.searchInput}
                 returnKeyType="done"
                 blurOnSubmit={true}
@@ -1212,7 +1225,7 @@ export const ExpenseSettings: React.FC = () => {
               onScrollBeginDrag={() => Keyboard.dismiss()}
               contentContainerStyle={{ paddingBottom: insets.bottom + 24, backgroundColor: '#1A1D23' }}
               style={{ backgroundColor: '#1A1D23' }}
-              automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+              automaticallyAdjustKeyboardInsets={true}
             >
               {filteredCurrencies.map((item) => {
                 const isSelected = currencyCode === item.code;
@@ -1784,18 +1797,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 8,
-    backgroundColor: 'rgba(112, 214, 188, 0.15)',
+    backgroundColor: 'rgba(169, 223, 191, 0.15)',
     borderWidth: 0.8,
-    borderColor: 'rgba(112, 214, 188, 0.3)',
+    borderColor: 'rgba(169, 223, 191, 0.3)',
   },
   updateBadgeDotGreen: {
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#70D6BC',
+    backgroundColor: '#A9DFBF',
   },
   updateBadgeTextGreen: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
     fontSize: 10,
     fontWeight: '800',
     letterSpacing: 0.5,
@@ -1825,6 +1838,13 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  editActionTouch: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    minHeight: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   editActionText: {
     color: expenseColors.textSubtle,
@@ -1975,7 +1995,7 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     backgroundColor: '#16171E',
     borderWidth: 1.2,
-    borderColor: 'rgba(112, 214, 188, 0.4)',
+    borderColor: 'rgba(169, 223, 191, 0.4)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1997,15 +2017,15 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   profileTypeBadge: {
-    backgroundColor: 'rgba(112, 214, 188, 0.15)',
+    backgroundColor: 'rgba(169, 223, 191, 0.15)',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 6,
     borderWidth: 0.8,
-    borderColor: 'rgba(112, 214, 188, 0.3)',
+    borderColor: 'rgba(169, 223, 191, 0.3)',
   },
   profileTypeBadgeText: {
-    color: '#70D6BC',
+    color: '#A9DFBF',
     fontSize: 9.5,
     fontWeight: '800',
     letterSpacing: 0.6,
@@ -2249,6 +2269,19 @@ const styles = StyleSheet.create({
     marginTop: 24,
     marginBottom: 20,
     gap: 4,
+  },
+  footerBrandLogo: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    marginBottom: 2,
+  },
+  footerBrandTitle: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 2.5,
+    marginBottom: 2,
   },
   footerVersionText: {
     color: 'rgba(255, 255, 255, 0.55)',

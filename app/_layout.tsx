@@ -8,13 +8,14 @@ import * as LocalAuthentication from "expo-local-authentication";
 
 import { initDatabase } from "@/database/database";
 import { initAuditLogs, installConsoleCapture, logAction, logWarn, logInfo, logException } from "@/utils/auditLog";
-import { requestNotificationPermissions } from "@/utils/notifications";
+import { requestNotificationPermissions, rescheduleAllAppNotifications } from "@/utils/notifications";
 import AsyncStorage from "@/utils/storage";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
+import { useExpenseStore, monthKeyOf } from "@/store/useExpenseStore";
 import { isSupabaseConfigured, fetchShareGroups, updateMyName } from "@/api/supabase";
 import { initSharedRealtimeSync } from "@/utils/sync";
-import { drainPendingQuickAdds } from "@/services/expense/quickAddNative";
+import { drainPendingQuickAdds, syncShortcutsParameters } from "@/services/expense/quickAddNative";
 import { checkAndAutoApplyUpdates } from "@/services/updates/updateManager";
 import { trackDeviceTelemetry } from "@/services/telemetry/deviceTracker";
 import { colors, radius } from "@/constants";
@@ -38,6 +39,7 @@ function triggerSharedSync() {
  */
 function drainQuickAdds() {
   drainPendingQuickAdds().catch(() => {});
+  syncShortcutsParameters().catch(() => {});
 }
 
 export default function RootLayout() {
@@ -51,7 +53,24 @@ export default function RootLayout() {
   // Initial setup: load db and lock the app on start if faceId is enabled in storage
   useEffect(() => {
     async function initialize() {
+      let isBiometricProtected = false;
       try {
+        // Read lock preference BEFORE any database, network, or UI operations
+        let settingsStr = await AsyncStorage.getItem("@expense_settings_v3");
+        if (!settingsStr) {
+          settingsStr = await AsyncStorage.getItem("@legacy_settings_v3");
+        }
+        if (settingsStr) {
+          try {
+            const parsed = JSON.parse(settingsStr);
+            if (parsed.faceIdEnabled) {
+              isBiometricProtected = true;
+              setIsLocked(true);
+              setTimeout(() => authenticate(), 150);
+            }
+          } catch {}
+        }
+
         logInfo("app", "App launch started");
         installConsoleCapture();
         // Best-effort, non-blocking: never delay the UI behind log init.
@@ -114,24 +133,16 @@ export default function RootLayout() {
 
         // Non-blocking background check for OTA updates and 2-day auto-apply
         checkAndAutoApplyUpdates().catch(() => {});
-        trackDeviceTelemetry().catch(() => {});
-
-        let settingsStr = await AsyncStorage.getItem("@expense_settings_v3");
-        if (!settingsStr) {
-          settingsStr = await AsyncStorage.getItem("@legacy_settings_v3");
+        if (useSettingsStore.getState().analyticsEnabled) {
+          trackDeviceTelemetry().catch(() => {});
         }
-        if (settingsStr) {
-          const parsed = JSON.parse(settingsStr);
-          if (parsed.faceIdEnabled) {
-            setIsLocked(true);
-            setIsReady(true);
-            setTimeout(() => authenticate(), 150);
-            return;
-          }
-        }
+        rescheduleAllAppNotifications().catch(() => {});
       } catch (e) {
         logException("app", "Startup initialization failed", e);
         console.warn("Startup initialization failed:", e);
+        if (isBiometricProtected) {
+          setIsLocked(true); // Fail closed
+        }
       }
       setIsReady(true);
     }
@@ -146,15 +157,13 @@ export default function RootLayout() {
         const types = await LocalAuthentication.supportedAuthenticationTypesAsync();
         const hasFaceId = types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION);
         setBiometricLabel(hasFaceId ? "Unlock with Face ID" : "Unlock with Fingerprint");
-      }
-      if (!hasHW || !enrolled) {
-        setIsLocked(false);
-        return;
+      } else {
+        setBiometricLabel("Unlock with Passcode");
       }
 
       authState.isAuthenticating = true;
       const result = await LocalAuthentication.authenticateAsync({
-        promptMessage: "Unlock App",
+        promptMessage: "Unlock Monevo",
         fallbackLabel: "Use Passcode",
         disableDeviceFallback: false,
       });
@@ -163,13 +172,15 @@ export default function RootLayout() {
         setIsLocked(false);
         logAction("security", "App unlocked via biometrics");
       } else {
+        // Fail closed
         setIsLocked(true);
         logWarn("security", "Biometric unlock cancelled or failed");
       }
     } catch (e) {
       logException("security", "Biometric authentication error", e);
       console.warn("Auth failed:", e);
-      setIsLocked(false); // Fallback to prevent permanent lockouts
+      // Fail closed: never unlock the app on error
+      setIsLocked(true);
     } finally {
       // Clear flag after small delay to let AppState state transitions settle
       setTimeout(() => {
@@ -199,6 +210,7 @@ export default function RootLayout() {
 
         triggerSharedSync();
         drainQuickAdds();
+        useExpenseStore.getState().setSelectedMonth(monthKeyOf());
       }
       appState.current = nextAppState;
     });

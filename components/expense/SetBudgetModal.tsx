@@ -9,6 +9,7 @@ import {
   Platform,
   Keyboard,
   StatusBar,
+  ScrollView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Target, X, Check, ArrowRight, Sparkles } from 'lucide-react-native';
@@ -84,6 +85,7 @@ export const SetBudgetModal: React.FC<SetBudgetModalProps> = ({
       visible={visible}
       animationType="slide"
       presentationStyle="pageSheet"
+      statusBarTranslucent={true}
       onRequestClose={() => {
         Keyboard.dismiss();
         onClose();
@@ -91,8 +93,8 @@ export const SetBudgetModal: React.FC<SetBudgetModalProps> = ({
     >
       <KeyboardAvoidingView
         style={[styles.container, { paddingTop: androidTopPadding }]}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
       >
         {/* Drag Handle */}
         {Platform.OS === 'ios' && (
@@ -128,67 +130,76 @@ export const SetBudgetModal: React.FC<SetBudgetModalProps> = ({
           </TouchableOpacity>
         </View>
 
-        {/* Content Body */}
-        <View style={styles.contentBody}>
-          {/* Informational Box */}
-          <View style={styles.infoCard}>
-            <Target size={18} color="#FF9D66" style={{ marginTop: 2 }} />
-            <View style={{ flex: 1 }}>
-              <AppText style={styles.infoTitle}>Why set a budget?</AppText>
-              <AppText style={styles.infoText}>
-                Bank statements contain historical expenses, but not your personal target limit. Setting a budget helps calculate your safe-to-spend daily runway.
-              </AppText>
+        {/* Content Body wrapped in ScrollView for guaranteed keyboard avoidance */}
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingBottom: 24 }}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+          automaticallyAdjustKeyboardInsets={true}
+        >
+          <View style={styles.contentBody}>
+            {/* Informational Box */}
+            <View style={styles.infoCard}>
+              <Target size={18} color="#FF9D66" style={{ marginTop: 2 }} />
+              <View style={{ flex: 1 }}>
+                <AppText style={styles.infoTitle}>Why set a budget?</AppText>
+                <AppText style={styles.infoText}>
+                  Bank statements contain historical expenses, but not your personal target limit. Setting a budget helps calculate your safe-to-spend daily runway.
+                </AppText>
+              </View>
             </View>
-          </View>
 
-          {/* Amount Input Box */}
-          <View style={styles.inputSection}>
-            <AppText style={styles.inputLabel}>MONTHLY TARGET AMOUNT</AppText>
-            <View style={styles.inputRow}>
-              <AppText style={styles.currencyPrefix}>{sym}</AppText>
-              <TextInput
-                style={styles.amountInput}
-                value={budgetInput}
-                onChangeText={setBudgetInput}
-                placeholder="30,000"
-                placeholderTextColor="#6C7082"
-                keyboardType="numeric"
-                returnKeyType="done"
-                onSubmitEditing={handleSave}
-              />
+            {/* Amount Input Box */}
+            <View style={styles.inputSection}>
+              <AppText style={styles.inputLabel}>MONTHLY TARGET AMOUNT</AppText>
+              <View style={styles.inputRow}>
+                <AppText style={styles.currencyPrefix}>{sym}</AppText>
+                <TextInput
+                  style={styles.amountInput}
+                  value={budgetInput}
+                  onChangeText={setBudgetInput}
+                  placeholder="30,000"
+                  placeholderTextColor="#6C7082"
+                  keyboardType="decimal-pad"
+                  returnKeyType="done"
+                  onSubmitEditing={handleSave}
+                />
+              </View>
             </View>
-          </View>
 
-          {/* Quick Presets Grid */}
-          <View style={styles.presetsSection}>
-            <AppText style={styles.presetsLabel}>QUICK PRESETS</AppText>
-            <View style={styles.presetsGrid}>
-              {BUDGET_PRESETS.map((amount) => {
-                const isSelected = budgetInput.trim().replace(/,/g, '') === amount.toString();
-                return (
-                  <TouchableOpacity
-                    key={amount}
-                    style={[
-                      styles.presetChip,
-                      isSelected && styles.presetChipSelected,
-                    ]}
-                    activeOpacity={0.75}
-                    onPress={() => handleSelectPreset(amount)}
-                  >
-                    <AppText
+            {/* Quick Presets Grid */}
+            <View style={styles.presetsSection}>
+              <AppText style={styles.presetsLabel}>QUICK PRESETS</AppText>
+              <View style={styles.presetsGrid}>
+                {BUDGET_PRESETS.map((amount) => {
+                  const isSelected = budgetInput.trim().replace(/,/g, '') === amount.toString();
+                  return (
+                    <TouchableOpacity
+                      key={amount}
                       style={[
-                        styles.presetChipText,
-                        isSelected && styles.presetChipTextSelected,
+                        styles.presetChip,
+                        isSelected && styles.presetChipSelected,
                       ]}
+                      activeOpacity={0.75}
+                      onPress={() => handleSelectPreset(amount)}
                     >
-                      {formatAmount(amount)}
-                    </AppText>
-                  </TouchableOpacity>
-                );
-              })}
+                      <AppText
+                        style={[
+                          styles.presetChipText,
+                          isSelected && styles.presetChipTextSelected,
+                        ]}
+                      >
+                        {formatAmount(amount)}
+                      </AppText>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             </View>
           </View>
-        </View>
+        </ScrollView>
 
         {/* Bottom Save Action Button */}
         <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>

@@ -25,6 +25,7 @@ import SummaryCard from "@/components/cards/SummaryCard";
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { getSubscriptionActivePrice, toMonthly } from "@/utils/date";
+import { parseISO, startOfDay } from "date-fns";
 import type { Subscription } from "@/types/subscription";
 
 function AnalyticsScreen() {
@@ -50,9 +51,9 @@ function AnalyticsScreen() {
 
   // Billing cycle breakdown (memoized)
   const cycleBreakdown = React.useMemo(() => ({
-    monthly: subscriptions.filter((s) => s.billingCycle === "monthly" && !s.isTrial).length,
-    yearly: subscriptions.filter((s) => s.billingCycle === "yearly" && !s.isTrial).length,
-    other: subscriptions.filter((s) => !["monthly", "yearly"].includes(s.billingCycle) && !s.isTrial).length,
+    monthly: subscriptions.filter((s) => s.billingCycle === "monthly" && !s.isTrial && !s.isPaused).length,
+    yearly: subscriptions.filter((s) => s.billingCycle === "yearly" && !s.isTrial && !s.isPaused).length,
+    other: subscriptions.filter((s) => !["monthly", "yearly"].includes(s.billingCycle) && !s.isTrial && !s.isPaused).length,
   }), [subscriptions]);
 
   // Trial status
@@ -62,8 +63,8 @@ function AnalyticsScreen() {
       (s) =>
         s.isTrial &&
         s.trialEndDate &&
-        new Date(s.trialEndDate).getTime() > nowTime &&
-        new Date(s.trialEndDate).getTime() - nowTime < 7 * 24 * 60 * 60 * 1000
+        startOfDay(parseISO(s.trialEndDate)).getTime() >= nowTime &&
+        parseISO(s.trialEndDate).getTime() - nowTime < 7 * 24 * 60 * 60 * 1000
     );
   }, [subscriptions, nowTime]);
 
@@ -85,7 +86,7 @@ function AnalyticsScreen() {
       categoryMap.set(cat, (categoryMap.get(cat) || 0) + monthly);
     }
     const sorted = Array.from(categoryMap.entries()).sort((a, b) => b[1] - a[1]);
-    return { categories: sorted, maxCategorySpend: sorted.length > 0 ? sorted[0][1] : 1 };
+    return { categories: sorted, maxCategorySpend: sorted.length > 0 && sorted[0][1] > 0 ? sorted[0][1] : 1 };
   }, [subscriptions]);
 
   return (
@@ -173,11 +174,11 @@ function AnalyticsScreen() {
                   </View>
                   <View style={styles.categoryList}>
                     {categories.map(([name, amount], idx) => {
-                      const barWidth = (amount / maxCategorySpend) * 100;
+                      const barWidth = Math.min(100, Math.max(0, (amount / (maxCategorySpend || 1)) * 100));
                       return (
                         <View key={name} style={styles.categoryRow}>
                           <View style={styles.categoryLabel}>
-                            <AppText variant="footnote" color={colors.textSecondary} style={{ width: 90 }}>
+                            <AppText variant="footnote" color={colors.textSecondary} style={{ flex: 1, minWidth: 0, marginRight: 8 }} numberOfLines={1}>
                               {name}
                             </AppText>
                             <AppText variant="footnote" weight="600" color={colors.white}>
@@ -310,9 +311,10 @@ function getCategoryColor(index: number): string {
 function getMostExpensive(subs: Subscription[]): string {
   let max = 0;
   for (const sub of subs) {
-    if (sub.isTrial) continue;
+    if (sub.isTrial || sub.isPaused) continue;
     const effectivePrice = getSubscriptionActivePrice(sub);
-    if (effectivePrice > max) max = effectivePrice;
+    const monthly = toMonthly(effectivePrice, sub.rawBillingCycle || sub.billingCycle, sub.customIntervalMonths);
+    if (monthly > max) max = monthly;
   }
   return max > 0 ? max.toFixed(2) : "0.00";
 }
