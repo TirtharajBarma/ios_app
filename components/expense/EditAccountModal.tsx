@@ -46,6 +46,7 @@ interface EditAccountModalProps {
   account: ExpenseAccount | null; // null = Add Account mode
   onClose: () => void;
   onDeleted?: () => void;
+  onSaved?: (accountName?: string) => void;
 }
 
 type AccountType = 'savings' | 'credit' | 'wallet' | 'cash';
@@ -55,6 +56,7 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
   account,
   onClose,
   onDeleted,
+  onSaved,
 }) => {
   const {
   addAccount,
@@ -228,6 +230,7 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
     }
 
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    onSaved?.(name.trim());
     onClose();
   };
 

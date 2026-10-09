@@ -15,6 +15,7 @@ try {
   if (Notifications && Notifications.setNotificationHandler) {
     Notifications.setNotificationHandler({
       handleNotification: async () => ({
+        shouldShowAlert: true,
         shouldPlaySound: true,
         shouldSetBadge: true,
         shouldShowBanner: true,
@@ -57,6 +58,7 @@ export async function notifySharedChange(kind: SharedChangeKind, subName: string
             ? `${subName} was updated by ${publisher}.`
             : `${publisher} removed ${subName} from the group.`,
         sound: true,
+        ...(Platform.OS === "android" ? { channelId: REMINDER_CHANNEL } : {}),
       },
       trigger: null, // null = deliver immediately
     });
@@ -72,13 +74,19 @@ export async function requestNotificationPermissions(): Promise<boolean> {
     if (Platform.OS === "android") {
       await Notifications.setNotificationChannelAsync(REMINDER_CHANNEL, {
         name: "Subscription Reminders",
-        importance: Notifications.AndroidImportance.HIGH,
+        importance: Notifications.AndroidImportance.MAX,
         vibrationPattern: [0, 250, 250, 250],
+        enableLights: true,
+        enableVibrate: true,
+        showBadge: true,
       });
       await Notifications.setNotificationChannelAsync(EXPENSE_CHANNEL, {
         name: "Daily Expense Reminders",
-        importance: Notifications.AndroidImportance.HIGH,
+        importance: Notifications.AndroidImportance.MAX,
         vibrationPattern: [0, 250, 250, 250],
+        enableLights: true,
+        enableVibrate: true,
+        showBadge: true,
       });
     }
 
@@ -119,6 +127,7 @@ export async function sendTestNotification(): Promise<boolean> {
         title: "🔔 Monevo Notification Test",
         body: "Notifications are working perfectly! You will receive daily check-ins and bill reminders on schedule.",
         sound: true,
+        ...(Platform.OS === "android" ? { channelId: EXPENSE_CHANNEL } : {}),
       },
       trigger: null, // deliver immediately
     });
@@ -147,11 +156,13 @@ export async function scheduleDailyReminders(): Promise<void> {
           title: "☀️ Afternoon Expense Check-in",
           body: "Had lunch or made a quick purchase? Take 5 seconds to log your expenses!",
           sound: true,
+          ...(Platform.OS === "android" ? { channelId: EXPENSE_CHANNEL } : {}),
         },
         trigger: {
+          type: "daily",
           hour: settings.afternoonReminderTime.hour,
           minute: settings.afternoonReminderTime.minute,
-          repeats: true,
+          ...(Platform.OS === "android" ? { channelId: EXPENSE_CHANNEL } : {}),
         } as any,
         identifier: afternoonId,
       });
@@ -172,11 +183,13 @@ export async function scheduleDailyReminders(): Promise<void> {
           title: "🌙 Daily Spending Wrap-Up",
           body: "Review today's transactions and keep your accounts and budgets in check!",
           sound: true,
+          ...(Platform.OS === "android" ? { channelId: EXPENSE_CHANNEL } : {}),
         },
         trigger: {
+          type: "daily",
           hour: settings.nightReminderTime.hour,
           minute: settings.nightReminderTime.minute,
-          repeats: true,
+          ...(Platform.OS === "android" ? { channelId: EXPENSE_CHANNEL } : {}),
         } as any,
         identifier: nightId,
       });
@@ -234,6 +247,7 @@ export async function scheduleCreditCardDueReminders(accounts: ExpenseAccount[])
           body: `Your credit card bill payment${dueAmountStr} is due on the ${dueDay}th. Pay on time to avoid interest!`,
           sound: true,
           data: { accountId: card.id },
+          ...(Platform.OS === "android" ? { channelId: EXPENSE_CHANNEL } : {}),
         },
         trigger: {
           type: "date",
@@ -277,6 +291,7 @@ export async function scheduleReminder(sub: Subscription): Promise<void> {
           : `Your ${sub.billingCycle} subscription for ${sub.name} renews${sub.reminderDays === 0 ? " today" : ` in ${sub.reminderDays} day${sub.reminderDays !== 1 ? "s" : ""}`}.`,
         data: { subscriptionId: sub.id },
         sound: true,
+        ...(Platform.OS === "android" ? { channelId: REMINDER_CHANNEL } : {}),
       },
       trigger: {
         type: "date",

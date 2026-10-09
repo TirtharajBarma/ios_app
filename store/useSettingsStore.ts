@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import AsyncStorage from "@/utils/storage";
 import type { ShareGroup } from "@/types/shared";
+import type { PendingTransaction } from "@/types/expense";
 import { isSupabaseConfigured, updateMyName } from "@/api/supabase";
 import { logAction, logException } from "@/utils/auditLog";
 
@@ -73,6 +74,18 @@ interface SettingsState {
   shareGroup: ShareGroup | null;
   setShareGroup: (group: ShareGroup | null) => Promise<void>;
 
+  // Auto-Track Transactions (Android SMS & Notification sync)
+  autoTrackSmsEnabled: boolean;
+  setAutoTrackSmsEnabled: (enabled: boolean) => Promise<void>;
+  autoTrackAutoApprove: boolean;
+  setAutoTrackAutoApprove: (enabled: boolean) => Promise<void>;
+  autoTrackDefaultAccountId: string | null;
+  setAutoTrackDefaultAccountId: (id: string | null) => Promise<void>;
+  pendingTransactions: PendingTransaction[];
+  addPendingTransaction: (tx: PendingTransaction) => Promise<void>;
+  dismissPendingTransaction: (id: string) => Promise<void>;
+  clearAllPendingTransactions: () => Promise<void>;
+
   // Reset & Load
   resetSettings: () => Promise<void>;
   loadSettings: () => Promise<void>;
@@ -128,6 +141,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   shareGroups: [],
   shareGroup: null,
 
+  autoTrackSmsEnabled: false,
+  autoTrackAutoApprove: false,
+  autoTrackDefaultAccountId: null,
+  pendingTransactions: [],
+
   setUserName: async (userName) => { set({ userName }); await save({ userName }); await saveNameToServer(userName); if (userName) logAction('settings', 'Display name updated'); },
   setUserEmail: async (userEmail) => { set({ userEmail }); await save({ userEmail }); if (userEmail) logAction('settings', 'Profile email updated'); },
   setUserTagline: async (userTagline) => { set({ userTagline }); await save({ userTagline }); },
@@ -147,6 +165,45 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setAnalyticsEnabled: async (analyticsEnabled) => { set({ analyticsEnabled }); await save({ analyticsEnabled }); logAction('settings', `Analytics ${analyticsEnabled ? 'enabled' : 'disabled'}`); },
   setShortcutSaved: async (shortcutSaved) => { set({ shortcutSaved }); await save({ shortcutSaved }); },
   setCrashReportsEnabled: async (crashReportsEnabled) => { set({ crashReportsEnabled }); await save({ crashReportsEnabled }); logAction('settings', `Crash reports ${crashReportsEnabled ? 'enabled' : 'disabled'}`); },
+
+  setAutoTrackSmsEnabled: async (autoTrackSmsEnabled) => {
+    set({ autoTrackSmsEnabled });
+    await save({ autoTrackSmsEnabled });
+    logAction('settings', `Auto-track transactions ${autoTrackSmsEnabled ? 'enabled' : 'disabled'}`);
+  },
+  setAutoTrackAutoApprove: async (autoTrackAutoApprove) => {
+    set({ autoTrackAutoApprove });
+    await save({ autoTrackAutoApprove });
+  },
+  setAutoTrackDefaultAccountId: async (autoTrackDefaultAccountId) => {
+    set({ autoTrackDefaultAccountId });
+    await save({ autoTrackDefaultAccountId });
+  },
+  addPendingTransaction: async (tx) => {
+    const current = get().pendingTransactions || [];
+    if (current.some((item) => item.id === tx.id)) return;
+    const isNearDuplicate = current.some(
+      (item) =>
+        item.amount === tx.amount &&
+        item.type === tx.type &&
+        Math.abs(item.timestamp - tx.timestamp) < 300000
+    );
+    if (isNearDuplicate) return;
+    const updated = [tx, ...current];
+    set({ pendingTransactions: updated });
+    await save({ pendingTransactions: updated });
+    logAction('transaction', 'Added pending auto-tracked transaction', { id: tx.id, amount: tx.amount });
+  },
+  dismissPendingTransaction: async (id) => {
+    const current = get().pendingTransactions || [];
+    const updated = current.filter((item) => item.id !== id);
+    set({ pendingTransactions: updated });
+    await save({ pendingTransactions: updated });
+  },
+  clearAllPendingTransactions: async () => {
+    set({ pendingTransactions: [] });
+    await save({ pendingTransactions: [] });
+  },
 
   addCustomCategory: async (category) => {
     const trimmed = category.trim();
@@ -240,6 +297,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           customCategories: p.customCategories ?? [],
           shareGroups,
           shareGroup: shareGroups[0] ?? null,
+          autoTrackSmsEnabled: p.autoTrackSmsEnabled ?? false,
+          autoTrackAutoApprove: p.autoTrackAutoApprove ?? false,
+          autoTrackDefaultAccountId: p.autoTrackDefaultAccountId ?? null,
+          pendingTransactions: Array.isArray(p.pendingTransactions) ? p.pendingTransactions : [],
         });
       } else {
         // First run (or pre-v3): honor a legacy single-group entry if present.

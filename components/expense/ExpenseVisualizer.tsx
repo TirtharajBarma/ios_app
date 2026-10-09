@@ -906,8 +906,8 @@ export const ExpenseVisualizer: React.FC = () => {
 
     const isSurge =
       totalTxCount >= 2 &&
-      ((weekdaySum === 0 && weekendSum >= 100) ||
-        (hasBaseline && avgWeekday > 0 && avgWeekend > avgWeekday * 1.25 && rawWeekendTax >= 100));
+      ((weekdaySum === 0 && weekendSum >= 400) ||
+        (hasBaseline && avgWeekday > 0 && avgWeekend > avgWeekday * 1.25 && rawWeekendTax >= 150));
     const rawRatio = avgWeekday > 0 ? avgWeekend / avgWeekday : weekendSum > 0 ? 9.9 : 1.0;
     const clampedRatio = Math.min(Math.max(1.0, rawRatio), 9.9);
     const ratio = clampedRatio >= 9.9 ? '9.9+' : clampedRatio.toFixed(1);
@@ -932,6 +932,23 @@ export const ExpenseVisualizer: React.FC = () => {
     }
 
     const topLeakCategory = topLeakCatId ? storeCategories.find(c => c.id === topLeakCatId) : null;
+    const isFixedDriver = Boolean(
+      topLeakCategory && (
+        topLeakCategory.id.toLowerCase().includes('rent') ||
+        topLeakCategory.id.toLowerCase().includes('util') ||
+        topLeakCategory.id.toLowerCase().includes('bill') ||
+        topLeakCategory.id.toLowerCase().includes('subs') ||
+        topLeakCategory.id.toLowerCase().includes('emi') ||
+        topLeakCategory.id.toLowerCase().includes('loan') ||
+        topLeakCategory.id.toLowerCase().includes('insurance') ||
+        topLeakCategory.name.toLowerCase().includes('rent') ||
+        topLeakCategory.name.toLowerCase().includes('utility') ||
+        topLeakCategory.name.toLowerCase().includes('bill') ||
+        topLeakCategory.name.toLowerCase().includes('subscription') ||
+        topLeakCategory.name.toLowerCase().includes('loan') ||
+        topLeakCategory.name.toLowerCase().includes('insurance')
+      )
+    );
 
     return {
       weekdaySum,
@@ -944,6 +961,7 @@ export const ExpenseVisualizer: React.FC = () => {
       topLeakCategory,
       weekendTax,
       isSurge,
+      isFixedDriver,
     };
   }, [transactions, horizonExpenses, timeHorizon, curYear, curMonth, daysInMonth, storeCategories]);
 
@@ -1287,11 +1305,15 @@ export const ExpenseVisualizer: React.FC = () => {
   }, [dailySpend, curYear, curMonth]);
 
   const noSpendStreak = useMemo(() => {
+    if (monthExpenses.length === 0) return 0;
+
     const now = new Date();
     const isCur = isCurrentMonthView;
     const todayNum = now.getDate();
     // Exclude unelapsed current day unless an expense was already recorded today
     const limitDay = isCur ? (dailySpend[todayNum] ? todayNum : Math.max(0, todayNum - 1)) : daysInMonth;
+
+    if (limitDay <= 0) return 0;
 
     let prevTrailingStreak = 0;
     if (isCur) {
@@ -1310,8 +1332,9 @@ export const ExpenseVisualizer: React.FC = () => {
       }
     }
 
-    let cur = prevTrailingStreak;
-    let best = prevTrailingStreak;
+    // A trailing streak from the previous month only continues into this month if day 1 is also zero spend
+    let cur = !dailySpend[1] ? prevTrailingStreak : 0;
+    let best = 0;
     for (let d = 1; d <= limitDay; d++) {
       if (!dailySpend[d]) {
         cur++;
@@ -1321,7 +1344,7 @@ export const ExpenseVisualizer: React.FC = () => {
       }
     }
     return best;
-  }, [dailySpend, daysInMonth, isCurrentMonthView, curYear, curMonth, lastMonthExpenses]);
+  }, [dailySpend, daysInMonth, isCurrentMonthView, curYear, curMonth, lastMonthExpenses, monthExpenses.length]);
 
   // Dynamic Weekly Rhythm
   const rhythmData = useMemo(() => {
@@ -1947,7 +1970,7 @@ export const ExpenseVisualizer: React.FC = () => {
               <AppText style={st.insightVal} numberOfLines={1} adjustsFontSizeToFit>
                 {noSpendStreak} {noSpendStreak === 1 ? 'day' : 'days'}
               </AppText>
-              <AppText style={st.insightSub}>Consecutive ₹0 spend days</AppText>
+              <AppText style={st.insightSub}>Consecutive {sym}0 spend days</AppText>
             </View>
           </View>
 
@@ -2238,11 +2261,15 @@ export const ExpenseVisualizer: React.FC = () => {
                 {weekendVsWeekday.weekdaySum + weekendVsWeekday.weekendSum === 0
                   ? 'No expenses logged in this period'
                   : weekendVsWeekday.weekdaySum === 0 && weekendVsWeekday.weekendSum > 0
-                  ? '⚡ 100% Weekend concentration · High leisure burn'
+                  ? (weekendVsWeekday.isFixedDriver && weekendVsWeekday.topLeakCategory
+                    ? `⚡ Weekend Spike: Driven by ${weekendVsWeekday.topLeakCategory.name}`
+                    : '⚡ 100% Weekend concentration · High leisure burn')
                   : weekendVsWeekday.weekendSum === 0 && weekendVsWeekday.weekdaySum > 0
                   ? 'Weekday spending · Awaiting weekend baseline'
                   : weekendVsWeekday.isSurge
-                  ? `⚡ Weekend Surge: ${weekendVsWeekday.ratio}x higher daily burn`
+                  ? (weekendVsWeekday.isFixedDriver && weekendVsWeekday.topLeakCategory
+                    ? `⚡ Weekend Spike: Driven by ${weekendVsWeekday.topLeakCategory.name}`
+                    : `⚡ Weekend Surge: ${weekendVsWeekday.ratio}x higher daily burn`)
                   : weekendVsWeekday.avgWeekday > (weekendVsWeekday.avgWeekend * 1.25)
                   ? '🛡️ Steady weekday pace · Low weekend burn'
                   : '⚖️ Balanced weekday vs weekend rhythm'}
@@ -2304,14 +2331,18 @@ export const ExpenseVisualizer: React.FC = () => {
               </View>
               <View style={st.leisureContent}>
                 <View style={st.leisureTopRow}>
-                  <AppText style={st.leisureSurgeLabel}>WEEKEND SURGE</AppText>
+                  <AppText style={st.leisureSurgeLabel}>
+                    {weekendVsWeekday.isFixedDriver ? 'WEEKEND SPIKE' : 'WEEKEND SURGE'}
+                  </AppText>
                   <AppText style={st.leisureSurgeAmount}>
                     +{sym}{weekendVsWeekday.weekendTax.toLocaleString('en-IN')}
                   </AppText>
                 </View>
                 <AppText style={st.leisureSubtext} numberOfLines={2}>
                   {weekendVsWeekday.topLeakCategory
-                    ? `Driven primarily by ${weekendVsWeekday.topLeakCategory.emoji ? weekendVsWeekday.topLeakCategory.emoji + ' ' : ''}${weekendVsWeekday.topLeakCategory.name}`
+                    ? (weekendVsWeekday.isFixedDriver
+                      ? `Driven by fixed commitment: ${weekendVsWeekday.topLeakCategory.emoji ? weekendVsWeekday.topLeakCategory.emoji + ' ' : ''}${weekendVsWeekday.topLeakCategory.name}`
+                      : `Driven primarily by ${weekendVsWeekday.topLeakCategory.emoji ? weekendVsWeekday.topLeakCategory.emoji + ' ' : ''}${weekendVsWeekday.topLeakCategory.name}`)
                     : 'Higher daily spending rhythm on weekends'}
                 </AppText>
               </View>
@@ -2348,7 +2379,7 @@ export const ExpenseVisualizer: React.FC = () => {
               </View>
             </View>
 
-            {momBenchmark.hasBaseline && (
+            {momBenchmark.hasBaseline ? (
               <View style={st.momBenchmarkBanner}>
                 <View style={[
                   st.momIconCircle,
@@ -2403,6 +2434,14 @@ export const ExpenseVisualizer: React.FC = () => {
                       : `Spent ${sym}${momBenchmark.diff.toLocaleString('en-IN')} more than day ${momBenchmark.targetDay} of last month`}
                   </AppText>
                 </View>
+              </View>
+            ) : (
+              <View style={{ paddingVertical: 12, paddingHorizontal: 14, backgroundColor: '#181920', borderRadius: 12, marginBottom: 16 }}>
+                <AppText style={{ color: expenseColors.textMuted, fontSize: 12 }}>
+                  {isCurrentMonthView
+                    ? 'Cumulative pace benchmark will unlock once previous month baseline is established'
+                    : 'No prior month baseline available for this period'}
+                </AppText>
               </View>
             )}
 

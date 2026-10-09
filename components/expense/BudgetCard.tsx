@@ -221,10 +221,19 @@ export const BudgetCard: React.FC = () => {
   const overallBudgetRatio = effectiveBudget > 0 ? Math.min(totalSpent / effectiveBudget, 1) : 0;
   const overallBudgetDash = overallBudgetRatio * innerCircumference;
 
+  // Dynamic Daily Safe Pace & Adaptive Split Burnout Forecasting
+  const now = new Date();
+  const { year: selYear, month: selMonth } = monthKeyToYearMonth(selectedMonth);
+  const isCurrentMonth = selYear === now.getFullYear() && selMonth === now.getMonth();
+  const isPastMonth = selYear < now.getFullYear() || (selYear === now.getFullYear() && selMonth < now.getMonth());
+  const daysInMonth = new Date(selYear, selMonth + 1, 0).getDate();
+  const currentDay = isCurrentMonth ? now.getDate() : isPastMonth ? daysInMonth : 0;
+  const daysRemaining = isCurrentMonth ? Math.max(1, daysInMonth - currentDay + 1) : isPastMonth ? 0 : daysInMonth;
+
   // ─────────────────────────────────────────────────────────
   // 2. CENTER CONTENT DISPLAY
   // ─────────────────────────────────────────────────────────
-  let centerTitle = 'LEFT TO SPEND';
+  let centerTitle = isPastMonth ? 'UNSPENT / SAVED' : 'LEFT TO SPEND';
   let centerAmount = formatCompactCurrency(Math.max(0, effectiveBudget - totalSpent), sym);
   let centerFootnote = `${formatCompactCurrency(totalSpent, sym)} of ${formatCompactCurrency(effectiveBudget, sym)} used`;
   let isCenterOverBudget = false;
@@ -240,7 +249,7 @@ export const BudgetCard: React.FC = () => {
     if (hasFixedBudget && catBudget > 0) {
       const isCatOver = catSpent > catBudget;
       if (isCatOver) {
-        centerAmount = `+${formatCompactCurrency(catSpent - catBudget, sym)}`;
+        centerAmount = formatCompactCurrency(catSpent - catBudget, sym);
         centerFootnote = `Over ${formatCompactCurrency(catBudget, sym)} limit`;
         isCenterOverBudget = true;
       } else {
@@ -257,13 +266,15 @@ export const BudgetCard: React.FC = () => {
       const isOverallOver = totalSpent > effectiveBudget;
       if (isOverallOver) {
         centerTitle = 'OVER BUDGET';
-        centerAmount = `+${formatCompactCurrency(totalSpent - effectiveBudget, sym)}`;
+        centerAmount = formatCompactCurrency(totalSpent - effectiveBudget, sym);
         centerFootnote = `${formatCompactCurrency(totalSpent, sym)} spent of ${formatCompactCurrency(effectiveBudget, sym)} limit`;
         isCenterOverBudget = true;
       } else {
-        centerTitle = 'LEFT TO SPEND';
+        centerTitle = isPastMonth ? 'UNSPENT / SAVED' : 'LEFT TO SPEND';
         centerAmount = formatCompactCurrency(effectiveBudget - totalSpent, sym);
-        centerFootnote = `${formatCompactCurrency(totalSpent, sym)} of ${formatCompactCurrency(effectiveBudget, sym)} used`;
+        centerFootnote = isPastMonth
+          ? `${formatCompactCurrency(totalSpent, sym)} spent of ${formatCompactCurrency(effectiveBudget, sym)} limit`
+          : `${formatCompactCurrency(totalSpent, sym)} of ${formatCompactCurrency(effectiveBudget, sym)} used`;
       }
     } else {
       centerTitle = 'TOTAL SPENT';
@@ -271,15 +282,6 @@ export const BudgetCard: React.FC = () => {
       centerFootnote = 'No budget set • Tap to set';
     }
   }
-
-  // Dynamic Daily Safe Pace & Adaptive Split Burnout Forecasting
-  const now = new Date();
-  const { year: selYear, month: selMonth } = monthKeyToYearMonth(selectedMonth);
-  const isCurrentMonth = selYear === now.getFullYear() && selMonth === now.getMonth();
-  const isPastMonth = selYear < now.getFullYear() || (selYear === now.getFullYear() && selMonth < now.getMonth());
-  const daysInMonth = new Date(selYear, selMonth + 1, 0).getDate();
-  const currentDay = isCurrentMonth ? now.getDate() : isPastMonth ? daysInMonth : 0;
-  const daysRemaining = isCurrentMonth ? Math.max(1, daysInMonth - currentDay + 1) : isPastMonth ? 0 : daysInMonth;
 
   // Helper to identify fixed non-discretionary commitments (Rent, Utilities, Subscriptions, EMIs)
   const isFixedCommitment = (cat: { id: string; name: string }) => {

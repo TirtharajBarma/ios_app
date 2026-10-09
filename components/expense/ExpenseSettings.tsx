@@ -205,7 +205,7 @@ export const ExpenseSettings: React.FC = () => {
   }))
 );
 
-  const { userName, userEmail, userAvatarId, setCurrencyCode, shortcutSaved } = useSettingsStore();
+  const { userName, userEmail, userAvatarId, setCurrencyCode, shortcutSaved, autoTrackSmsEnabled } = useSettingsStore();
   const { convertAllCurrencies } = useSubscriptionStore();
   const updateInfo = useAppUpdateManager();
 
@@ -852,32 +852,65 @@ export const ExpenseSettings: React.FC = () => {
             <ChevronRight size={18} color={expenseColors.textSubtle} />
           </TouchableOpacity>
 
-          <View style={styles.groupedRowDivider} />
+          {/* Quick Add Shortcut (iOS only) */}
+          {Platform.OS === 'ios' && (
+            <>
+              <View style={styles.groupedRowDivider} />
+              <TouchableOpacity
+                style={styles.groupedRowItem}
+                activeOpacity={0.7}
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  router.push('/settings/shortcut-setup');
+                }}
+              >
+                <View style={styles.iconRowLeft}>
+                  <View style={styles.orangeIconCircle}>
+                    <Zap size={16} color={expenseColors.accentPeach} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <AppText style={styles.groupedRowTitle}>QUICK ADD SHORTCUT</AppText>
+                    <AppText style={styles.settingSubValue} numberOfLines={1}>
+                      {shortcutSaved
+                        ? 'Saved to Shortcuts — ready for Back Tap'
+                        : 'Log expense by double tapping back of phone'}
+                    </AppText>
+                  </View>
+                </View>
+                <ChevronRight size={18} color={expenseColors.textSubtle} />
+              </TouchableOpacity>
+            </>
+          )}
 
-          {/* Quick Add Shortcut */}
-          <TouchableOpacity
-            style={styles.groupedRowItem}
-            activeOpacity={0.7}
-            onPress={() => {
-              Haptics.selectionAsync();
-              router.push('/settings/shortcut-setup');
-            }}
-          >
-            <View style={styles.iconRowLeft}>
-              <View style={styles.orangeIconCircle}>
-                <Zap size={16} color={expenseColors.accentPeach} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <AppText style={styles.groupedRowTitle}>QUICK ADD SHORTCUT</AppText>
-                <AppText style={styles.settingSubValue} numberOfLines={1}>
-                  {shortcutSaved
-                    ? 'Saved to Shortcuts — ready for Back Tap'
-                    : 'Log expense by double tapping back of phone'}
-                </AppText>
-              </View>
-            </View>
-            <ChevronRight size={18} color={expenseColors.textSubtle} />
-          </TouchableOpacity>
+          {/* Auto Tracking (Android only) */}
+          {Platform.OS === 'android' && (
+            <>
+              <View style={styles.groupedRowDivider} />
+              <TouchableOpacity
+                style={styles.groupedRowItem}
+                activeOpacity={0.7}
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  router.push('/settings/auto-tracking');
+                }}
+              >
+                <View style={styles.iconRowLeft}>
+                  <View style={styles.orangeIconCircle}>
+                    <Smartphone size={16} color={expenseColors.accentPeach} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <AppText style={styles.groupedRowTitle}>AUTO TRACKING</AppText>
+                    <AppText style={styles.settingSubValue} numberOfLines={1}>
+                      {autoTrackSmsEnabled
+                        ? 'Active · Logging bank alerts'
+                        : 'Read SMS & bank notifications'}
+                    </AppText>
+                  </View>
+                </View>
+                <ChevronRight size={18} color={expenseColors.textSubtle} />
+              </TouchableOpacity>
+            </>
+          )}
 
           <View style={styles.groupedRowDivider} />
 

@@ -130,8 +130,14 @@ export const NativeLiquidMenu: React.FC<NativeLiquidMenuProps> = ({
   );
 
   const flattenedStyle = (style ? (StyleSheet.flatten(style) || {}) : {}) as Record<string, any>;
-  const isCompact = flattenedStyle.alignSelf === 'flex-start' || flattenedStyle.width === 'auto';
+  const isCompact =
+    flattenedStyle.alignSelf === 'flex-start' ||
+    flattenedStyle.alignSelf === 'flex-end' ||
+    flattenedStyle.alignSelf === 'center' ||
+    flattenedStyle.width === 'auto' ||
+    (typeof flattenedStyle.width === 'number' && flattenedStyle.width > 0);
   const isFullWidth = !isCompact && (flattenedStyle.width === undefined || flattenedStyle.width === '100%');
+  const compactAlign = flattenedStyle.alignSelf || 'flex-start';
 
   // On iOS, render real Apple UIKit / SwiftUI UIMenu with the dynamic pixel-width bridge
   if (Platform.OS === 'ios') {
@@ -139,7 +145,7 @@ export const NativeLiquidMenu: React.FC<NativeLiquidMenuProps> = ({
       <View
         onLayout={isFullWidth ? handleLayout : undefined}
         style={[
-          isFullWidth ? { width: '100%', alignSelf: 'stretch', minWidth: 0 } : { alignSelf: 'flex-start' },
+          isFullWidth ? { width: '100%', alignSelf: 'stretch', minWidth: 0 } : { alignSelf: compactAlign },
           style,
         ]}
       >
@@ -152,9 +158,9 @@ export const NativeLiquidMenu: React.FC<NativeLiquidMenuProps> = ({
             }
           }}
           shouldOpenOnLongPress={shouldOpenOnLongPress}
-          style={isFullWidth && containerWidth ? { width: containerWidth, alignSelf: 'stretch' } : { alignSelf: 'flex-start' }}
+          style={isFullWidth && containerWidth ? { width: containerWidth, alignSelf: 'stretch' } : { alignSelf: compactAlign }}
         >
-          <View style={isFullWidth && containerWidth ? { width: containerWidth, alignSelf: 'stretch' } : { alignSelf: 'flex-start' }}>
+          <View style={isFullWidth && containerWidth ? { width: containerWidth, alignSelf: 'stretch' } : { alignSelf: compactAlign }}>
             {children}
           </View>
         </ExpoMenuView>
@@ -164,9 +170,9 @@ export const NativeLiquidMenu: React.FC<NativeLiquidMenuProps> = ({
 
   // On Android / Web, render high-intensity Frosted BlurView Modal
   return (
-    <View style={[isFullWidth ? { width: '100%', alignSelf: 'stretch' } : { alignSelf: 'flex-start' }, style]}>
+    <View style={[isFullWidth ? { width: '100%', alignSelf: 'stretch' } : { alignSelf: compactAlign }, style]}>
       <Pressable
-        style={isFullWidth ? { width: '100%', alignSelf: 'stretch' } : { alignSelf: 'flex-start' }}
+        style={isFullWidth ? { width: '100%', alignSelf: 'stretch' } : { alignSelf: compactAlign }}
         onPress={shouldOpenOnLongPress ? (onPress ?? undefined) : openMenu}
         onLongPress={
           shouldOpenOnLongPress

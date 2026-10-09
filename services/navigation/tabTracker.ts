@@ -1,10 +1,9 @@
 /**
  * Tab Tracker service to coordinate scroll positions across tab navigation.
  *
- * Ensures that tabs only reset their scroll position to top when actively
- * switching tabs from another tab, but PRESERVE their scroll position when
- * navigating into a sub-screen / modal (e.g. Subscription Detail, Add Subscription,
- * Budget Settings) and returning.
+ * Switching between tabs preserves the scroll position of each tab, aligning
+ * with Apple HIG and Android Material Design standards. Native scroll-to-top
+ * when tapping the already active tab is handled natively via useScrollToTop.
  */
 
 let activeTabName: string = '';
@@ -12,9 +11,11 @@ let activeTabName: string = '';
 export function handleTabFocus(tabName: string, onTabSwitched?: () => void): void {
   if (activeTabName !== tabName) {
     activeTabName = tabName;
-    if (onTabSwitched) {
-      onTabSwitched();
-    }
+    // Per Apple HIG and Material Design guidelines, switching between tabs
+    // preserves each tab's scroll position rather than forcing an abrupt
+    // un-animated scroll jump to offset 0 during the screen transition.
+    // Tapping the currently active tab to scroll to top is handled natively
+    // by useScrollToTop(scrollRef).
   }
 }
 

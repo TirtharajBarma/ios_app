@@ -89,7 +89,10 @@ export const MoneyFlowCard: React.FC = () => {
   // Streak Calculation
   const streakDays = useMemo(() => {
     const now = new Date();
-    const currentDay = now.getDate();
+    const { year: curY, month: curM } = monthKeyToYearMonth(selectedMonth);
+    const isCur = curY === now.getFullYear() && curM === now.getMonth();
+    const daysInSelMonth = new Date(curY, curM + 1, 0).getDate();
+    const currentDay = isCur ? now.getDate() : daysInSelMonth;
     if (currentDay < 1) return 0;
 
     const dailySpendMap: Record<number, number> = {};
@@ -105,7 +108,7 @@ export const MoneyFlowCard: React.FC = () => {
           const y = parseInt(parts[1], 10);
           const m = parseInt(parts[2], 10) - 1;
           const day = parseInt(parts[3], 10);
-          if (m === now.getMonth() && y === now.getFullYear()) {
+          if (m === curM && y === curY) {
             dailySpendMap[day] = (dailySpendMap[day] || 0) + (t.split ? t.split.yourShare : t.amount);
           }
         }
@@ -122,7 +125,7 @@ export const MoneyFlowCard: React.FC = () => {
       }
     }
     return streak;
-  }, [transactions, averageDailyLimit]);
+  }, [transactions, selectedMonth, averageDailyLimit]);
 
   return (
     <View style={styles.cardContainer}>
@@ -163,7 +166,11 @@ export const MoneyFlowCard: React.FC = () => {
           <AppText style={styles.tileAmount} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
             {sym}{totalSpent.toLocaleString('en-IN')}
           </AppText>
-          <AppText style={styles.tileSub}>Total Outflow</AppText>
+          <AppText style={styles.tileSub}>
+            {vaultDepositsThisMonth > 0
+              ? `+${sym}${vaultDepositsThisMonth.toLocaleString('en-IN')} in vaults`
+              : 'Total Outflow'}
+          </AppText>
         </View>
 
         {/* Income Tile */}

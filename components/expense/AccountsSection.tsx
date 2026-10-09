@@ -2,7 +2,7 @@ import React, { useRef } from 'react';
 import { View, StyleSheet, TouchableOpacity, Animated } from 'react-native';
 import { ChevronRight } from 'lucide-react-native';
 import { AppText } from '@/components/ui';
-import { useExpenseStore } from '@/store/useExpenseStore';
+import { useExpenseStore, monthKeyToYearMonth } from '@/store/useExpenseStore';
 import { useShallow } from 'zustand/react/shallow';
 import { ExpenseAccount } from '@/types/expense';
 import { expenseColors } from '@/constants/expenseColors';
@@ -17,10 +17,12 @@ interface AccountsSectionProps {
 function SpringAccountCard({
   acc,
   formatAmount,
+  isCurrentMonth = true,
   onPress,
 }: {
   acc: ExpenseAccount;
   formatAmount: (val: number) => string;
+  isCurrentMonth?: boolean;
   onPress?: () => void;
 }) {
   const scaleAnim = useRef(new Animated.Value(1)).current;
@@ -52,7 +54,7 @@ function SpringAccountCard({
       ? 'Wallet'
       : 'Savings';
   const txLabel = `${acc.txnCountThisMonth} txn${acc.txnCountThisMonth !== 1 ? 's' : ''}`;
-  const dueStatus = isCredit
+  const dueStatus = isCredit && isCurrentMonth
     ? getCreditCardDueStatus(acc.dueDay, acc.billingDay, acc.dueAmount || 0)
     : null;
 
@@ -151,13 +153,18 @@ function SpringAccountCard({
 }
 
 export const AccountsSection: React.FC<AccountsSectionProps> = ({ onAccountPress }) => {
-  const { accounts, currencySymbol, formatAmount } = useExpenseStore(
+  const { accounts, currencySymbol, formatAmount, selectedMonth } = useExpenseStore(
     useShallow((s) => ({
       accounts: s.accounts,
       currencySymbol: s.currencySymbol,
       formatAmount: s.formatAmount,
+      selectedMonth: s.selectedMonth,
     }))
   );
+
+  const now = new Date();
+  const { year: selYear, month: selMonth } = monthKeyToYearMonth(selectedMonth);
+  const isCurrentMonth = selYear === now.getFullYear() && selMonth === now.getMonth();
 
   const activeAccounts = accounts.filter((acc) => !acc.isArchived);
 
@@ -173,6 +180,7 @@ export const AccountsSection: React.FC<AccountsSectionProps> = ({ onAccountPress
             key={acc.id}
             acc={acc}
             formatAmount={formatAmount}
+            isCurrentMonth={isCurrentMonth}
             onPress={() => onAccountPress?.(acc)}
           />
         ))}

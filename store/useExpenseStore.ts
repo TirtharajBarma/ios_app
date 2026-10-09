@@ -58,6 +58,15 @@ function parseISODate(dateStr: string): { year: number; month: number; day: numb
   return { year: Number(m[1]), month: Number(m[2]) - 1, day: Number(m[3]) };
 }
 
+function parseTxDate(dateStr: string): Date {
+  if (!dateStr) return new Date();
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr);
+  if (m) {
+    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12, 0, 0);
+  }
+  return new Date(dateStr);
+}
+
 export function isInMonth(dateStr: string, year: number, month: number): boolean {
   const d = parseISODate(dateStr);
   return d.year === year && d.month === month;
@@ -186,7 +195,7 @@ interface ExpenseState {
   resetAllData: () => void;
 
   // Derived Calculations
-  getTotalBalance: () => number;
+  getTotalBalance: (monthKey?: string) => number;
   getTotalIncome: (monthKey?: string) => number;
   getTotalSpent: (monthKey?: string) => number;
   getNetBalance: (monthKey?: string) => number;
@@ -421,7 +430,15 @@ export const useExpenseStore = create<ExpenseState>()(
   },
 
   setHasSeenWalkthrough: (hasSeenWalkthrough) => set({ hasSeenWalkthrough }),
-  setSelectedMonth: (month) => set({ selectedMonth: month }),
+  setSelectedMonth: (month) => {
+    set((state) => {
+      const updatedAccounts = recomputeAllAccountsHelper(state.accounts, state.transactions, month);
+      return {
+        selectedMonth: month,
+        accounts: updatedAccounts,
+      };
+    });
+  },
   setMonthlyBudget: (budget) => {
     set({ monthlyBudget: budget });
     logAction('budget', `Set monthly budget: ${budget}`, { budget });
@@ -1486,14 +1503,75 @@ export const useExpenseStore = create<ExpenseState>()(
     logAction('budget', `Set budgets for ${Object.keys(budgets).length} category(ies)`);
   },
 
-  getTotalBalance: () => {
-    const { accounts } = get();
+  getTotalBalance: (monthKey) => {
+    const { accounts, transactions, selectedMonth } = get();
+    const targetKey = monthKey || selectedMonth;
+    const now = new Date();
+    const currentMonthKey = monthKeyOf(now);
+
+    // If current or future month, return real-time live total balance
+    if (!targetKey || targetKey >= currentMonthKey) {
+      return roundMoney(
+        accounts.reduce((sum, acc) => {
+          if (acc.type === 'credit') {
+            return sum + (acc.balance || 0) - (acc.dueAmount || 0);
+          }
+          return sum + (acc.balance || 0);
+        }, 0)
+      );
+    }
+
+    // For a past month, calculate historical balance as of the last day of targetKey
+    const { year, month } = monthKeyToYearMonth(targetKey);
+    const endOfTargetMonth = new Date(year, month + 1, 0, 23, 59, 59, 999).getTime();
+
     return roundMoney(
-      accounts.reduce((sum, acc) => {
-        if (acc.type === 'credit') {
-          return sum + (acc.balance || 0) - (acc.dueAmount || 0);
+      accounts.reduce((total, acc) => {
+        const isCredit = acc.type === 'credit';
+        const startingOpening =
+          acc.openingBalance !== undefined
+            ? acc.openingBalance
+            : isCredit
+            ? acc.dueAmount || 0
+            : acc.balance ?? 0;
+
+        const accNameLower = (acc.name || '').trim().toLowerCase();
+        const isFrom = (t: ExpenseTransaction) =>
+          t.accountId === acc.id ||
+          (!t.accountId && t.accountName && accNameLower && t.accountName.trim().toLowerCase() === accNameLower);
+        const isTo = (t: ExpenseTransaction) =>
+          t.toAccountId === acc.id ||
+          (!t.toAccountId && t.toAccountName && accNameLower && t.toAccountName.trim().toLowerCase() === accNameLower);
+
+        const pastTxs = transactions.filter((t) => {
+          const tTime = parseTxDate(t.date).getTime();
+          return tTime <= endOfTargetMonth && (isFrom(t) || isTo(t));
+        });
+
+        let expSum = 0;
+        let incSum = 0;
+        for (const t of pastTxs) {
+          const fromThis = isFrom(t);
+          const toThis = isTo(t);
+          if (t.type === 'expense' && fromThis) expSum += t.amount;
+          else if (t.type === 'income' && fromThis) incSum += t.amount;
+          else if (t.type === 'transfer') {
+            if (fromThis) expSum += t.amount;
+            if (toThis) incSum += t.amount;
+          } else if (t.type === 'debt_lend' && fromThis) expSum += t.amount;
+          else if (t.type === 'debt_borrow' && fromThis) incSum += t.amount;
+          else if (t.type === 'vault_deposit' && fromThis) expSum += t.amount;
+          else if (t.type === 'vault_withdraw' && fromThis) incSum += t.amount;
         }
-        return sum + (acc.balance || 0);
+
+        if (isCredit) {
+          const rawDue = startingOpening + expSum - incSum;
+          const posBal = rawDue < 0 ? Math.abs(rawDue) : 0;
+          const dueAmt = rawDue > 0 ? rawDue : 0;
+          return total + posBal - dueAmt;
+        } else {
+          return total + (startingOpening + incSum - expSum);
+        }
       }, 0)
     );
   },

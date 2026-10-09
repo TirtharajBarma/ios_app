@@ -66,7 +66,8 @@
       "expo-image",
       "expo-web-browser",
       "./plugins/with-ios-scene-lifecycle",
-      "./plugins/with-ios-local-no-push"
+      "./plugins/with-ios-local-no-push",
+      "./plugins/with-android-transaction-tracker"
     ],
     "experiments": {
       "typedRoutes": true,

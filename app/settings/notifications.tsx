@@ -14,23 +14,21 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ChevronLeft,
-  Check,
-  Bell,
-  BellOff,
   Sun,
   Moon,
   CreditCard,
   Calendar,
-  ExternalLink,
   Sparkles,
-  AlertCircle,
-  Clock,
   ChevronRight,
-  ShieldCheck,
+  ChevronDown,
+  Bell,
+  AlertCircle,
+  ExternalLink,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 
-import { AppText } from '@/components/ui';
+import { AppText, NativeLiquidMenu } from '@/components/ui';
+import type { MenuAction } from '@/components/ui';
 import { useSettingsStore, NotificationTiming } from '@/store/useSettingsStore';
 import { useSubscriptionStore } from '@/store/useSubscriptionStore';
 import { expenseColors } from '@/constants/expenseColors';
@@ -40,27 +38,24 @@ import {
   rescheduleAllAppNotifications,
   cancelAllReminders,
   isNotificationsAvailable,
+  sendTestNotification,
 } from '@/utils/notifications';
 
-const TIMING_OPTIONS: { label: string; sublabel: string; value: NotificationTiming; days: number }[] = [
-  { label: '1 Day Before', sublabel: 'Delivered 24 hours prior to billing', value: '1day', days: 1 },
-  { label: '3 Days Before', sublabel: 'Early reminder 3 days before renewal', value: '3days', days: 3 },
-  { label: '1 Week Before', sublabel: 'Advance notice 7 days before charge', value: '1week', days: 7 },
+const TIMING_OPTIONS: { label: string; value: NotificationTiming; days: number }[] = [
+  { label: '1 Day Before', value: '1day', days: 1 },
+  { label: '3 Days Before', value: '3days', days: 3 },
+  { label: '1 Week Before', value: '1week', days: 7 },
 ];
 
 const AFTERNOON_TIME_PRESETS = [
   { label: '1:00 PM', hour: 13, minute: 0 },
-  { label: '1:30 PM', hour: 13, minute: 30 },
-  { label: '2:00 PM', hour: 14, minute: 0, tag: 'Default' },
-  { label: '2:30 PM', hour: 14, minute: 30 },
+  { label: '2:00 PM', hour: 14, minute: 0 },
   { label: '3:00 PM', hour: 15, minute: 0 },
 ];
 
 const NIGHT_TIME_PRESETS = [
   { label: '8:30 PM', hour: 20, minute: 30 },
-  { label: '9:00 PM', hour: 21, minute: 0 },
-  { label: '9:30 PM', hour: 21, minute: 30, tag: 'Default' },
-  { label: '10:00 PM', hour: 22, minute: 0 },
+  { label: '9:30 PM', hour: 21, minute: 30 },
   { label: '10:30 PM', hour: 22, minute: 30 },
 ];
 
@@ -75,7 +70,6 @@ export default function NotificationsScreen() {
     setNotificationsEnabled,
     notificationTiming,
     setNotificationTiming,
-    dailyExpenseReminderEnabled,
     setDailyExpenseReminderEnabled,
     afternoonReminderEnabled,
     setAfternoonReminderEnabled,
@@ -93,7 +87,7 @@ export default function NotificationsScreen() {
 
   const [hasSystemPermission, setHasSystemPermission] = useState(true);
 
-  // Synchronize state with iOS Notification Center status
+  // Synchronize state with OS Notification status
   useEffect(() => {
     async function syncSystemPermission() {
       if (!isNotificationsAvailable) return;
@@ -109,9 +103,7 @@ export default function NotificationsScreen() {
       }
     });
 
-    return () => {
-      appStateSub.remove();
-    };
+    return () => appStateSub.remove();
   }, [notificationsEnabled]);
 
   // Master Toggle
@@ -123,7 +115,7 @@ export default function NotificationsScreen() {
       if (!granted) {
         Alert.alert(
           'Notifications Permission Required',
-          'Please enable notifications in iOS Settings to receive scheduled daily spend check-ins and due date alerts.',
+          'Please enable notifications in device Settings to receive scheduled daily spend check-ins and due date alerts.',
           [
             { text: 'Cancel', style: 'cancel' },
             { text: 'Open Settings', onPress: () => Linking.openURL(OPEN_SETTINGS_URL) },
@@ -139,15 +131,10 @@ export default function NotificationsScreen() {
     }
   };
 
-  const handleToggleDailyExpense = async (val: boolean) => {
-    Haptics.selectionAsync().catch(() => {});
-    await setDailyExpenseReminderEnabled(val);
-    await rescheduleAllAppNotifications();
-  };
-
   const handleToggleAfternoon = async (val: boolean) => {
     Haptics.selectionAsync().catch(() => {});
     await setAfternoonReminderEnabled(val);
+    await setDailyExpenseReminderEnabled(val || nightReminderEnabled);
     await rescheduleAllAppNotifications();
   };
 
@@ -160,6 +147,7 @@ export default function NotificationsScreen() {
   const handleToggleNight = async (val: boolean) => {
     Haptics.selectionAsync().catch(() => {});
     await setNightReminderEnabled(val);
+    await setDailyExpenseReminderEnabled(val || afternoonReminderEnabled);
     await rescheduleAllAppNotifications();
   };
 
@@ -202,350 +190,276 @@ export default function NotificationsScreen() {
     }
     const granted = await checkNotificationPermissions();
     if (!granted) {
-      Alert.alert('Permission Required', 'Please enable notification permissions in iOS Settings first.');
+      Alert.alert('Permission Required', 'Please enable notification permissions in device Settings first.');
       return;
     }
-    try {
-      const expoNotifications = require('expo-notifications');
-      await expoNotifications.scheduleNotificationAsync({
-        content: {
-          title: '☀️ Afternoon Expense Check-in',
-          body: 'Had lunch or coffee today? Take 5 seconds to log your transactions!',
-          sound: true,
-        },
-        trigger: null,
-      });
+    const ok = await sendTestNotification();
+    if (ok) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-    } catch {
-      Alert.alert('Error', 'Could not dispatch test notification.');
+      Alert.alert(
+        'Notification Dispatched',
+        'A test alert was sent. If the banner does not appear immediately, swipe down from the top to check your Notification Shade / Lock Screen.',
+        [{ text: 'OK' }]
+      );
+    } else {
+      Alert.alert('Error', 'Could not dispatch test notification. Please check system permissions.');
     }
   };
 
-  const isMasterActive = notificationsEnabled && hasSystemPermission;
-
-  // Format active time strings
-  const afternoonTimeStr = useMemo(() => {
-    const p = AFTERNOON_TIME_PRESETS.find(
-      (x) => x.hour === afternoonReminderTime.hour && x.minute === afternoonReminderTime.minute
+  const formatTimeLabel = (time: { hour: number; minute: number }) => {
+    const match = [...AFTERNOON_TIME_PRESETS, ...NIGHT_TIME_PRESETS].find(
+      (p) => p.hour === time.hour && p.minute === time.minute
     );
-    return p ? p.label : `${afternoonReminderTime.hour}:${afternoonReminderTime.minute < 10 ? '0' : ''}${afternoonReminderTime.minute}`;
-  }, [afternoonReminderTime]);
+    if (match) return match.label;
+    const h = time.hour;
+    const m = time.minute.toString().padStart(2, '0');
+    const period = h >= 12 ? 'PM' : 'AM';
+    const displayH = h % 12 === 0 ? 12 : h % 12;
+    return `${displayH}:${m} ${period}`;
+  };
 
-  const nightTimeStr = useMemo(() => {
-    const p = NIGHT_TIME_PRESETS.find(
-      (x) => x.hour === nightReminderTime.hour && x.minute === nightReminderTime.minute
-    );
-    return p ? p.label : `${nightReminderTime.hour}:${nightReminderTime.minute < 10 ? '0' : ''}${nightReminderTime.minute}`;
-  }, [nightReminderTime]);
+  const currentTimingLabel = useMemo(() => {
+    return TIMING_OPTIONS.find((o) => o.value === notificationTiming)?.label || '1 Day Before';
+  }, [notificationTiming]);
+
+  // Liquid Menu Action Sets
+  const afternoonMenuActions: MenuAction[] = useMemo(
+    () =>
+      AFTERNOON_TIME_PRESETS.map((p) => ({
+        id: `${p.hour}:${p.minute}`,
+        title: p.label,
+        state:
+          afternoonReminderTime.hour === p.hour && afternoonReminderTime.minute === p.minute
+            ? 'on'
+            : 'off',
+      })),
+    [afternoonReminderTime]
+  );
+
+  const nightMenuActions: MenuAction[] = useMemo(
+    () =>
+      NIGHT_TIME_PRESETS.map((p) => ({
+        id: `${p.hour}:${p.minute}`,
+        title: p.label,
+        state:
+          nightReminderTime.hour === p.hour && nightReminderTime.minute === p.minute
+            ? 'on'
+            : 'off',
+      })),
+    [nightReminderTime]
+  );
+
+  const timingMenuActions: MenuAction[] = useMemo(
+    () =>
+      TIMING_OPTIONS.map((t) => ({
+        id: t.value,
+        title: t.label,
+        state: notificationTiming === t.value ? 'on' : 'off',
+      })),
+    [notificationTiming]
+  );
 
   return (
-    <View style={styles.screenContainer}>
-      {/* Top Safe Area Background */}
-      <View style={{ height: insets.top, backgroundColor: expenseColors.bgPrimary }} />
-
-      {/* ── TOP NAVIGATION BAR ── */}
-      <View style={styles.headerRow}>
+    <View style={[styles.screen, { paddingTop: insets.top }]}>
+      {/* ── HEADER ── */}
+      <View style={styles.header}>
         <TouchableOpacity
           onPress={() => {
             Haptics.selectionAsync().catch(() => {});
             router.back();
           }}
-          style={styles.headerBackBtn}
+          style={styles.backBtn}
           activeOpacity={0.7}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
         >
-          <ChevronLeft size={20} color="#FFFFFF" strokeWidth={2.5} />
+          <ChevronLeft size={22} color={expenseColors.accentPeach} />
         </TouchableOpacity>
 
-        <View style={styles.titleContainer}>
-          <AppText style={styles.titleThe}>SYSTEM </AppText>
-          <AppText style={styles.titleMain}>NOTIFICATIONS</AppText>
-        </View>
+        <AppText style={styles.headerTitle}>Notifications</AppText>
 
         <View style={styles.headerRightSpacer} />
       </View>
 
       <ScrollView
-        style={styles.scrollView}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           styles.scrollContent,
           { paddingBottom: Math.max(insets.bottom, 24) + 40 },
         ]}
       >
-        {/* ── SYSTEM PERMISSION WARNING BANNER (When iOS settings disabled) ── */}
+        {/* System Permission Warning Banner if disabled at OS level */}
         {!hasSystemPermission && (
-          <View style={styles.permissionWarningCard}>
-            <View style={styles.warningIconCircle}>
-              <AlertCircle size={20} color={expenseColors.accentPeach} />
-            </View>
-            <View style={{ flex: 1, gap: 4 }}>
-              <AppText style={styles.warningCardTitle}>iOS Permissions Disabled</AppText>
-              <AppText style={styles.warningCardDesc}>
-                Device notifications are turned off in Settings. Enable them to receive daily spend check-ins & bill due alerts.
+          <TouchableOpacity
+            style={styles.warningBanner}
+            activeOpacity={0.8}
+            onPress={() => Linking.openURL(OPEN_SETTINGS_URL)}
+          >
+            <AlertCircle size={20} color="#F48B8B" />
+            <View style={{ flex: 1 }}>
+              <AppText style={styles.warningTitle}>System Alerts Disabled</AppText>
+              <AppText style={styles.warningSub}>
+                Notifications are disabled in device Settings. Tap to enable.
               </AppText>
-              <TouchableOpacity
-                style={styles.warningActionBtn}
-                activeOpacity={0.8}
-                onPress={() => Linking.openURL(OPEN_SETTINGS_URL)}
-              >
-                <AppText style={styles.warningActionText}>Open iOS Settings</AppText>
-                <ExternalLink size={12} color={expenseColors.accentPeach} />
-              </TouchableOpacity>
             </View>
-          </View>
+            <ExternalLink size={16} color="#F48B8B" />
+          </TouchableOpacity>
         )}
 
-        {/* ── MASTER HERO CARD ── */}
-        <View style={styles.heroCard}>
-          <View style={styles.heroTopRow}>
-            <View
-              style={[
-                styles.heroIconCircle,
-                {
-                  backgroundColor: isMasterActive
-                    ? 'rgba(248, 177, 149, 0.16)'
-                    : 'rgba(255, 255, 255, 0.05)',
-                },
-              ]}
-            >
-              {isMasterActive ? (
-                <Bell size={22} color={expenseColors.accentPeach} />
-              ) : (
-                <BellOff size={22} color="#6C7080" />
-              )}
-            </View>
+        {/* ── SECTION 1: MASTER SWITCH ── */}
+        <View style={styles.sectionHeaderWrap}>
+          <AppText style={styles.sectionHeader}>NOTIFICATIONS</AppText>
+        </View>
 
-            <View
-              style={[
-                styles.liveStatusBadge,
-                isMasterActive ? styles.liveStatusBadgeActive : styles.liveStatusBadgeInactive,
-              ]}
-            >
-              <View
-                style={[
-                  styles.statusDot,
-                  { backgroundColor: isMasterActive ? expenseColors.accentGreen : '#7E8394' },
-                ]}
-              />
-              <AppText
-                style={[
-                  styles.statusBadgeText,
-                  { color: isMasterActive ? expenseColors.accentGreen : '#8E919D' },
-                ]}
-              >
-                {isMasterActive ? 'ACTIVE & SYNCED' : 'PAUSED'}
-              </AppText>
-            </View>
-          </View>
-
-          <AppText style={styles.heroTitle}>Smart Spend Reminders</AppText>
-          <AppText style={styles.heroSubtitle}>
-            Automated alerts for daily expense logging, credit card payment deadlines, and recurring subscriptions.
-          </AppText>
-
-          <View style={styles.heroDivider} />
-
-          <View style={styles.heroToggleRow}>
-            <View style={{ flex: 1 }}>
-              <AppText style={styles.heroToggleLabel}>Allow Reminders</AppText>
-              <AppText style={styles.heroToggleSub}>Master toggle for all background alerts</AppText>
+        <View style={styles.groupedInsetCard}>
+          <View style={styles.groupedRowItem}>
+            <View style={styles.iconRowLeft}>
+              <View style={styles.iconSquare}>
+                <Bell size={17} color={expenseColors.accentPeach} />
+              </View>
+              <View style={{ flex: 1, marginRight: 8 }}>
+                <AppText style={styles.rowTitle}>Allow Notifications</AppText>
+                <AppText style={styles.rowSubtitle}>
+                  Receive daily spending check-ins & due date alerts
+                </AppText>
+              </View>
             </View>
             <Switch
-              value={isMasterActive}
+              value={notificationsEnabled}
               onValueChange={handleMasterToggle}
               trackColor={{ false: '#282B37', true: expenseColors.accentPeach }}
-              thumbColor={Platform.OS === 'android' ? (isMasterActive ? '#FFFFFF' : '#8E8E93') : undefined}
+              thumbColor={Platform.OS === 'android' ? (notificationsEnabled ? '#FFFFFF' : '#8E8E93') : undefined}
               ios_backgroundColor="#282B37"
             />
           </View>
         </View>
 
-        {isMasterActive && (
+        <View style={styles.sectionFooterWrap}>
+          <AppText style={styles.sectionFooterText}>
+            Notifications are scheduled locally on your device based on your timezone. No personal data is sent to external servers.
+          </AppText>
+        </View>
+
+        {notificationsEnabled && (
           <>
-            {/* ══════════════════════════════════════════════
-                SECTION 1: DAILY LOGGING AUTOMATION
-            ══════════════════════════════════════════════ */}
+            {/* ── SECTION 2: DAILY REMINDERS ── */}
             <View style={styles.sectionHeaderWrap}>
-              <AppText style={styles.sectionCategoryHeader}>DAILY LOGGING AUTOMATION</AppText>
+              <AppText style={styles.sectionHeader}>DAILY REMINDERS</AppText>
             </View>
 
             <View style={styles.groupedInsetCard}>
-              {/* MASTER DAILY TOGGLE (TOP LEVEL) */}
-              <View style={styles.masterPromptRow}>
+              {/* Midday Check-In */}
+              <View style={styles.groupedRowItem}>
                 <View style={styles.iconRowLeft}>
-                  <View style={[styles.tileIconCircle, { backgroundColor: 'rgba(244, 205, 137, 0.15)' }]}>
-                    <Clock size={17} color="#F4CD89" />
+                  <View style={styles.iconSquare}>
+                    <Sun size={17} color={expenseColors.accentPeach} />
                   </View>
-                  <View style={{ flex: 1 }}>
-                    <AppText style={styles.groupedRowTitle}>DAILY LOGGING PROMPTS</AppText>
-                    <AppText style={styles.settingSubValue} numberOfLines={1}>
-                      Scheduled daily check-ins to record transactions
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <AppText style={styles.rowTitle}>Midday Check-In</AppText>
+                    <AppText style={styles.rowSubtitle}>
+                      Prompt to log lunch, coffee, or morning transit
                     </AppText>
                   </View>
                 </View>
                 <Switch
-                  value={dailyExpenseReminderEnabled}
-                  onValueChange={handleToggleDailyExpense}
+                  value={afternoonReminderEnabled}
+                  onValueChange={handleToggleAfternoon}
                   trackColor={{ false: '#282B37', true: expenseColors.accentPeach }}
+                  thumbColor={Platform.OS === 'android' ? (afternoonReminderEnabled ? '#FFFFFF' : '#8E8E93') : undefined}
                   ios_backgroundColor="#282B37"
                 />
               </View>
 
-              {/* NESTED SUB-ITEMS CONTAINER (CLEAR HIERARCHICAL INDENTATION) */}
-              {dailyExpenseReminderEnabled && (
-                <View style={styles.nestedSubCardsContainer}>
-                  {/* SUB-ITEM 1: ☀️ Afternoon Check-in */}
-                  <View style={styles.subSessionCard}>
-                    <View style={styles.subSessionTopRow}>
-                      <View style={styles.subSessionTitleLeft}>
-                        <View style={styles.sessionMiniSquircleSun}>
-                          <Sun size={14} color="#FF9D66" />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                            <AppText style={styles.subSessionTitle}>Afternoon Check-in</AppText>
-                            {afternoonReminderEnabled && (
-                              <View style={styles.sessionTimeBadge}>
-                                <AppText style={styles.sessionTimeBadgeText}>{afternoonTimeStr}</AppText>
-                              </View>
-                            )}
-                          </View>
-                          <AppText style={styles.subSessionDesc}>
-                            Log lunch, coffee, snacks & midday purchases
-                          </AppText>
-                        </View>
+              {afternoonReminderEnabled && (
+                <>
+                  <View style={styles.subDivider} />
+                  <View style={styles.subRowItem}>
+                    <AppText style={styles.subRowLabel}>Reminder Time</AppText>
+                    <NativeLiquidMenu
+                      title="Midday Reminder Time"
+                      actions={afternoonMenuActions}
+                      onSelect={(id) => {
+                        const match = AFTERNOON_TIME_PRESETS.find((p) => `${p.hour}:${p.minute}` === id);
+                        if (match) handleSelectAfternoonTime(match);
+                      }}
+                      style={{ alignSelf: 'flex-end' }}
+                    >
+                      <View style={styles.dropdownPill}>
+                        <AppText style={styles.dropdownPillText}>
+                          {formatTimeLabel(afternoonReminderTime)}
+                        </AppText>
+                        <ChevronDown size={13} color={expenseColors.accentPeach} />
                       </View>
-                      <Switch
-                        value={afternoonReminderEnabled}
-                        onValueChange={handleToggleAfternoon}
-                        trackColor={{ false: '#282B37', true: expenseColors.accentPeach }}
-                        ios_backgroundColor="#282B37"
-                      />
-                    </View>
-
-                    {afternoonReminderEnabled && (
-                      <View style={styles.subSessionChipsWrap}>
-                        <ScrollView
-                          horizontal
-                          showsHorizontalScrollIndicator={false}
-                          contentContainerStyle={styles.timePillsScroll}
-                        >
-                          {AFTERNOON_TIME_PRESETS.map((p) => {
-                            const isSelected =
-                              afternoonReminderTime.hour === p.hour &&
-                              afternoonReminderTime.minute === p.minute;
-                            return (
-                              <TouchableOpacity
-                                key={p.label}
-                                style={[styles.timePill, isSelected && styles.timePillActive]}
-                                activeOpacity={0.75}
-                                onPress={() => handleSelectAfternoonTime({ hour: p.hour, minute: p.minute })}
-                              >
-                                <AppText style={[styles.timePillText, isSelected && styles.timePillTextActive]}>
-                                  {p.label}
-                                </AppText>
-                                {p.tag && (
-                                  <View style={[styles.miniTag, isSelected && styles.miniTagActive]}>
-                                    <AppText style={[styles.miniTagText, isSelected && styles.miniTagTextActive]}>
-                                      {p.tag}
-                                    </AppText>
-                                  </View>
-                                )}
-                              </TouchableOpacity>
-                            );
-                          })}
-                        </ScrollView>
-                      </View>
-                    )}
+                    </NativeLiquidMenu>
                   </View>
+                </>
+              )}
 
-                  {/* SUB-ITEM 2: 🌙 Night Summary */}
-                  <View style={styles.subSessionCard}>
-                    <View style={styles.subSessionTopRow}>
-                      <View style={styles.subSessionTitleLeft}>
-                        <View style={styles.sessionMiniSquircleMoon}>
-                          <Moon size={14} color="#C4A7E7" />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                            <AppText style={styles.subSessionTitle}>Night Spending Summary</AppText>
-                            {nightReminderEnabled && (
-                              <View style={styles.sessionTimeBadge}>
-                                <AppText style={styles.sessionTimeBadgeText}>{nightTimeStr}</AppText>
-                              </View>
-                            )}
-                          </View>
-                          <AppText style={styles.subSessionDesc}>
-                            Review total day spend & reconcile accounts before sleep
-                          </AppText>
-                        </View>
-                      </View>
-                      <Switch
-                        value={nightReminderEnabled}
-                        onValueChange={handleToggleNight}
-                        trackColor={{ false: '#282B37', true: expenseColors.accentPeach }}
-                        ios_backgroundColor="#282B37"
-                      />
-                    </View>
+              <View style={styles.divider} />
 
-                    {nightReminderEnabled && (
-                      <View style={styles.subSessionChipsWrap}>
-                        <ScrollView
-                          horizontal
-                          showsHorizontalScrollIndicator={false}
-                          contentContainerStyle={styles.timePillsScroll}
-                        >
-                          {NIGHT_TIME_PRESETS.map((p) => {
-                            const isSelected =
-                              nightReminderTime.hour === p.hour &&
-                              nightReminderTime.minute === p.minute;
-                            return (
-                              <TouchableOpacity
-                                key={p.label}
-                                style={[styles.timePill, isSelected && styles.timePillActive]}
-                                activeOpacity={0.75}
-                                onPress={() => handleSelectNightTime({ hour: p.hour, minute: p.minute })}
-                              >
-                                <AppText style={[styles.timePillText, isSelected && styles.timePillTextActive]}>
-                                  {p.label}
-                                </AppText>
-                                {p.tag && (
-                                  <View style={[styles.miniTag, isSelected && styles.miniTagActive]}>
-                                    <AppText style={[styles.miniTagText, isSelected && styles.miniTagTextActive]}>
-                                      {p.tag}
-                                    </AppText>
-                                  </View>
-                                )}
-                              </TouchableOpacity>
-                            );
-                          })}
-                        </ScrollView>
-                      </View>
-                    )}
+              {/* Evening Summary */}
+              <View style={styles.groupedRowItem}>
+                <View style={styles.iconRowLeft}>
+                  <View style={styles.iconSquare}>
+                    <Moon size={17} color={expenseColors.accentPeach} />
+                  </View>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <AppText style={styles.rowTitle}>Evening Summary</AppText>
+                    <AppText style={styles.rowSubtitle}>
+                      Review total daily spend before going to bed
+                    </AppText>
                   </View>
                 </View>
+                <Switch
+                  value={nightReminderEnabled}
+                  onValueChange={handleToggleNight}
+                  trackColor={{ false: '#282B37', true: expenseColors.accentPeach }}
+                  thumbColor={Platform.OS === 'android' ? (nightReminderEnabled ? '#FFFFFF' : '#8E8E93') : undefined}
+                  ios_backgroundColor="#282B37"
+                />
+              </View>
+
+              {nightReminderEnabled && (
+                <>
+                  <View style={styles.subDivider} />
+                  <View style={styles.subRowItem}>
+                    <AppText style={styles.subRowLabel}>Reminder Time</AppText>
+                    <NativeLiquidMenu
+                      title="Evening Reminder Time"
+                      actions={nightMenuActions}
+                      onSelect={(id) => {
+                        const match = NIGHT_TIME_PRESETS.find((p) => `${p.hour}:${p.minute}` === id);
+                        if (match) handleSelectNightTime(match);
+                      }}
+                      style={{ alignSelf: 'flex-end' }}
+                    >
+                      <View style={styles.dropdownPill}>
+                        <AppText style={styles.dropdownPillText}>
+                          {formatTimeLabel(nightReminderTime)}
+                        </AppText>
+                        <ChevronDown size={13} color={expenseColors.accentPeach} />
+                      </View>
+                    </NativeLiquidMenu>
+                  </View>
+                </>
               )}
             </View>
 
-            {/* ══════════════════════════════════════════════
-                SECTION 2: BILLS & RECURRING CHARGES
-            ══════════════════════════════════════════════ */}
+            {/* ── SECTION 3: BILLS & SUBSCRIPTIONS ── */}
             <View style={styles.sectionHeaderWrap}>
-              <AppText style={styles.sectionCategoryHeader}>BILLS & SUBSCRIPTIONS</AppText>
+              <AppText style={styles.sectionHeader}>BILLS & SUBSCRIPTIONS</AppText>
             </View>
 
             <View style={styles.groupedInsetCard}>
-              {/* Credit Card Bill Due Dates */}
+              {/* Credit Card Bill Due */}
               <View style={styles.groupedRowItem}>
                 <View style={styles.iconRowLeft}>
-                  <View style={[styles.tileIconCircle, { backgroundColor: 'rgba(157, 198, 235, 0.15)' }]}>
-                    <CreditCard size={16} color="#9DC6EB" />
+                  <View style={styles.iconSquare}>
+                    <CreditCard size={17} color={expenseColors.accentPeach} />
                   </View>
-                  <View style={{ flex: 1 }}>
-                    <AppText style={styles.groupedRowTitle}>CREDIT CARD BILL DUES</AppText>
-                    <AppText style={styles.settingSubValue} numberOfLines={1}>
-                      Alerts 3 days before payment due date
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <AppText style={styles.rowTitle}>Credit Card Due Dates</AppText>
+                    <AppText style={styles.rowSubtitle}>
+                      Alert 3 days before payment deadline
                     </AppText>
                   </View>
                 </View>
@@ -553,22 +467,23 @@ export default function NotificationsScreen() {
                   value={billDueReminderEnabled}
                   onValueChange={handleToggleBillDue}
                   trackColor={{ false: '#282B37', true: expenseColors.accentPeach }}
+                  thumbColor={Platform.OS === 'android' ? (billDueReminderEnabled ? '#FFFFFF' : '#8E8E93') : undefined}
                   ios_backgroundColor="#282B37"
                 />
               </View>
 
-              <View style={styles.groupedRowDivider} />
+              <View style={styles.divider} />
 
-              {/* Subscription Renewal Alerts */}
+              {/* Subscription Renewals */}
               <View style={styles.groupedRowItem}>
                 <View style={styles.iconRowLeft}>
-                  <View style={[styles.tileIconCircle, { backgroundColor: 'rgba(140, 217, 200, 0.15)' }]}>
-                    <Calendar size={16} color="#8CD9C8" />
+                  <View style={styles.iconSquare}>
+                    <Calendar size={17} color={expenseColors.accentPeach} />
                   </View>
-                  <View style={{ flex: 1 }}>
-                    <AppText style={styles.groupedRowTitle}>SUBSCRIPTION RENEWALS</AppText>
-                    <AppText style={styles.settingSubValue} numberOfLines={1}>
-                      Notify before free trials & monthly renewals charge
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <AppText style={styles.rowTitle}>Subscription Renewals</AppText>
+                    <AppText style={styles.rowSubtitle}>
+                      Advance warning before charges occur
                     </AppText>
                   </View>
                 </View>
@@ -576,490 +491,239 @@ export default function NotificationsScreen() {
                   value={subscriptionReminderEnabled}
                   onValueChange={handleToggleSubscriptions}
                   trackColor={{ false: '#282B37', true: expenseColors.accentPeach }}
+                  thumbColor={Platform.OS === 'android' ? (subscriptionReminderEnabled ? '#FFFFFF' : '#8E8E93') : undefined}
                   ios_backgroundColor="#282B37"
                 />
               </View>
 
               {subscriptionReminderEnabled && (
-                <View style={styles.nestedSubCardsContainer}>
-                  <View style={styles.subTimingCard}>
-                    <AppText style={styles.subTimingHeading}>RENEWAL ALERT TIMING</AppText>
-                    {TIMING_OPTIONS.map((opt, index) => {
-                      const isSelected = notificationTiming === opt.value;
-                      const isLast = index === TIMING_OPTIONS.length - 1;
-                      return (
-                        <TouchableOpacity
-                          key={opt.value}
-                          activeOpacity={0.7}
-                          onPress={() => handleTimingChange(opt.value)}
-                          style={[styles.timingRow, !isLast && styles.timingRowDivider]}
-                        >
-                          <View style={{ flex: 1, gap: 2 }}>
-                            <AppText style={styles.timingOptionLabel}>{opt.label}</AppText>
-                            <AppText style={styles.timingOptionSub}>{opt.sublabel}</AppText>
-                          </View>
-                          {isSelected ? (
-                            <View style={styles.timingCheckCircle}>
-                              <Check size={12} color="#0D0E12" strokeWidth={3.5} />
-                            </View>
-                          ) : (
-                            <View style={styles.timingUncheckCircle} />
-                          )}
-                        </TouchableOpacity>
-                      );
-                    })}
+                <>
+                  <View style={styles.subDivider} />
+                  <View style={styles.subRowItem}>
+                    <AppText style={styles.subRowLabel}>Alert Timing</AppText>
+                    <NativeLiquidMenu
+                      title="Subscription Alert Timing"
+                      actions={timingMenuActions}
+                      onSelect={(id) => handleTimingChange(id as NotificationTiming)}
+                      style={{ alignSelf: 'flex-end' }}
+                    >
+                      <View style={styles.dropdownPill}>
+                        <AppText style={styles.dropdownPillText}>{currentTimingLabel}</AppText>
+                        <ChevronDown size={13} color={expenseColors.accentPeach} />
+                      </View>
+                    </NativeLiquidMenu>
                   </View>
-                </View>
+                </>
               )}
             </View>
 
-            {/* ══════════════════════════════════════════════
-                SECTION 3: DIAGNOSTICS & TEST
-            ══════════════════════════════════════════════ */}
+            {/* ── SECTION 4: TESTING & VERIFICATION ── */}
             <View style={styles.sectionHeaderWrap}>
-              <AppText style={styles.sectionCategoryHeader}>DIAGNOSTICS & TEST</AppText>
+              <AppText style={styles.sectionHeader}>TESTING</AppText>
             </View>
 
-            <TouchableOpacity
-              style={styles.testActionCard}
-              activeOpacity={0.75}
-              onPress={handleSendTestNotification}
-            >
-              <View style={styles.iconRowLeft}>
-                <View style={[styles.tileIconCircle, { backgroundColor: 'rgba(248, 177, 149, 0.16)' }]}>
-                  <Sparkles size={16} color={expenseColors.accentPeach} />
+            <View style={styles.groupedInsetCard}>
+              <TouchableOpacity
+                style={styles.groupedRowItem}
+                activeOpacity={0.7}
+                onPress={handleSendTestNotification}
+              >
+                <View style={styles.iconRowLeft}>
+                  <View style={styles.iconSquare}>
+                    <Sparkles size={17} color={expenseColors.accentPeach} />
+                  </View>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <AppText style={styles.rowTitle}>Send Test Notification</AppText>
+                    <AppText style={styles.rowSubtitle}>
+                      Dispatch an immediate alert to verify sound & delivery
+                    </AppText>
+                  </View>
                 </View>
-                <View style={{ flex: 1 }}>
-                  <AppText style={styles.groupedRowTitle}>SEND TEST NOTIFICATION</AppText>
-                  <AppText style={styles.settingSubValue}>
-                    Test banner presentation, alert sounds & vibrations
-                  </AppText>
-                </View>
-              </View>
-              <ChevronRight size={18} color={expenseColors.textSubtle} />
-            </TouchableOpacity>
+                <ChevronRight size={18} color={expenseColors.textSubtle} />
+              </TouchableOpacity>
+            </View>
           </>
         )}
+
+        {/* ── FOOTER CAPTION ── */}
+        <View style={styles.footerNoteWrap}>
+          <AppText style={styles.footerNoteText}>
+            Local Device Reminders • Timed to Device Clock • 100% Private
+          </AppText>
+        </View>
       </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screenContainer: {
+  screen: {
     flex: 1,
     backgroundColor: expenseColors.bgPrimary,
   },
-  headerRow: {
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 14,
-    backgroundColor: expenseColors.bgPrimary,
+    paddingVertical: 12,
   },
-  headerBackBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: '#1E212B',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.07)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  titleThe: {
-    color: '#8E919D',
-    fontSize: 14,
-    fontWeight: '800',
-    letterSpacing: 1.4,
-  },
-  titleMain: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '800',
-    letterSpacing: 1.4,
-  },
-  headerRightSpacer: {
-    width: 38,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingHorizontal: 16,
-    paddingTop: 6,
-  },
-  permissionWarningCard: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(248, 177, 149, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(248, 177, 149, 0.3)',
-    borderRadius: 20,
-    padding: 16,
-    gap: 12,
-    marginBottom: 16,
-  },
-  warningIconCircle: {
+  backBtn: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(248, 177, 149, 0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  warningCardTitle: {
-    color: expenseColors.accentPeach,
-    fontSize: 14,
-    fontWeight: '800',
-    letterSpacing: 0.3,
-  },
-  warningCardDesc: {
-    color: '#C7C8CF',
-    fontSize: 12,
-    lineHeight: 17,
-  },
-  warningActionBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    gap: 6,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    backgroundColor: 'rgba(248, 177, 149, 0.18)',
-    borderRadius: 10,
-    marginTop: 6,
-  },
-  warningActionText: {
-    color: expenseColors.accentPeach,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  heroCard: {
-    backgroundColor: expenseColors.bgCard,
-    borderRadius: 22,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: expenseColors.borderCard,
-    marginBottom: 18,
-  },
-  heroTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  heroIconCircle: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  liveStatusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
-  liveStatusBadgeActive: {
-    backgroundColor: 'rgba(112, 214, 188, 0.12)',
-    borderColor: 'rgba(112, 214, 188, 0.25)',
-  },
-  liveStatusBadgeInactive: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  statusBadgeText: {
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.8,
-  },
-  heroTitle: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    lineHeight: 22,
-    fontWeight: '800',
-    letterSpacing: 0.2,
-    marginBottom: 4,
-  },
-  heroSubtitle: {
-    color: expenseColors.textSubtle,
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  heroDivider: {
-    height: 1,
     backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    marginVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  heroToggleRow: {
+  headerTitle: {
+    color: expenseColors.textPrimary,
+    fontSize: 17,
+    fontWeight: '700',
+    letterSpacing: -0.3,
+  },
+  headerRightSpacer: {
+    width: 36,
+  },
+  scrollContent: {
+    paddingTop: 8,
+  },
+  warningBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 12,
+    backgroundColor: 'rgba(244, 139, 139, 0.1)',
+    borderRadius: 16,
+    padding: 14,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(244, 139, 139, 0.25)',
   },
-  heroToggleLabel: {
-    color: '#FFFFFF',
-    fontSize: 15,
+  warningTitle: {
+    color: expenseColors.textPrimary,
+    fontSize: 13,
     fontWeight: '700',
   },
-  heroToggleSub: {
+  warningSub: {
     color: expenseColors.textMuted,
-    fontSize: 12,
-    marginTop: 2,
+    fontSize: 11,
+    lineHeight: 15,
   },
   sectionHeaderWrap: {
-    paddingHorizontal: 4,
-    marginBottom: 8,
-    marginTop: 4,
+    paddingHorizontal: 20,
+    marginTop: 20,
+    marginBottom: 7,
   },
-  sectionCategoryHeader: {
-    color: expenseColors.textSubtle,
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 1.4,
+  sectionHeader: {
+    color: '#8E8E93',
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 0.8,
   },
   groupedInsetCard: {
     backgroundColor: expenseColors.bgCard,
-    borderRadius: 22,
+    borderRadius: 16,
+    marginHorizontal: 16,
     borderWidth: 1,
     borderColor: expenseColors.borderCard,
-    marginBottom: 18,
     overflow: 'hidden',
-  },
-  masterPromptRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 16,
-  },
-  nestedSubCardsContainer: {
-    backgroundColor: '#15171D',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.05)',
-    padding: 12,
-    gap: 10,
-  },
-  subSessionCard: {
-    backgroundColor: '#1E212A',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.05)',
-    padding: 14,
-  },
-  subSessionTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  subSessionTitleLeft: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-    flex: 1,
-    marginRight: 10,
-  },
-  sessionMiniSquircleSun: {
-    width: 28,
-    height: 28,
-    borderRadius: 9,
-    backgroundColor: 'rgba(255, 157, 102, 0.16)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 1,
-  },
-  sessionMiniSquircleMoon: {
-    width: 28,
-    height: 28,
-    borderRadius: 9,
-    backgroundColor: 'rgba(196, 167, 231, 0.16)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 1,
-  },
-  subSessionTitle: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '800',
-    letterSpacing: 0.3,
-  },
-  sessionTimeBadge: {
-    backgroundColor: 'rgba(248, 177, 149, 0.16)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  sessionTimeBadgeText: {
-    color: expenseColors.accentPeach,
-    fontSize: 10,
-    fontWeight: '800',
-  },
-  subSessionDesc: {
-    color: expenseColors.textSubtle,
-    fontSize: 11,
-    lineHeight: 15,
-    marginTop: 3,
-  },
-  subSessionChipsWrap: {
-    marginTop: 12,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.05)',
   },
   groupedRowItem: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 16,
+    paddingVertical: 13,
+    paddingHorizontal: 16,
+    minHeight: 56,
   },
   iconRowLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
     flex: 1,
-    marginRight: 10,
   },
-  tileIconCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+  iconSquare: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 157, 102, 0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  groupedRowTitle: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '800',
-    letterSpacing: 0.8,
-    marginBottom: 2,
+  rowTitle: {
+    color: expenseColors.textPrimary,
+    fontSize: 15,
+    fontWeight: '600',
+    lineHeight: 20,
   },
-  settingSubValue: {
-    color: expenseColors.textSubtle,
+  rowSubtitle: {
+    color: expenseColors.textMuted,
     fontSize: 12,
     lineHeight: 16,
+    marginTop: 1,
   },
-  groupedRowDivider: {
-    height: 1,
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    marginLeft: 60,
+  },
+  subDivider: {
+    height: StyleSheet.hairlineWidth,
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    marginLeft: 64,
+    marginLeft: 60,
   },
-  timePillsScroll: {
+  subRowItem: {
     flexDirection: 'row',
-    gap: 8,
-    paddingVertical: 2,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    paddingLeft: 60,
   },
-  timePill: {
+  subRowLabel: {
+    color: expenseColors.textSecondary,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  dropdownPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingVertical: 6,
+    backgroundColor: 'rgba(255, 157, 102, 0.12)',
     paddingHorizontal: 11,
-    borderRadius: 10,
-    backgroundColor: '#262934',
+    paddingVertical: 6,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
+    borderColor: 'rgba(255, 157, 102, 0.25)',
+    alignSelf: 'flex-end',
+    maxWidth: 160,
   },
-  timePillActive: {
-    backgroundColor: 'rgba(248, 177, 149, 0.16)',
-    borderColor: expenseColors.accentPeach,
-  },
-  timePillText: {
-    color: '#A2A5B0',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  timePillTextActive: {
+  dropdownPillText: {
     color: expenseColors.accentPeach,
-    fontWeight: '800',
-  },
-  miniTag: {
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    borderRadius: 4,
-  },
-  miniTagActive: {
-    backgroundColor: 'rgba(248, 177, 149, 0.25)',
-  },
-  miniTagText: {
-    color: '#7E8394',
-    fontSize: 9,
-    fontWeight: '700',
-  },
-  miniTagTextActive: {
-    color: expenseColors.accentPeach,
-  },
-  subTimingCard: {
-    backgroundColor: '#1E212A',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.05)',
-    padding: 14,
-  },
-  subTimingHeading: {
-    color: expenseColors.textSubtle,
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 1.1,
-    marginBottom: 8,
-  },
-  timingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 9,
-  },
-  timingRowDivider: {
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.04)',
-  },
-  timingOptionLabel: {
-    color: '#FFFFFF',
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '600',
+    maxWidth: 120,
   },
-  timingOptionSub: {
-    color: expenseColors.textSubtle,
+  sectionFooterWrap: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+  },
+  sectionFooterText: {
+    color: '#636366',
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  footerNoteWrap: {
+    marginTop: 32,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+  },
+  footerNoteText: {
+    color: '#48484A',
     fontSize: 11,
-    lineHeight: 15,
-  },
-  timingCheckCircle: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: expenseColors.accentPeach,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  timingUncheckCircle: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: '#4A4D59',
-  },
-  testActionCard: {
-    backgroundColor: expenseColors.bgCard,
-    borderRadius: 22,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: expenseColors.borderCard,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 18,
+    lineHeight: 16,
+    textAlign: 'center',
+    letterSpacing: 0.2,
   },
 });

@@ -4,6 +4,7 @@ import {
   ScrollView,
   StyleSheet,
   TouchableOpacity,
+  Platform,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -21,6 +22,7 @@ import {
   Zap,
   Lock,
   Database,
+  Smartphone,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { colors, spacing, radius, getCurrencySymbol, AUTHOR_CREDIT } from "@/constants";
@@ -87,11 +89,14 @@ function Divider() {
 export default function SettingsIndex() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { currencyCode, userName } = useSettingsStore();
+  const { currencyCode, userName, autoTrackSmsEnabled, pendingTransactions } = useSettingsStore();
   const { isUpdateAvailable, isUpdatePending, activeVersion, isEmbeddedLaunch } = useAppUpdateManager();
 
   const currencySymbol = getCurrencySymbol(currencyCode);
   const updateBadge = isUpdatePending ? "Ready" : isUpdateAvailable ? "Update" : undefined;
+  const autoTrackBadge = Platform.OS === "android"
+    ? (pendingTransactions?.length > 0 ? `${pendingTransactions.length}` : autoTrackSmsEnabled ? "Active" : undefined)
+    : undefined;
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -169,13 +174,29 @@ export default function SettingsIndex() {
               label="Biometrics & Security"
               onPress={() => router.push("/settings/privacy")}
             />
-            <Divider />
-            <Row
-              iconBg="#30D158"
-              icon={<Zap size={18} color="#fff" />}
-              label="Quick Add Shortcut"
-              onPress={() => router.push("/settings/shortcut-setup")}
-            />
+            {Platform.OS === 'ios' && (
+              <>
+                <Divider />
+                <Row
+                  iconBg="#30D158"
+                  icon={<Zap size={18} color="#fff" />}
+                  label="Quick Add Shortcut"
+                  onPress={() => router.push("/settings/shortcut-setup")}
+                />
+              </>
+            )}
+            {Platform.OS === 'android' && (
+              <>
+                <Divider />
+                <Row
+                  iconBg="#FF9500"
+                  icon={<Smartphone size={18} color="#fff" />}
+                  label="Auto Tracking"
+                  badge={autoTrackBadge}
+                  onPress={() => router.push("/settings/auto-tracking")}
+                />
+              </>
+            )}
             <Divider />
             <Row
               iconBg="#8E8E93"

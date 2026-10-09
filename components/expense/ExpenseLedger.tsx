@@ -36,6 +36,7 @@ import {
   Building2,
   Folder,
   Target,
+  Smartphone,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { BlurView } from 'expo-blur';
@@ -43,6 +44,8 @@ import * as Clipboard from 'expo-clipboard';
 import { AppText, NativeLiquidMenu } from '@/components/ui';
 import type { MenuAction } from '@/components/ui';
 import { useExpenseStore, compareTransactions, getUserCategories } from '@/store/useExpenseStore';
+import { useSettingsStore } from '@/store/useSettingsStore';
+import { ReviewPendingModal } from './ReviewPendingModal';
 import { useShallow } from 'zustand/react/shallow';
 import { expenseColors } from '@/constants/expenseColors';
 import { ExpenseTransaction, ExpenseCategory } from '@/types/expense';
@@ -126,6 +129,8 @@ export const ExpenseLedger: React.FC = () => {
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('All');
   const [editingTx, setEditingTx] = useState<ExpenseTransaction | null>(null);
   const [selectedSplitTx, setSelectedSplitTx] = useState<ExpenseTransaction | null>(null);
+  const [isReviewModalVisible, setIsReviewModalVisible] = useState(false);
+  const pendingTransactions = useSettingsStore((s) => s.pendingTransactions);
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const searchInputRef = useRef<TextInput>(null);
@@ -573,9 +578,10 @@ export const ExpenseLedger: React.FC = () => {
 
       // 3. Explicit Merchant field
       if (tx.merchant && tx.merchant.trim()) {
+        const isAutoTracked = tx.note?.startsWith('Auto-tracked');
         return {
           displayTitle: tx.merchant.trim().toUpperCase(),
-          displayContext: tx.note && tx.note.trim() ? tx.note.trim().toUpperCase() : null,
+          displayContext: !isAutoTracked && tx.note && tx.note.trim() ? tx.note.trim().toUpperCase() : null,
         };
       }
 
@@ -1187,8 +1193,25 @@ export const ExpenseLedger: React.FC = () => {
             <AppText style={styles.titleLedger}>LEDGER</AppText>
           </View>
 
-          {/* Placeholder spacer on right to keep THE LEDGER centered */}
-          <View style={styles.headerRightSpacer} />
+          {/* Right Header: Pending Bank Alerts Pill or Spacer */}
+          {pendingTransactions && pendingTransactions.length > 0 && !isSelectMode ? (
+            <TouchableOpacity
+              style={styles.headerAlertPill}
+              activeOpacity={0.75}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              onPress={() => {
+                Haptics.selectionAsync().catch(() => {});
+                setIsReviewModalVisible(true);
+              }}
+            >
+              <Smartphone size={12} color={expenseColors.accentPeach} />
+              <AppText style={styles.headerAlertText}>
+                {pendingTransactions.length} NEW
+              </AppText>
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.headerRightSpacer} />
+          )}
         </Animated.View>
 
         {/* Smart Search Card */}
@@ -1669,11 +1692,33 @@ export const ExpenseLedger: React.FC = () => {
         />
       )}
 
+      <ReviewPendingModal
+        visible={isReviewModalVisible}
+        onClose={() => setIsReviewModalVisible(false)}
+      />
+
     </View>
   );
 };
 
 const styles = StyleSheet.create({
+  headerAlertPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(248, 177, 149, 0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(248, 177, 149, 0.3)',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 12,
+  },
+  headerAlertText: {
+    color: expenseColors.accentPeach,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
   screenContainer: {
     flex: 1,
     backgroundColor: expenseColors.bgPrimary,

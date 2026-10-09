@@ -90,6 +90,12 @@ export default function SettingsLayout() {
           gestureEnabled: true,
         }}
       />
+      <Stack.Screen
+        name="auto-tracking"
+        options={{
+          gestureEnabled: true,
+        }}
+      />
     </Stack>
   );
 }

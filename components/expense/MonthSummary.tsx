@@ -3,7 +3,7 @@ import { View, StyleSheet, TouchableOpacity, Animated, LayoutAnimation, Platform
 import { Zap, ArrowLeftRight } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { AppText } from '@/components/ui';
-import { useExpenseStore } from '@/store/useExpenseStore';
+import { useExpenseStore, monthKeyToYearMonth } from '@/store/useExpenseStore';
 import { useShallow } from 'zustand/react/shallow';
 import { expenseColors } from '@/constants/expenseColors';
 import { ExpenseCategory } from '@/types/expense';
@@ -38,6 +38,7 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
     selectedMonth,
     currencySymbol,
     monthlyBudget,
+    categoryBudgets,
     savingsVaults,
     getTotalBalance,
     getTotalSpent,
@@ -51,6 +52,7 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
       selectedMonth: s.selectedMonth,
       currencySymbol: s.currencySymbol,
       monthlyBudget: s.monthlyBudget,
+      categoryBudgets: s.categoryBudgets,
       savingsVaults: s.savingsVaults,
       getTotalBalance: s.getTotalBalance,
       getTotalSpent: s.getTotalSpent,
@@ -78,7 +80,19 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
   const knownArcIds = useRef(new Set<string>());
   const hasRunArcEntrance = useRef(false);
 
-  const totalBalance = getTotalBalance();
+  // Derive Effective Budget (fallback to sum of category budgets if monthlyBudget === 0)
+  const totalAllocatedCategoryBudget = Object.values(categoryBudgets || {}).reduce(
+    (sum, val) => sum + (val > 0 ? val : 0),
+    0
+  );
+  const effectiveBudget = monthlyBudget > 0 ? monthlyBudget : totalAllocatedCategoryBudget;
+
+  const now = new Date();
+  const { year: selYear, month: selMonth } = monthKeyToYearMonth(selectedMonth);
+  const isCurrentMonth = selYear === now.getFullYear() && selMonth === now.getMonth();
+  const isPastMonth = selYear < now.getFullYear() || (selYear === now.getFullYear() && selMonth < now.getMonth());
+
+  const totalBalance = getTotalBalance(selectedMonth);
   const totalSpent = getTotalSpent();
   const remainingBudget = getRemainingBudget();
   const breakdown = getCategoryBreakdown();
@@ -319,26 +333,30 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
             >
               <AppText style={styles.balanceTitle}>
                 {isBudgetMode
-                  ? monthlyBudget > 0
+                  ? effectiveBudget > 0
                     ? remainingBudget < 0
                       ? 'Over budget'
+                      : isPastMonth
+                      ? 'Saved / Unspent'
                       : 'Safe to spend'
                     : 'Total spent'
-                  : 'Total balance'}
+                  : isCurrentMonth
+                  ? 'Total balance'
+                  : 'Balance at month end'}
               </AppText>
 
               <AppText
                 numberOfLines={1}
                 style={[
                   styles.balanceAmount,
-                  isBudgetMode && monthlyBudget > 0 && remainingBudget < 0 && styles.negativeAmount,
+                  isBudgetMode && effectiveBudget > 0 && remainingBudget < 0 && styles.negativeAmount,
                   !isBudgetMode && totalBalance < 0 && styles.negativeAmount,
                 ]}
               >
                 {isBudgetMode
-                  ? monthlyBudget > 0
+                  ? effectiveBudget > 0
                     ? remainingBudget < 0
-                      ? `+${formatAmount(Math.abs(remainingBudget))}`
+                      ? formatAmount(Math.abs(remainingBudget))
                       : formatAmount(remainingBudget)
                     : formatAmount(totalSpent)
                   : formatAmount(totalBalance)}
@@ -351,7 +369,7 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
                     <View style={styles.accountChip}>
                       <AppText style={styles.accountChipLabel}>Budget </AppText>
                       <AppText style={styles.accountChipVal}>
-                        {monthlyBudget > 0 ? formatAmount(monthlyBudget) : 'No limit'}
+                        {effectiveBudget > 0 ? formatAmount(effectiveBudget) : 'No limit'}
                       </AppText>
                     </View>
                     <View style={styles.accountChip}>

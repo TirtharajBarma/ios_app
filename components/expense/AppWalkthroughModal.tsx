@@ -64,6 +64,7 @@ export const AppWalkthroughModal: React.FC<AppWalkthroughModalProps> = ({ visibl
   const { width: screenWidth } = useWindowDimensions();
   const {
   accounts,
+  monthlyBudget,
   setMonthlyBudget,
   setHasSeenWalkthrough,
   currencySymbol,
@@ -74,6 +75,7 @@ export const AppWalkthroughModal: React.FC<AppWalkthroughModalProps> = ({ visibl
 } = useExpenseStore(
   useShallow((s) => ({
     accounts: s.accounts,
+    monthlyBudget: s.monthlyBudget,
     setMonthlyBudget: s.setMonthlyBudget,
     setHasSeenWalkthrough: s.setHasSeenWalkthrough,
     currencySymbol: s.currencySymbol,
@@ -106,6 +108,36 @@ export const AppWalkthroughModal: React.FC<AppWalkthroughModalProps> = ({ visibl
   const [isImporting, setIsImporting] = useState<boolean>(false);
   const [importReviewResult, setImportReviewResult] = useState<NormalizedStatementResult | null>(null);
   const [isReviewModalVisible, setIsReviewModalVisible] = useState<boolean>(false);
+
+  // Setup feedback & custom budget input states
+  const [createdAccountFeedback, setCreatedAccountFeedback] = useState<string | null>(null);
+  const [createdBudgetFeedback, setCreatedBudgetFeedback] = useState<number | null>(null);
+  const [customBudgetInput, setCustomBudgetInput] = useState<string>('');
+  const [customBudgetError, setCustomBudgetError] = useState<string | null>(null);
+
+  const handleAccountCreated = (name?: string) => {
+    const accountName = (name || '').trim() || 'Account';
+    setCreatedAccountFeedback(accountName);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    setShowAddAccountModal(false);
+  };
+
+  const handleSaveCustomBudget = () => {
+    const clean = customBudgetInput.trim().replace(/,/g, '');
+    const parsed = parseFloat(clean);
+    if (!clean || isNaN(parsed) || parsed <= 0) {
+      setCustomBudgetError('Please enter a valid amount greater than 0');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+      return;
+    }
+    setMonthlyBudget(parsed);
+    setCreatedBudgetFeedback(parsed);
+    setShowBudgetPicker(false);
+    setCustomBudgetError(null);
+    setCustomBudgetInput('');
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    handleNext();
+  };
 
   // Demo interactive state in moments
   const [demoSplitSettled, setDemoSplitSettled] = useState<boolean>(false);
@@ -438,6 +470,22 @@ export const AppWalkthroughModal: React.FC<AppWalkthroughModalProps> = ({ visibl
                 {currentMoment === 1 && (
                   <View style={styles.momentStage}>
                     <View style={styles.accountsShowcaseStack}>
+                      {createdAccountFeedback && (
+                        <View style={styles.createdAccountSuccessCard}>
+                          <View style={styles.createdAccountSuccessIcon}>
+                            <CheckCircle2 size={18} color="#34D399" />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <AppText style={styles.createdAccountSuccessTitle}>ACCOUNT CREATED</AppText>
+                            <AppText style={styles.createdAccountSuccessName} numberOfLines={1}>
+                              "{createdAccountFeedback}" is linked & active ✓
+                            </AppText>
+                          </View>
+                          <View style={styles.createdAccountSuccessBadge}>
+                            <AppText style={styles.createdAccountSuccessBadgeText}>SAVED</AppText>
+                          </View>
+                        </View>
+                      )}
                       {/* Bank Card */}
                       <View style={styles.accountShowcaseCard}>
                         <View style={[styles.accountIconBox, { backgroundColor: 'rgba(169, 223, 191, 0.15)' }]}>
@@ -615,6 +663,19 @@ export const AppWalkthroughModal: React.FC<AppWalkthroughModalProps> = ({ visibl
                 {currentMoment === 4 && (
                   <View style={styles.momentStage}>
                     <View style={styles.subHeatStack}>
+                      {(createdBudgetFeedback !== null || (monthlyBudget && monthlyBudget > 0)) && (
+                        <View style={styles.createdBudgetSuccessCard}>
+                          <View style={styles.createdBudgetSuccessIcon}>
+                            <CheckCircle2 size={16} color="#34D399" />
+                          </View>
+                          <AppText style={styles.createdBudgetSuccessText}>
+                            ✓ Monthly target of {sym}{(createdBudgetFeedback ?? monthlyBudget ?? 0).toLocaleString('en-IN')} configured
+                          </AppText>
+                          <View style={styles.createdBudgetSuccessBadge}>
+                            <AppText style={styles.createdBudgetSuccessBadgeText}>SAVED</AppText>
+                          </View>
+                        </View>
+                      )}
                       {/* Subscription Card */}
                       <View style={styles.subCardDemo}>
                         <View style={[styles.subIconCircle, { backgroundColor: 'rgba(251, 191, 36, 0.15)' }]}>
@@ -703,7 +764,45 @@ export const AppWalkthroughModal: React.FC<AppWalkthroughModalProps> = ({ visibl
                 <AppText style={styles.momentSubtitle}>{currentMomentData.subtitle}</AppText>
 
                 <View style={styles.actionsBar}>
-                  {currentMomentData.hasSetup ? (
+                  {currentMoment === 1 && (createdAccountFeedback || accounts.length > 0) ? (
+                    <View style={styles.setupActionGroup}>
+                      <TouchableOpacity
+                        style={styles.primaryActionButton}
+                        activeOpacity={0.85}
+                        onPress={handleNext}
+                      >
+                        <AppText style={styles.primaryActionText}>Continue to Ledger</AppText>
+                        <ArrowRight size={16} color="#0E1015" strokeWidth={2.8} />
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={styles.maybeLaterButton}
+                        activeOpacity={0.7}
+                        onPress={() => setShowAddAccountModal(true)}
+                      >
+                        <AppText style={styles.maybeLaterText}>+ Add another account</AppText>
+                      </TouchableOpacity>
+                    </View>
+                  ) : currentMoment === 4 && (createdBudgetFeedback !== null || (monthlyBudget && monthlyBudget > 0)) ? (
+                    <View style={styles.setupActionGroup}>
+                      <TouchableOpacity
+                        style={styles.primaryActionButton}
+                        activeOpacity={0.85}
+                        onPress={handleNext}
+                      >
+                        <AppText style={styles.primaryActionText}>Continue</AppText>
+                        <ArrowRight size={16} color="#0E1015" strokeWidth={2.8} />
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={styles.maybeLaterButton}
+                        activeOpacity={0.7}
+                        onPress={() => setShowBudgetPicker(true)}
+                      >
+                        <AppText style={styles.maybeLaterText}>Change Spending Goal</AppText>
+                      </TouchableOpacity>
+                    </View>
+                  ) : currentMomentData.hasSetup ? (
                     <View style={styles.setupActionGroup}>
                       <TouchableOpacity
                         style={styles.primaryActionButton}
@@ -908,6 +1007,7 @@ export const AppWalkthroughModal: React.FC<AppWalkthroughModalProps> = ({ visibl
       <EditAccountModal
         visible={showAddAccountModal}
         account={null}
+        onSaved={(name) => handleAccountCreated(name)}
         onClose={() => setShowAddAccountModal(false)}
       />
 
@@ -917,9 +1017,16 @@ export const AppWalkthroughModal: React.FC<AppWalkthroughModalProps> = ({ visibl
           visible={showBudgetPicker}
           transparent
           animationType="fade"
-          onRequestClose={() => setShowBudgetPicker(false)}
+          onRequestClose={() => {
+            setShowBudgetPicker(false);
+            setCustomBudgetError(null);
+            setCustomBudgetInput('');
+          }}
         >
-          <View style={styles.budgetModalBackdrop}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.budgetModalBackdrop}
+          >
             <View style={styles.budgetModalCard}>
               <AppText style={styles.budgetModalTitle}>Monthly Spending Target</AppText>
               <AppText style={styles.budgetModalSub}>
@@ -934,7 +1041,10 @@ export const AppWalkthroughModal: React.FC<AppWalkthroughModalProps> = ({ visibl
                     activeOpacity={0.7}
                     onPress={() => {
                       setMonthlyBudget(amt);
+                      setCreatedBudgetFeedback(amt);
                       setShowBudgetPicker(false);
+                      setCustomBudgetError(null);
+                      setCustomBudgetInput('');
                       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
                       handleNext();
                     }}
@@ -944,15 +1054,50 @@ export const AppWalkthroughModal: React.FC<AppWalkthroughModalProps> = ({ visibl
                 ))}
               </View>
 
+              {/* Custom Budget Input */}
+              <View style={styles.customBudgetSection}>
+                <AppText style={styles.customBudgetLabel}>OR ENTER CUSTOM MONTHLY BUDGET</AppText>
+                <View style={[styles.customBudgetInputRow, customBudgetError ? styles.customBudgetInputRowError : null]}>
+                  <AppText style={styles.customBudgetCurrency}>{sym}</AppText>
+                  <TextInput
+                    style={styles.customBudgetTextInput}
+                    placeholder="e.g. 25000"
+                    placeholderTextColor="#555866"
+                    keyboardType="number-pad"
+                    value={customBudgetInput}
+                    onChangeText={(val) => {
+                      setCustomBudgetInput(val);
+                      if (customBudgetError) setCustomBudgetError(null);
+                    }}
+                    returnKeyType="done"
+                    onSubmitEditing={handleSaveCustomBudget}
+                  />
+                  <TouchableOpacity
+                    style={styles.customBudgetApplyBtn}
+                    activeOpacity={0.8}
+                    onPress={handleSaveCustomBudget}
+                  >
+                    <AppText style={styles.customBudgetApplyBtnText}>Set Target</AppText>
+                  </TouchableOpacity>
+                </View>
+                {customBudgetError ? (
+                  <AppText style={styles.customBudgetErrorText}>{customBudgetError}</AppText>
+                ) : null}
+              </View>
+
               <TouchableOpacity
                 style={styles.budgetCancelBtn}
                 activeOpacity={0.7}
-                onPress={() => setShowBudgetPicker(false)}
+                onPress={() => {
+                  setShowBudgetPicker(false);
+                  setCustomBudgetError(null);
+                  setCustomBudgetInput('');
+                }}
               >
                 <AppText style={styles.budgetCancelBtnText}>Cancel</AppText>
               </TouchableOpacity>
             </View>
-          </View>
+          </KeyboardAvoidingView>
         </Modal>
       )}
 
@@ -1737,6 +1882,148 @@ const styles = StyleSheet.create({
     color: '#8E919D',
     fontSize: 13,
     lineHeight: 17,
+    fontWeight: '600',
+  },
+  // Feedback cards for Moments 1 and 4
+  createdAccountSuccessCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: 'rgba(52, 211, 153, 0.08)',
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(52, 211, 153, 0.25)',
+    marginBottom: 4,
+  },
+  createdAccountSuccessIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(52, 211, 153, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  createdAccountSuccessTitle: {
+    color: '#34D399',
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  createdAccountSuccessName: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '600',
+  },
+  createdAccountSuccessBadge: {
+    backgroundColor: 'rgba(52, 211, 153, 0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(52, 211, 153, 0.3)',
+  },
+  createdAccountSuccessBadgeText: {
+    color: '#34D399',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  createdBudgetSuccessCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(52, 211, 153, 0.08)',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(52, 211, 153, 0.25)',
+    marginBottom: 4,
+  },
+  createdBudgetSuccessIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(52, 211, 153, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  createdBudgetSuccessText: {
+    color: '#34D399',
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '700',
+    flex: 1,
+  },
+  createdBudgetSuccessBadge: {
+    backgroundColor: 'rgba(52, 211, 153, 0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(52, 211, 153, 0.3)',
+  },
+  createdBudgetSuccessBadgeText: {
+    color: '#34D399',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  customBudgetSection: {
+    gap: 8,
+    marginTop: 4,
+  },
+  customBudgetLabel: {
+    color: '#8E919D',
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  customBudgetInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#1C202B',
+    borderRadius: 12,
+    paddingLeft: 12,
+    paddingRight: 6,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  customBudgetInputRowError: {
+    borderColor: '#F48B8B',
+  },
+  customBudgetCurrency: {
+    color: '#FBBF24',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  customBudgetTextInput: {
+    flex: 1,
+    paddingVertical: 8,
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  customBudgetApplyBtn: {
+    backgroundColor: '#FBBF24',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  customBudgetApplyBtnText: {
+    color: '#0E1015',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  customBudgetErrorText: {
+    color: '#F48B8B',
+    fontSize: 11,
     fontWeight: '600',
   },
 });

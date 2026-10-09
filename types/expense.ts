@@ -101,3 +101,20 @@ export interface QuickExpensePreset {
   note?: string;
 }
 
+export interface PendingTransaction {
+  id: string;
+  source: 'sms' | 'notification' | 'manual_test';
+  sender: string;
+  rawText: string;
+  amount: number;
+  currency: string;
+  type: TransactionType;
+  merchant?: string;
+  accountHint?: string;
+  suggestedCategoryId?: string;
+  suggestedAccountId?: string;
+  date: string; // YYYY-MM-DD
+  timestamp: number;
+  status: 'pending' | 'approved' | 'dismissed';
+}
+
