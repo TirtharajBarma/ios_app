@@ -55,8 +55,12 @@ function SpringAccountCard({
       : 'Savings';
   const txLabel = `${acc.txnCountThisMonth} txn${acc.txnCountThisMonth !== 1 ? 's' : ''}`;
   const dueStatus = isCredit && isCurrentMonth
-    ? getCreditCardDueStatus(acc.dueDay, acc.billingDay, acc.dueAmount || 0)
+    ? getCreditCardDueStatus(acc.dueDay, acc.billingDay, acc.dueAmount || 0, undefined, acc.unbilledDue)
     : null;
+  const isNegativeNonCredit = !isCredit && acc.balance < 0;
+  const unbilled = acc.unbilledDue || 0;
+  const billedDue = (acc.dueAmount || 0) - unbilled;
+  const onlyUnbilled = isCredit && unbilled > 0 && billedDue <= 0;
 
   return (
     <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
@@ -93,6 +97,8 @@ function SpringAccountCard({
                       ? styles.dueBadgePaid
                       : dueStatus.isUrgent
                       ? styles.dueBadgeUrgent
+                      : dueStatus.isUnbilled
+                      ? styles.dueBadgeUnbilled
                       : styles.dueBadgeUpcoming,
                   ]}
                 >
@@ -103,10 +109,19 @@ function SpringAccountCard({
                         ? styles.dueBadgePaidText
                         : dueStatus.isUrgent
                         ? styles.dueBadgeUrgentText
+                        : dueStatus.isUnbilled
+                        ? styles.dueBadgeUnbilledText
                         : styles.dueBadgeUpcomingText,
                     ]}
                   >
                     {dueStatus.badgeLabel}
+                  </AppText>
+                </View>
+              )}
+              {isNegativeNonCredit && (
+                <View style={[styles.dueBadge, styles.dueBadgeReconcile, { flexShrink: 0 }]}>
+                  <AppText style={[styles.dueBadgeText, styles.dueBadgeReconcileText]}>
+                    Reconcile
                   </AppText>
                 </View>
               )}
@@ -122,26 +137,42 @@ function SpringAccountCard({
           <View style={styles.balanceCol}>
             {isCredit ? (
               hasDue ? (
-                <AppText
-                  style={styles.dueBalanceText}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit={true}
-                  minimumFontScale={0.8}
-                >
-                  Due: {formatAmount(acc.dueAmount || 0)}
-                </AppText>
+                <View style={styles.amountCol}>
+                  <AppText
+                    style={onlyUnbilled ? styles.unbilledBalanceText : styles.dueBalanceText}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit={true}
+                    minimumFontScale={0.8}
+                  >
+                    {onlyUnbilled ? 'Spend: ' : 'Due: '}
+                    {formatAmount(onlyUnbilled ? acc.dueAmount || 0 : billedDue)}
+                  </AppText>
+                  {(dueStatus?.dueDateFormatted || (!onlyUnbilled && unbilled > 0)) && (
+                    <AppText style={styles.subtextDue} numberOfLines={2}>
+                      {dueStatus?.dueDateFormatted ? (onlyUnbilled ? `Pay by ${dueStatus.dueDateFormatted}` : `Due ${dueStatus.dueDateFormatted}`) : ''}
+                      {!onlyUnbilled && unbilled > 0 ? `${dueStatus?.dueDateFormatted ? ' • ' : ''}+${formatAmount(unbilled)} upcoming` : ''}
+                    </AppText>
+                  )}
+                </View>
               ) : (
                 <AppText style={styles.noDueText}>No Due</AppText>
               )
             ) : (
-              <AppText
-                style={styles.positiveBalanceText}
-                numberOfLines={1}
-                adjustsFontSizeToFit={true}
-                minimumFontScale={0.8}
-              >
-                {formatAmount(acc.balance)}
-              </AppText>
+              <View style={styles.amountCol}>
+                <AppText
+                  style={isNegativeNonCredit ? styles.negativeBalanceText : styles.positiveBalanceText}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit={true}
+                  minimumFontScale={0.8}
+                >
+                  {formatAmount(acc.balance)}
+                </AppText>
+                {isNegativeNonCredit && (
+                  <AppText style={styles.subtextReconcile} numberOfLines={1}>
+                    Tap to reconcile
+                  </AppText>
+                )}
+              </View>
             )}
           </View>
 
@@ -265,6 +296,12 @@ const styles = StyleSheet.create({
   dueBadgePaid: {
     backgroundColor: 'rgba(112, 214, 188, 0.12)',
   },
+  dueBadgeUnbilled: {
+    backgroundColor: 'rgba(126, 182, 255, 0.14)',
+  },
+  dueBadgeReconcile: {
+    backgroundColor: 'rgba(255, 184, 0, 0.14)',
+  },
   dueBadgeText: {
     fontSize: 9,
     fontWeight: '800',
@@ -278,6 +315,12 @@ const styles = StyleSheet.create({
   },
   dueBadgePaidText: {
     color: expenseColors.accentGreen,
+  },
+  dueBadgeUnbilledText: {
+    color: '#7EB6FF',
+  },
+  dueBadgeReconcileText: {
+    color: '#FFB800',
   },
   txnSubtitle: {
     color: expenseColors.textMuted,
@@ -294,10 +337,25 @@ const styles = StyleSheet.create({
   balanceCol: {
     alignItems: 'flex-end',
   },
+  amountCol: {
+    alignItems: 'flex-end',
+  },
   positiveBalanceText: {
     color: expenseColors.textPrimary,
     fontSize: 15,
     lineHeight: 19,
+    fontWeight: '700',
+  },
+  negativeBalanceText: {
+    color: '#FF6B6B',
+    fontSize: 15,
+    lineHeight: 19,
+    fontWeight: '700',
+  },
+  unbilledBalanceText: {
+    color: expenseColors.textPrimary,
+    fontSize: 14,
+    lineHeight: 18,
     fontWeight: '700',
   },
   dueBalanceText: {
@@ -305,6 +363,20 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 18,
     fontWeight: '700',
+  },
+  subtextDue: {
+    color: expenseColors.textMuted,
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: '500',
+    marginTop: 1,
+  },
+  subtextReconcile: {
+    color: '#FFB800',
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: '600',
+    marginTop: 1,
   },
   noDueText: {
     color: expenseColors.textMuted,

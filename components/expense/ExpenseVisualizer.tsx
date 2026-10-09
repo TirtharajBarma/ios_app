@@ -28,9 +28,6 @@ import {
   ChevronRight,
   ChevronLeft,
   Calendar,
-  TrendingDown,
-  TrendingUp,
-  Minus,
   Sparkles,
   RotateCcw,
 } from 'lucide-react-native';
@@ -575,34 +572,44 @@ export const ExpenseVisualizer: React.FC = () => {
   const [scrubbedRhythmIndex, setScrubbedRhythmIndex] = useState<number | null>(null);
   const rhythmScrubAnim = useRef(new Animated.Value(0)).current;
 
-  const handleRhythmTouch = useCallback(
-    (locationX: number, totalWidth: number) => {
-      if (!totalWidth || totalWidth <= 0) return;
-      const colWidth = totalWidth / 7;
-      const idx = Math.min(Math.max(0, Math.floor(locationX / colWidth)), 6);
-      if (idx !== scrubbedRhythmIndex) {
-        setScrubbedRhythmIndex(idx);
-        Haptics.selectionAsync().catch(() => {});
-        Animated.spring(rhythmScrubAnim, {
-          toValue: 1,
-          damping: 20,
-          stiffness: 300,
-          useNativeDriver: true,
-        }).start();
+  // Refs mirror the selection so rapid touch events never read a stale index.
+  const rhythmIdxRef = useRef<number | null>(null);
+  const rhythmWidthRef = useRef(0);
+  const rhythmGrantIdxRef = useRef<number | null>(null);
+  const rhythmMovedRef = useRef(false);
+
+  const selectRhythm = useCallback(
+    (idx: number | null) => {
+      if (rhythmIdxRef.current === idx) return;
+      rhythmIdxRef.current = idx;
+      setScrubbedRhythmIndex(idx);
+      if (idx === null) {
+        rhythmScrubAnim.setValue(0);
+        return;
       }
+      Haptics.selectionAsync().catch(() => {});
+      rhythmScrubAnim.stopAnimation();
+      Animated.spring(rhythmScrubAnim, {
+        toValue: 1,
+        damping: 20,
+        stiffness: 300,
+        useNativeDriver: true,
+      }).start();
     },
-    [scrubbedRhythmIndex, rhythmScrubAnim]
+    [rhythmScrubAnim]
   );
 
-  const handleRhythmTouchEnd = useCallback(() => {
-    Animated.timing(rhythmScrubAnim, {
-      toValue: 0,
-      duration: 180,
-      useNativeDriver: true,
-    }).start(() => {
-      setScrubbedRhythmIndex(null);
-    });
-  }, [rhythmScrubAnim]);
+  const rhythmIndexAt = useCallback((locationX: number) => {
+    const w = rhythmWidthRef.current;
+    if (!w || w <= 0) return null;
+    return Math.min(Math.max(0, Math.floor(locationX / (w / 7))), 6);
+  }, []);
+
+  // Selection belongs to one month's data, so clear it when the month changes.
+  useEffect(() => {
+    rhythmIdxRef.current = null;
+    setScrubbedRhythmIndex(null);
+  }, [selectedMonth]);
 
   // Generate a continuous, stable strip of the past 36 calendar months ending at current calendar month
   const monthList = useMemo(() => {
@@ -1086,15 +1093,34 @@ export const ExpenseVisualizer: React.FC = () => {
     });
   }, [transactions, lastYear, lastMonth]);
 
+  // 'auto' = same days, unless last month had nothing in those days but does have data overall.
+  const [vsMode, setVsMode] = useState<'auto' | 'same' | 'full'>('auto');
+
   // MoM Ghost Benchmark Pace
   const momBenchmark = useMemo(() => {
     const now = new Date();
     const targetDay = isCurrentMonthView ? now.getDate() : daysInMonth;
     const lastMonthDays = new Date(lastYear, lastMonth + 1, 0).getDate();
-    const lastTargetDay = isCurrentMonthView ? Math.min(lastMonthDays, Math.round((targetDay / daysInMonth) * lastMonthDays)) : lastMonthDays;
+    // Same day-range of both months (e.g. 1st–10th vs 1st–10th) is the fair pace test mid-month.
+    const sameDaysEnd = isCurrentMonthView ? Math.min(lastMonthDays, targetDay) : lastMonthDays;
+
+    const shareOf = (tx: { split?: { yourShare: number } | null; amount: number }) => (tx.split ? tx.split.yourShare : tx.amount);
+    let lastSameDays = 0;
+    let lastMonthTotal = 0;
+    lastMonthExpenses.forEach((tx) => {
+      if (tx.categoryId === 'cat_debt_repayment') return;
+      const share = shareOf(tx);
+      lastMonthTotal += share;
+      if (parseTxDate(tx.date).getDate() <= sameDaysEnd) lastSameDays += share;
+    });
+
+    const autoFull = isCurrentMonthView && lastSameDays === 0 && lastMonthTotal > 0;
+    const isFullLast = !isCurrentMonthView || (vsMode === 'full' ? true : vsMode === 'same' ? false : autoFull);
+    const lastTargetDay = isFullLast ? lastMonthDays : sameDaysEnd;
 
     let thisMonthCumulative = 0;
     monthExpenses.forEach((tx) => {
+      if (tx.categoryId === 'cat_debt_repayment') return; // not real spending, same as the app-wide Spent figure
       const d = parseTxDate(tx.date).getDate();
       if (d <= targetDay) {
         const share = tx.split ? tx.split.yourShare : tx.amount;
@@ -1102,14 +1128,7 @@ export const ExpenseVisualizer: React.FC = () => {
       }
     });
 
-    let lastMonthCumulative = 0;
-    lastMonthExpenses.forEach((tx) => {
-      const d = parseTxDate(tx.date).getDate();
-      if (d <= lastTargetDay) {
-        const share = tx.split ? tx.split.yourShare : tx.amount;
-        lastMonthCumulative += share;
-      }
-    });
+    const lastMonthCumulative = isFullLast ? lastMonthTotal : lastSameDays;
 
     const diff = thisMonthCumulative - lastMonthCumulative;
     const isEqual = Math.abs(diff) < 0.01;
@@ -1119,8 +1138,11 @@ export const ExpenseVisualizer: React.FC = () => {
 
     return {
       targetDay,
+      lastTargetDay,
       thisMonthCumulative,
       lastMonthCumulative,
+      lastMonthTotal,
+      isFullLast,
       diff: Math.abs(diff),
       pctDiff,
       isLower,
@@ -1128,19 +1150,36 @@ export const ExpenseVisualizer: React.FC = () => {
       isEqual,
       hasBaseline: lastMonthCumulative > 0,
     };
-  }, [isCurrentMonthView, daysInMonth, monthExpenses, lastMonthExpenses]);
+  }, [isCurrentMonthView, daysInMonth, monthExpenses, lastMonthExpenses, lastYear, lastMonth, vsMode]);
+
+  const thisMonthShort = new Date(curYear, curMonth, 1).toLocaleDateString('en-US', { month: 'short' });
+  const lastMonthShort = new Date(lastYear, lastMonth, 1).toLocaleDateString('en-US', { month: 'short' });
+  const vsPeriodLabel = !isCurrentMonthView
+    ? `${thisMonthShort} vs ${lastMonthShort} (full months)`
+    : momBenchmark.isFullLast
+    ? `${thisMonthShort} 1–${momBenchmark.targetDay} vs ${lastMonthShort} full month`
+    : `${thisMonthShort} 1–${momBenchmark.targetDay} vs ${lastMonthShort} 1–${momBenchmark.lastTargetDay}`;
 
   // Dynamic VS Last Month comparison algorithm
   const vsCategories: VsCat[] = useMemo(() => {
     const thisMonthMap: Record<string, number> = {};
     const lastMonthMap: Record<string, number> = {};
+    const lastMonthFullMap: Record<string, number> = {};
 
     monthExpenses.forEach(tx => {
+      if (tx.categoryId === 'cat_debt_repayment') return;
+      // Same day-range as the banner above, so the rows add up to it.
+      if (parseTxDate(tx.date).getDate() > momBenchmark.targetDay) return;
       const share = tx.split ? tx.split.yourShare : tx.amount;
       thisMonthMap[tx.categoryId] = (thisMonthMap[tx.categoryId] || 0) + share;
     });
 
     lastMonthExpenses.forEach(tx => {
+      if (tx.categoryId === 'cat_debt_repayment') return;
+      const fullShare = tx.split ? tx.split.yourShare : tx.amount;
+      lastMonthFullMap[tx.categoryId] = (lastMonthFullMap[tx.categoryId] || 0) + fullShare;
+      // Same day-range as this month so far; otherwise early-month badges always show a big drop.
+      if (parseTxDate(tx.date).getDate() > momBenchmark.lastTargetDay) return;
       const share = tx.split ? tx.split.yourShare : tx.amount;
       lastMonthMap[tx.categoryId] = (lastMonthMap[tx.categoryId] || 0) + share;
     });
@@ -1168,8 +1207,14 @@ export const ExpenseVisualizer: React.FC = () => {
         let isIncrease = false;
 
         if (lastAmt === 0 && thisAmt > 0) {
-          changeBadge = 'NEW';
-          isNew = true;
+          if ((lastMonthFullMap[catId] || 0) === 0) {
+            // Truly new: nothing in this category all of last month.
+            changeBadge = 'NEW';
+            isNew = true;
+          } else {
+            // Spent in this category last month, just not in the same days yet: "vs ₹0" already says it.
+            changeBadge = '';
+          }
         } else if (thisAmt === 0 && lastAmt > 0) {
           changeBadge = '-100%';
           isIncrease = false;
@@ -1213,7 +1258,7 @@ export const ExpenseVisualizer: React.FC = () => {
     });
 
     return activeList.sort((a, b) => b.thisAmount - a.thisAmount);
-  }, [monthExpenses, lastMonthExpenses, storeCategories, sym]);
+  }, [monthExpenses, lastMonthExpenses, storeCategories, sym, momBenchmark.lastTargetDay, momBenchmark.targetDay]);
 
   // Calendar Grid Rows
   const calendarRows: (number | null)[][] = [];
@@ -2110,16 +2155,30 @@ export const ExpenseVisualizer: React.FC = () => {
 
             <View
               style={st.rhythmChartArea}
+              // box-only: touches always report locationX relative to this chart, never to a bar or label inside it
+              pointerEvents="box-only"
+              onLayout={(e) => {
+                rhythmWidthRef.current = e.nativeEvent.layout.width;
+              }}
               onStartShouldSetResponder={() => true}
               onMoveShouldSetResponder={() => true}
+              onResponderTerminationRequest={() => false}
               onResponderGrant={(e) => {
-                handleRhythmTouch(e.nativeEvent.locationX, INNER_W - 50);
+                rhythmGrantIdxRef.current = rhythmIdxRef.current;
+                rhythmMovedRef.current = false;
+                selectRhythm(rhythmIndexAt(e.nativeEvent.locationX));
               }}
               onResponderMove={(e) => {
-                handleRhythmTouch(e.nativeEvent.locationX, INNER_W - 50);
+                const idx = rhythmIndexAt(e.nativeEvent.locationX);
+                if (idx !== rhythmIdxRef.current) rhythmMovedRef.current = true;
+                selectRhythm(idx);
               }}
-              onResponderRelease={handleRhythmTouchEnd}
-              onResponderTerminate={handleRhythmTouchEnd}
+              onResponderRelease={() => {
+                // Selection stays after release; tapping the already-selected bar again clears it.
+                if (!rhythmMovedRef.current && rhythmGrantIdxRef.current === rhythmIdxRef.current) {
+                  selectRhythm(null);
+                }
+              }}
             >
               {/* Floating Glass Scrub Tooltip */}
               {scrubbedRhythmIndex !== null && rhythmData.days[scrubbedRhythmIndex] && (
@@ -2136,7 +2195,7 @@ export const ExpenseVisualizer: React.FC = () => {
                           }),
                         },
                       ],
-                      left: `${(scrubbedRhythmIndex / 7) * 100 + 7}%`,
+                      left: `${Math.min((scrubbedRhythmIndex / 7) * 100 + 7, 62)}%`,
                     },
                   ]}
                   pointerEvents="none"
@@ -2308,7 +2367,7 @@ export const ExpenseVisualizer: React.FC = () => {
                 <View style={[st.miniDot, { backgroundColor: '#C4A7E7' }]} />
                 <AppText style={st.statLabel}>Weekdays (Mon-Fri)</AppText>
               </View>
-              <AppText style={st.statAmount}>{sym}{weekendVsWeekday.weekdaySum.toLocaleString('en-IN')}</AppText>
+              <AppText style={st.statAmount}>{sym}{Math.round(weekendVsWeekday.weekdaySum).toLocaleString('en-IN')}</AppText>
               <AppText style={st.statSub}>~{sym}{Math.round(weekendVsWeekday.avgWeekday).toLocaleString('en-IN')}/day</AppText>
             </View>
 
@@ -2319,7 +2378,7 @@ export const ExpenseVisualizer: React.FC = () => {
                 <View style={[st.miniDot, { backgroundColor: expenseColors.accentPeach }]} />
                 <AppText style={st.statLabel}>Weekends (Sat-Sun)</AppText>
               </View>
-              <AppText style={st.statAmount}>{sym}{weekendVsWeekday.weekendSum.toLocaleString('en-IN')}</AppText>
+              <AppText style={st.statAmount}>{sym}{Math.round(weekendVsWeekday.weekendSum).toLocaleString('en-IN')}</AppText>
               <AppText style={st.statSub}>~{sym}{Math.round(weekendVsWeekday.avgWeekend).toLocaleString('en-IN')}/day</AppText>
             </View>
           </View>
@@ -2370,77 +2429,59 @@ export const ExpenseVisualizer: React.FC = () => {
             ]}
           >
             <View style={st.rowBetween}>
-              <AppText style={st.cardLabel}>VS LAST MONTH</AppText>
-              <View style={st.legendRow}>
-                <View style={[st.legendSq, { backgroundColor: '#2C2D35' }]} />
-                <AppText style={st.legendTxt}>Last</AppText>
-                <View style={[st.legendSq, { backgroundColor: '#FFFFFF', marginLeft: 8 }]} />
-                <AppText style={st.legendTxt}>This</AppText>
+              <View style={{ flex: 1 }}>
+                <AppText style={st.cardLabel}>VS LAST MONTH</AppText>
+                <AppText style={st.cardSub} numberOfLines={1}>{vsPeriodLabel}</AppText>
               </View>
+              {isCurrentMonthView && (
+                <View style={st.vsSeg}>
+                  {([['same', 'Same days'], ['full', 'Full month']] as const).map(([mode, label]) => {
+                    const active = (mode === 'full') === momBenchmark.isFullLast;
+                    return (
+                      <TouchableOpacity
+                        key={mode}
+                        activeOpacity={0.7}
+                        style={[st.vsSegItem, active && st.vsSegItemActive]}
+                        onPress={() => {
+                          Haptics.selectionAsync().catch(() => {});
+                          setVsMode(mode);
+                        }}
+                      >
+                        <AppText style={[st.vsSegTxt, active && st.vsSegTxtActive]}>{label}</AppText>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
             </View>
 
             {momBenchmark.hasBaseline ? (
               <View style={st.momBenchmarkBanner}>
-                <View style={[
-                  st.momIconCircle,
-                  {
-                    backgroundColor: momBenchmark.isEqual
-                      ? 'rgba(157, 198, 235, 0.15)'
-                      : momBenchmark.isLower
-                      ? 'rgba(112, 214, 188, 0.15)'
-                      : 'rgba(255, 157, 102, 0.15)',
-                  }
-                ]}>
-                  {momBenchmark.isEqual ? (
-                    <Minus size={14} color="#9DC6EB" />
-                  ) : momBenchmark.isLower ? (
-                    <TrendingDown size={14} color={expenseColors.accentGreen} />
-                  ) : (
-                    <TrendingUp size={14} color="#FF9D66" />
-                  )}
-                </View>
-                <View style={{ flex: 1 }}>
-                  <View style={st.momTopRow}>
-                    <AppText style={[
-                      st.momPaceTitle,
-                      {
-                        color: momBenchmark.isEqual
-                          ? '#9DC6EB'
-                          : momBenchmark.isLower
-                          ? expenseColors.accentGreen
-                          : '#FF9D66',
-                      }
-                    ]}>
-                      {momBenchmark.isEqual ? 'CUMULATIVE PACE: ON TRACK' : momBenchmark.isLower ? 'CUMULATIVE PACE: LOWER' : 'CUMULATIVE PACE: HIGHER'}
-                    </AppText>
-                    <AppText style={[
-                      st.momPaceBadge,
-                      {
-                        color: momBenchmark.isEqual
-                          ? '#9DC6EB'
-                          : momBenchmark.isLower
-                          ? expenseColors.accentGreen
-                          : '#FF9D66',
-                      }
-                    ]}>
-                      {momBenchmark.isEqual ? '0%' : momBenchmark.isLower ? `-${momBenchmark.pctDiff}%` : `+${momBenchmark.pctDiff}%`}
-                    </AppText>
-                  </View>
-                  <AppText style={st.momPaceSub}>
-                    {momBenchmark.isEqual
-                      ? `Identical spending to day ${momBenchmark.targetDay} of last month`
-                      : momBenchmark.isLower
-                      ? `Spent ${sym}${momBenchmark.diff.toLocaleString('en-IN')} less than day ${momBenchmark.targetDay} of last month`
-                      : `Spent ${sym}${momBenchmark.diff.toLocaleString('en-IN')} more than day ${momBenchmark.targetDay} of last month`}
+                <View style={st.momCol}>
+                  <AppText style={st.momLabel}>
+                    {isCurrentMonthView ? `${thisMonthShort} so far` : `${thisMonthShort} total`}
                   </AppText>
+                  <AppText style={st.momAmt}>{sym}{Math.round(momBenchmark.thisMonthCumulative).toLocaleString('en-IN')}</AppText>
                 </View>
+                <View style={st.momCol}>
+                  <AppText style={st.momLabel}>
+                    {momBenchmark.isFullLast ? `${lastMonthShort} total` : `${lastMonthShort} 1–${momBenchmark.lastTargetDay}`}
+                  </AppText>
+                  <AppText style={st.momAmt}>{sym}{Math.round(momBenchmark.lastMonthCumulative).toLocaleString('en-IN')}</AppText>
+                </View>
+                {/* A percentage only means something when both sides cover the same days */}
+                {!momBenchmark.isFullLast && !momBenchmark.isEqual && (
+                  <AppText style={st.momPct}>
+                    {momBenchmark.isLower ? '↓' : '↑'} {momBenchmark.pctDiff}%
+                  </AppText>
+                )}
               </View>
             ) : (
               <View style={{ paddingVertical: 12, paddingHorizontal: 14, backgroundColor: '#181920', borderRadius: 12, marginBottom: 16 }}>
-                <AppText style={{ color: expenseColors.textMuted, fontSize: 12 }}>
-                  {isCurrentMonthView
-                    ? 'Cumulative pace benchmark will unlock once previous month baseline is established'
-                    : 'No prior month baseline available for this period'}
+                <AppText style={{ color: expenseColors.textMuted, fontSize: 12, lineHeight: 17 }}>
+                  {momBenchmark.lastMonthTotal > 0
+                    ? `Nothing was spent on ${lastMonthShort} 1–${momBenchmark.lastTargetDay}, so there is no pace to compare yet. Switch to Full month to compare with the whole month. ${lastMonthShort} total: ${sym}${Math.round(momBenchmark.lastMonthTotal).toLocaleString('en-IN')}.`
+                    : `No spending recorded in ${lastMonthShort}, so there is nothing to compare with.`}
                 </AppText>
               </View>
             )}
@@ -2453,66 +2494,59 @@ export const ExpenseVisualizer: React.FC = () => {
               </View>
             ) : (
               <View style={st.vsStack}>
-                {vsCategories.map(cat => (
+                {vsCategories.filter(c => c.thisAmount > 0).map(cat => (
                   <View key={cat.id} style={st.vsItem}>
                     <View style={st.vsTopRow}>
                       <View style={st.vsLeft}>
                         <View style={[st.vsDot, { backgroundColor: cat.color }]} />
-                        <AppText style={st.vsCat}>
-                          {cat.name}
-                        </AppText>
-                      </View>
-                      <View style={st.vsRight}>
-                        <View
-                          style={[
-                            st.newPill,
-                            !cat.isNew && (cat.isIncrease ? st.increasePill : st.decreasePill),
-                          ]}
-                        >
+                        <AppText style={st.vsCat} numberOfLines={1}>{cat.name.charAt(0) + cat.name.slice(1).toLowerCase()}</AppText>
+                        {cat.changeBadge !== '' && (
                           <AppText
                             style={[
-                              st.newTxt,
-                              !cat.isNew && (cat.isIncrease ? st.increaseTxt : st.decreaseTxt),
+                              st.vsDelta,
+                              cat.isNew ? st.vsDeltaNew : cat.isIncrease ? st.vsDeltaUp : st.vsDeltaDown,
                             ]}
                           >
-                            {cat.changeBadge}
+                            {cat.isNew ? 'New' : `${cat.isIncrease ? '↑' : '↓'} ${cat.changeBadge.replace(/^[+-]/, '')}`}
                           </AppText>
-                        </View>
+                        )}
+                      </View>
+                      <View style={st.vsRight}>
                         <AppText style={st.vsAmt}>{cat.formatted}</AppText>
                       </View>
                     </View>
 
+                    {/* One track: fill = this month, white tick = last month */}
                     <View style={st.vsBarTrack}>
+                      <Animated.View
+                        style={[
+                          st.vsFill,
+                          {
+                            backgroundColor: cat.color,
+                            width: barGrowAnim.interpolate({
+                              inputRange: [0, 1],
+                              outputRange: ['0%', `${cat.thisPercent}%`],
+                            }) as any,
+                          },
+                        ]}
+                      />
                       {cat.lastPercent > 0 && (
-                        <Animated.View
-                          style={[
-                            st.vsLastBar,
-                            {
-                              width: barGrowAnim.interpolate({
-                                inputRange: [0, 1],
-                                outputRange: ['0%', `${cat.lastPercent}%`],
-                              }) as any,
-                            },
-                          ]}
-                        />
-                      )}
-                      {cat.thisPercent > 0 && (
-                        <Animated.View
-                          style={[
-                            st.vsFill,
-                            {
-                              backgroundColor: cat.color,
-                              width: barGrowAnim.interpolate({
-                                inputRange: [0, 1],
-                                outputRange: ['0%', `${cat.thisPercent}%`],
-                              }) as any,
-                            },
-                          ]}
-                        />
+                        <View style={[st.vsTick, { left: `${Math.min(cat.lastPercent, 99)}%` }]} />
                       )}
                     </View>
                   </View>
                 ))}
+
+                {vsCategories.some(c => c.thisAmount === 0) && (
+                  <AppText style={st.vsQuiet} numberOfLines={2}>
+                    Nothing yet in {vsCategories
+                      .filter(c => c.thisAmount === 0)
+                      .map(c => `${c.name.charAt(0)}${c.name.slice(1).toLowerCase()}`)
+                      .join(', ')}
+                  </AppText>
+                )}
+
+                <AppText style={st.vsKey}>Bar: {thisMonthShort} · Tick: {lastMonthShort}</AppText>
               </View>
             )}
           </Animated.View>
@@ -3310,42 +3344,49 @@ const st = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.06)',
   },
-  momIconCircle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  momTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  momPaceTitle: {
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.6,
-  },
-  momPaceBadge: {
-    fontSize: 11,
-    fontWeight: '800',
-  },
   momPaceSub: {
     color: '#8E919D',
-    fontSize: 10,
-    lineHeight: 14,
-    fontWeight: '500',
-    marginTop: 2,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '400',
+    marginTop: 1,
   },
+  momCol: { flex: 1 },
+  momLabel: { color: expenseColors.textMuted, fontSize: 11, lineHeight: 15, fontWeight: '500' },
+  momAmt: { color: '#FFFFFF', fontSize: 18, lineHeight: 24, fontWeight: '700' },
+  momPct: { color: expenseColors.textMuted, fontSize: 13, lineHeight: 18, fontWeight: '600' },
 
   // ── VS Last Month ──
+  vsSeg: {
+    flexDirection: 'row',
+    padding: 2,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  vsSegItem: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8 },
+  vsSegItemActive: { backgroundColor: 'rgba(255, 157, 102, 0.2)' },
+  vsSegTxt: { color: expenseColors.textMuted, fontSize: 10, lineHeight: 13, fontWeight: '700' },
+  vsSegTxtActive: { color: '#FF9D66' },
+  vsDelta: { fontSize: 11, lineHeight: 15, fontWeight: '600' },
+  vsDeltaUp: { color: expenseColors.textMuted },
+  vsDeltaDown: { color: expenseColors.textMuted },
+  vsDeltaNew: { color: expenseColors.textMuted },
+  vsTick: {
+    position: 'absolute',
+    top: -3,
+    width: 2,
+    height: 12,
+    borderRadius: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+  },
+  vsQuiet: { color: expenseColors.textMuted, fontSize: 11, lineHeight: 16 },
+  vsKey: { color: expenseColors.textMuted, fontSize: 10, lineHeight: 14, opacity: 0.7 },
   vsStack: {
-    gap: 16,
+    gap: 14,
     marginTop: 4,
   },
   vsItem: {
-    gap: 8,
+    gap: 7,
   },
   vsTopRow: {
     flexDirection: 'row',
@@ -3356,6 +3397,7 @@ const st = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flexShrink: 1,
   },
   vsDot: {
     width: 7,
@@ -3364,15 +3406,14 @@ const st = StyleSheet.create({
   },
   vsCat: {
     color: '#FFFFFF',
-    fontSize: 13,
-    lineHeight: 17,
-    fontWeight: '700',
-    letterSpacing: 0.6,
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: '600',
   },
   vsRight: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+    alignItems: 'baseline',
+    gap: 6,
   },
   newPill: {
     backgroundColor: '#2E1E1A',
@@ -3411,23 +3452,20 @@ const st = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     lineHeight: 18,
-    fontWeight: '700',
+    fontWeight: '600',
   },
+  // One compact track: this month (category colour) on top, last month (grey) as a thinner bar underneath.
   vsBarTrack: {
     height: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderRadius: 3,
-    position: 'relative',
-    overflow: 'hidden',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
     justifyContent: 'center',
   },
-  vsLastBar: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    backgroundColor: '#2C2D35',
-    borderRadius: 3,
+  vsLastTxt: {
+    color: expenseColors.textMuted,
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '400',
   },
   vsFill: {
     height: 6,

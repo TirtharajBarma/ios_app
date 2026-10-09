@@ -40,6 +40,7 @@ export interface ExpenseAccount {
   txnCountThisMonth: number;
   balance: number;
   dueAmount?: number;
+  unbilledDue?: number; // Part of dueAmount spent after the last statement closing (credit cards with billingDay)
   monthlyChange: number; // positive for credit/gain, negative for due/debit
   statusType: 'positive' | 'negative' | 'due' | 'no_change';
   iconType?: string;

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View,
   StyleSheet,
@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   ScrollView,
   Platform,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -26,7 +27,7 @@ import { expenseColors } from '@/constants/expenseColors';
 import { useSettingsStore } from '@/store/useSettingsStore';
 import { useExpenseStore } from '@/store/useExpenseStore';
 import { PendingTransaction } from '@/types/expense';
-import { autoApproveTransaction } from '@/services/expense/autoTrackService';
+import { autoApproveTransaction, resolvePendingAccount, resolvePendingCategory } from '@/services/expense/autoTrackService';
 
 interface ReviewPendingModalProps {
   visible: boolean;
@@ -38,17 +39,29 @@ export const ReviewPendingModal: React.FC<ReviewPendingModalProps> = ({
   onClose,
 }) => {
   const insets = useSafeAreaInsets();
-  const { pendingTransactions, dismissPendingTransaction, clearAllPendingTransactions } =
+  const { pendingTransactions, dismissPendingTransaction } =
     useSettingsStore();
   const { accounts, categories, currencySymbol } = useExpenseStore();
 
   const [selectedAccounts, setSelectedAccounts] = useState<Record<string, string>>({});
 
+  // Guards against double-taps adding the same transaction twice while an approval is in flight.
+  const inFlight = useRef(new Set<string>());
+
   const handleApprove = async (tx: PendingTransaction) => {
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    const targetAccountId = selectedAccounts[tx.id] || tx.suggestedAccountId;
-    await autoApproveTransaction(tx, targetAccountId);
-    await dismissPendingTransaction(tx.id);
+    if (inFlight.current.has(tx.id)) return;
+    inFlight.current.add(tx.id);
+    try {
+      const targetAccountId = selectedAccounts[tx.id] || tx.suggestedAccountId;
+      await autoApproveTransaction(tx, targetAccountId, { manual: true });
+      // Only remove it from the review list once it is safely in the ledger.
+      await dismissPendingTransaction(tx.id);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch {
+      Alert.alert('Could not add transaction', 'It is still in your review list. Please try again.');
+    } finally {
+      inFlight.current.delete(tx.id);
+    }
   };
 
   const handleDismiss = async (txId: string) => {
@@ -57,12 +70,22 @@ export const ReviewPendingModal: React.FC<ReviewPendingModalProps> = ({
   };
 
   const handleApproveAll = async () => {
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    for (const tx of pendingTransactions) {
-      const targetAccountId = selectedAccounts[tx.id] || tx.suggestedAccountId;
-      await autoApproveTransaction(tx, targetAccountId);
+    // Approve one by one and dismiss each only after it is added, so a failure never loses the rest.
+    for (const tx of [...pendingTransactions]) {
+      if (inFlight.current.has(tx.id)) continue;
+      inFlight.current.add(tx.id);
+      try {
+        const targetAccountId = selectedAccounts[tx.id] || tx.suggestedAccountId;
+        await autoApproveTransaction(tx, targetAccountId, { manual: true });
+        await dismissPendingTransaction(tx.id);
+      } catch {
+        Alert.alert('Could not add a transaction', 'Some items are still in your review list. Please try again.');
+        return;
+      } finally {
+        inFlight.current.delete(tx.id);
+      }
     }
-    await clearAllPendingTransactions();
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     onClose();
   };
 
@@ -126,17 +149,9 @@ export const ReviewPendingModal: React.FC<ReviewPendingModalProps> = ({
           >
             {pendingTransactions.map((tx) => {
               const isExpense = tx.type === 'expense';
-              const matchedAccount = accounts.find(
-                (a) => a.id === (selectedAccounts[tx.id] || tx.suggestedAccountId)
-              ) || accounts[0];
-              const catHint = (tx.suggestedCategoryId || '').toLowerCase();
-              const merchantHint = (tx.merchant || '').toLowerCase();
-              const matchedCategory = categories.find((c) => {
-                if (catHint && (c.id.toLowerCase() === catHint || c.name.toLowerCase().includes(catHint))) return true;
-                if (merchantHint && (merchantHint.includes('starbucks') || merchantHint.includes('swiggy') || merchantHint.includes('zomato')) && c.id === 'cat_food') return true;
-                if (merchantHint && (merchantHint.includes('uber') || merchantHint.includes('ola')) && c.id === 'cat_trans') return true;
-                return false;
-              }) || categories.find((c) => c.id === 'cat_food') || categories[0];
+              // Same resolvers as approval, so what is shown here is exactly what gets saved.
+              const matchedAccount = resolvePendingAccount(tx, selectedAccounts[tx.id] || tx.suggestedAccountId, accounts);
+              const matchedCategory = resolvePendingCategory(tx, categories);
 
               return (
                 <View key={tx.id} style={styles.card}>

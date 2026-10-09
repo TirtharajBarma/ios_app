@@ -155,7 +155,7 @@ export const ExpenseDashboard: React.FC = () => {
       tab: 'transfer',
       fromAccountId: primaryBank?.id || '',
       toAccountId: cardAccount.id,
-      amount: cardAccount.dueAmount || 0,
+      amount: (cardAccount.dueAmount || 0) - (cardAccount.unbilledDue || 0) || cardAccount.dueAmount || 0,
       note: `Pay Bill - ${cardAccount.name}`,
     });
     setShowAddTxModal(true);

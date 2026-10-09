@@ -86,7 +86,7 @@ export default function AccountDetailScreen() {
   // Real-time credit card due status
   const dueStatus = useMemo(() => {
     if (!account || !isCredit) return null;
-    return getCreditCardDueStatus(account.dueDay, account.billingDay, account.dueAmount || 0);
+    return getCreditCardDueStatus(account.dueDay, account.billingDay, account.dueAmount || 0, undefined, account.unbilledDue);
   }, [account, isCredit]);
 
   // All transactions linked to this account
@@ -375,6 +375,11 @@ export default function AccountDetailScreen() {
             >
               {formatAmount(isCredit ? account?.dueAmount || 0 : account?.balance || 0)}
             </AppText>
+            {isCredit && (account?.unbilledDue || 0) > 0 && (
+              <AppText style={styles.heroBillingCycleText}>
+                {`Billed ${formatAmount((account?.dueAmount || 0) - (account?.unbilledDue || 0))} • Upcoming ${formatAmount(account?.unbilledDue || 0)}`}
+              </AppText>
+            )}
             {dueStatus?.billingCycleLabel && (
               <AppText style={styles.heroBillingCycleText}>
                 {dueStatus.billingCycleLabel}

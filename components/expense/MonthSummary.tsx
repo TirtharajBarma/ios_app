@@ -103,7 +103,8 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
     .reduce((sum, a) => sum + (a.balance || 0), 0);
   const cardDues = accounts
     .filter((a) => a.type === 'credit' && !a.isArchived)
-    .reduce((sum, a) => sum + (a.dueAmount || 0), 0);
+    .reduce((sum, a) => sum + (a.dueAmount || 0) - (a.unbilledDue || 0), 0);
+  const totalInVaults = (savingsVaults || []).reduce((sum, v) => sum + (v.currentAmount || 0), 0);
 
   // ── HERO SWITCH SPEED CONTROLS ───────────────────────────────────────────
   // Adjust `tension` (higher = faster) and `friction` (lower = bouncier) below.
@@ -338,7 +339,7 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
                       ? 'Over budget'
                       : isPastMonth
                       ? 'Saved / Unspent'
-                      : 'Safe to spend'
+                      : 'Budget left'
                     : 'Total spent'
                   : isCurrentMonth
                   ? 'Total balance'
@@ -372,10 +373,12 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
                         {effectiveBudget > 0 ? formatAmount(effectiveBudget) : 'No limit'}
                       </AppText>
                     </View>
-                    <View style={styles.accountChip}>
-                      <AppText style={styles.accountChipLabel}>Spent </AppText>
-                      <AppText style={styles.accountChipVal}>{formatAmount(totalSpent)}</AppText>
-                    </View>
+                    {totalInVaults > 0 && (
+                      <View style={[styles.accountChip, styles.accountChipVault]}>
+                        <AppText style={styles.accountChipVaultLabel}>Vaults </AppText>
+                        <AppText style={styles.accountChipVaultVal}>{formatAmount(totalInVaults)}</AppText>
+                      </View>
+                    )}
                   </View>
                 ) : (
                   <View style={styles.accountChipsRow}>
@@ -387,6 +390,12 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
                       <View style={[styles.accountChip, styles.accountChipDue]}>
                         <AppText style={styles.accountChipDueLabel}>Bills </AppText>
                         <AppText style={styles.accountChipDueVal}>{formatAmount(cardDues)}</AppText>
+                      </View>
+                    )}
+                    {totalInVaults > 0 && (
+                      <View style={[styles.accountChip, styles.accountChipVault]}>
+                        <AppText style={styles.accountChipVaultLabel}>Vaults </AppText>
+                        <AppText style={styles.accountChipVaultVal}>{formatAmount(totalInVaults)}</AppText>
                       </View>
                     )}
                   </View>

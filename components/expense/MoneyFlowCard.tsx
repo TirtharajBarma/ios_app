@@ -47,6 +47,7 @@ export const MoneyFlowCard: React.FC = () => {
   monthlyBudget,
   getTotalIncome,
   getTotalSpent,
+  updateTransaction,
 } = useExpenseStore(
   useShallow((s) => ({
     currencySymbol: s.currencySymbol,
@@ -55,6 +56,7 @@ export const MoneyFlowCard: React.FC = () => {
     monthlyBudget: s.monthlyBudget,
     getTotalIncome: s.getTotalIncome,
     getTotalSpent: s.getTotalSpent,
+    updateTransaction: s.updateTransaction,
   }))
 );
 
@@ -64,6 +66,35 @@ export const MoneyFlowCard: React.FC = () => {
 
   const totalIncome = getTotalIncome();
   const totalSpent = getTotalSpent();
+
+  const priorMonthUnallocatedSalary = useMemo(() => {
+    if (totalIncome > 0) return null;
+    const prevYear = month === 0 ? year - 1 : year;
+    const prevMonth = month === 0 ? 11 : month - 1;
+    return (
+      transactions.find((t) => {
+        if (t.type !== 'income' || t.allocatedMonth) return false;
+        if (t.categoryId === 'cat_split_return' || t.categoryId === 'cat_debt_repayment') return false;
+        const parts = t.date.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (!parts) return false;
+        const y = parseInt(parts[1], 10);
+        const m = parseInt(parts[2], 10) - 1;
+        const d = parseInt(parts[3], 10);
+        return y === prevYear && m === prevMonth && d >= 24;
+      }) || null
+    );
+  }, [totalIncome, transactions, year, month]);
+
+  const hasAllocatedIncome = useMemo(() => {
+    const targetMonthNormalized = selectedMonth.trim().toLowerCase();
+    return transactions.some(
+      (t) =>
+        t.type === 'income' &&
+        t.allocatedMonth &&
+        t.allocatedMonth.trim().toLowerCase() === targetMonthNormalized &&
+        !isInMonth(t.date, year, month)
+    );
+  }, [transactions, selectedMonth, year, month]);
 
   const vaultDepositsThisMonth = useMemo(() => {
     return transactions
@@ -185,7 +216,11 @@ export const MoneyFlowCard: React.FC = () => {
             {sym}{totalIncome.toLocaleString('en-IN')}
           </AppText>
           <AppText style={styles.tileSub} numberOfLines={1}>
-            {totalIncome > 0 ? 'Total Inflow' : 'No Inflow'}
+            {totalIncome > 0
+              ? hasAllocatedIncome
+                ? 'Includes allocated'
+                : 'Total Inflow'
+              : 'No Inflow'}
           </AppText>
         </View>
       </View>
@@ -195,7 +230,7 @@ export const MoneyFlowCard: React.FC = () => {
         {totalIncome > 0 ? (
           <>
             <View style={styles.footerLeft}>
-              <Sparkles size={12} color={pastelColors.purple} />
+              {/* <Sparkles size={12} color={pastelColors.purple} /> */}
               <AppText style={styles.footerLabel}>Month Leftover</AppText>
               <AppText style={[styles.footerAmount, { color: netCashFlow >= 0 ? pastelColors.mint : pastelColors.coral }]}>
                 {netCashFlow >= 0
@@ -209,6 +244,27 @@ export const MoneyFlowCard: React.FC = () => {
               </AppText>
             </View>
           </>
+        ) : priorMonthUnallocatedSalary ? (
+          <View style={styles.allocateRow}>
+            <View style={styles.allocateLeft}>
+              <Sparkles size={12} color={pastelColors.mint} />
+              <AppText style={styles.allocateText} numberOfLines={1}>
+                {sym}{priorMonthUnallocatedSalary.amount.toLocaleString('en-IN')} on {new Date(priorMonthUnallocatedSalary.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+              </AppText>
+            </View>
+            <TouchableOpacity
+              style={styles.allocateBtn}
+              activeOpacity={0.75}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                updateTransaction(priorMonthUnallocatedSalary.id, { allocatedMonth: selectedMonth });
+              }}
+            >
+              <AppText style={styles.allocateBtnText}>
+                Allocate to {new Date(year, month, 1).toLocaleDateString('en-US', { month: 'short' })}
+              </AppText>
+            </TouchableOpacity>
+          </View>
         ) : (
           <View style={styles.footerLeft}>
             <Sparkles size={12} color={pastelColors.purple} />
@@ -478,6 +534,42 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     lineHeight: 14,
+  },
+  allocateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    gap: 8,
+  },
+  allocateLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+    minWidth: 0,
+  },
+  allocateText: {
+    color: '#D1D5DB',
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '600',
+    flexShrink: 1,
+  },
+  allocateBtn: {
+    backgroundColor: 'rgba(112, 214, 188, 0.16)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(112, 214, 188, 0.28)',
+    flexShrink: 0,
+  },
+  allocateBtnText: {
+    color: pastelColors.mint,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.2,
   },
 
   // Streak Modal Styles

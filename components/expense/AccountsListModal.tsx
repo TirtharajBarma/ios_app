@@ -108,7 +108,7 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
   const liquidAccounts = accounts.filter((a) => a.type !== 'credit' && !a.isArchived);
   const liquidBankBalance = liquidAccounts.reduce((sum, a) => sum + a.balance, 0);
   const creditAccounts = accounts.filter((a) => a.type === 'credit' && !a.isArchived);
-  const totalCreditDues = creditAccounts.reduce((sum, a) => sum + (a.dueAmount || 0), 0);
+  const totalCreditDues = creditAccounts.reduce((sum, a) => sum + (a.dueAmount || 0) - (a.unbilledDue || 0), 0);
   const rawUnspentSurplus = Math.max(0, monthlyBudget - totalSpent);
   // Real surplus is strictly bounded by actual liquid cash in bank
   const realSurplus = Math.max(0, Math.min(rawUnspentSurplus, liquidBankBalance));
@@ -367,7 +367,10 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
                   const txCount = getAccountTxCount(account.id) || account.txnCountThisMonth || 0;
                   const isCredit = account.type === 'credit';
                   const isDue = isCredit && (account.dueAmount ?? 0) > 0;
-                  const dueStatus = isCredit ? getCreditCardDueStatus(account.dueDay, account.billingDay, account.dueAmount || 0) : null;
+                  const dueStatus = isCredit ? getCreditCardDueStatus(account.dueDay, account.billingDay, account.dueAmount || 0, undefined, account.unbilledDue) : null;
+                  const unbilled = account.unbilledDue || 0;
+                  const billedDue = (account.dueAmount || 0) - unbilled;
+                  const onlyUnbilled = isCredit && unbilled > 0 && billedDue <= 0;
 
                   return (
                     <TouchableOpacity
@@ -393,6 +396,8 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
                                   ? styles.dueBadgePaid
                                   : dueStatus.isUrgent
                                   ? styles.dueBadgeUrgent
+                                  : dueStatus.isUnbilled
+                                  ? styles.dueBadgeUnbilled
                                   : styles.dueBadgeUpcoming,
                               ]}
                             >
@@ -403,6 +408,8 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
                                     ? styles.dueBadgePaidText
                                     : dueStatus.isUrgent
                                     ? styles.dueBadgeUrgentText
+                                    : dueStatus.isUnbilled
+                                    ? styles.dueBadgeUnbilledText
                                     : styles.dueBadgeUpcomingText,
                                 ]}
                               >
@@ -412,9 +419,10 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
                           )}
                         </View>
                         {isCredit ? (
-                          <AppText style={styles.dueText}>
-                            Due: {sym}{(account.dueAmount || 0).toLocaleString('en-IN')}
-                            {dueStatus?.billingCycleLabel ? ` • ${dueStatus.billingCycleLabel}` : ''}
+                          <AppText style={onlyUnbilled ? styles.unbilledText : styles.dueText} numberOfLines={2}>
+                            {onlyUnbilled ? 'Spend' : 'Due'}: {sym}{(onlyUnbilled ? account.dueAmount || 0 : billedDue).toLocaleString('en-IN')}
+                            {dueStatus?.dueDateFormatted ? ` • ${onlyUnbilled ? 'Pay by' : 'Due'} ${dueStatus.dueDateFormatted}` : ''}
+                            {!onlyUnbilled && unbilled > 0 ? ` • +${sym}${unbilled.toLocaleString('en-IN')} upcoming` : ''}
                           </AppText>
                         ) : (
                           <AppText style={styles.balanceText}>
@@ -423,9 +431,9 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
                         )}
                       </View>
 
-                      {/* Right: Pay Bill + Badge + Chevron */}
+                      {/* Right: Pay Bill (only if truly billed, not unbilled spend) + Badge + Chevron */}
                       <View style={styles.rightGroup}>
-                        {isDue && onPayBill && (
+                        {isDue && !onlyUnbilled && onPayBill && (
                           <TouchableOpacity
                             style={styles.payBillBtn}
                             activeOpacity={0.8}
@@ -1169,6 +1177,9 @@ const styles = StyleSheet.create({
   dueBadgePaid: {
     backgroundColor: 'rgba(169, 223, 191, 0.12)',
   },
+  dueBadgeUnbilled: {
+    backgroundColor: 'rgba(126, 182, 255, 0.14)',
+  },
   dueBadgeText: {
     fontSize: 9,
     fontWeight: '800',
@@ -1183,6 +1194,9 @@ const styles = StyleSheet.create({
   dueBadgePaidText: {
     color: expenseColors.accentGreen,
   },
+  dueBadgeUnbilledText: {
+    color: '#7EB6FF',
+  },
   balanceText: {
     color: '#8E95A5',
     fontSize: 13,
@@ -1194,6 +1208,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
     fontWeight: '600',
+  },
+  unbilledText: {
+    color: '#8E95A5',
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '500',
   },
   rightGroup: {
     flexDirection: 'row',

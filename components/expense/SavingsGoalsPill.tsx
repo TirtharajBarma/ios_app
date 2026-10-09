@@ -32,9 +32,9 @@ export const SavingsGoalsPill: React.FC<SavingsGoalsPillProps> = ({ onPress }) =
         }}
       >
         <View style={styles.leftContent}>
-          <View style={styles.iconCircle}>
+          {/* <View style={styles.iconCircle}>
             <Target size={13} color={expenseColors.accentGreen} strokeWidth={2.5} />
-          </View>
+          </View> */}
           <View style={styles.textWrap}>
             <AppText style={styles.label}>SAVINGS GOALS</AppText>
             <AppText style={styles.summaryText}>

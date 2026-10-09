@@ -182,7 +182,8 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
     const parsedDue = dueDayInput.trim() ? parseInt(dueDayInput.trim(), 10) : undefined;
     const parsedBill = billingDayInput.trim() ? parseInt(billingDayInput.trim(), 10) : undefined;
     const dueAmt = account?.dueAmount || parseFloat(openingBalance || '0') || 0;
-    return getCreditCardDueStatus(parsedDue, parsedBill, dueAmt);
+    // Stored unbilled amount is only valid for the saved billing day.
+    return getCreditCardDueStatus(parsedDue, parsedBill, dueAmt, undefined, parsedBill === account?.billingDay ? account?.unbilledDue : undefined);
   }, [type, dueDayInput, billingDayInput, account, openingBalance]);
 
   const handleSave = () => {

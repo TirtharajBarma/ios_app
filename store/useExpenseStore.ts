@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { AppState } from 'react-native';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@/utils/storage';
 import { logAction, logException } from '@/utils/auditLog';
@@ -17,6 +18,7 @@ import {
   FALLBACK_EXCHANGE_RATES,
 } from '@/utils/currency';
 import { getCurrencySymbol } from '@/constants';
+import { getLastClosingDateStr } from '@/utils/creditCard';
 
 export type AppThemeMode = 'editorial' | 'cream' | 'midnight' | 'system';
 
@@ -195,6 +197,7 @@ interface ExpenseState {
   resetAllData: () => void;
 
   // Derived Calculations
+  refreshCardCycles: () => void;
   getTotalBalance: (monthKey?: string) => number;
   getTotalIncome: (monthKey?: string) => number;
   getTotalSpent: (monthKey?: string) => number;
@@ -305,6 +308,8 @@ export const recomputeAllAccountsHelper = (
     let monthlyChange = 0;
     let expenseSum = 0;
     let incomeSum = 0;
+    let unbilledSum = 0;
+    const closingStr = isCredit && acc.billingDay ? getLastClosingDateStr(acc.billingDay) : null;
 
     for (const t of linkedTxs) {
       const inCurrentMonth = isInMonth(t.date, currentYear, currentMonth);
@@ -314,6 +319,10 @@ export const recomputeAllAccountsHelper = (
 
       const fromThis = isFrom(t);
       const toThis = isTo(t);
+
+      if (closingStr && fromThis && t.type !== 'income' && t.type !== 'debt_borrow' && t.type !== 'vault_withdraw' && t.date.slice(0, 10) > closingStr) {
+        unbilledSum += t.amount;
+      }
 
       if (t.type === 'expense' && fromThis) {
         expenseSum += t.amount;
@@ -360,6 +369,8 @@ export const recomputeAllAccountsHelper = (
         openingBalance: startingOpening,
         balance: positiveBalance,
         dueAmount: finalDue,
+        // Payments settle the oldest (billed) amount first, so unbilled can never exceed total due.
+        unbilledDue: closingStr ? roundMoney(Math.min(unbilledSum, finalDue)) : 0,
         monthlyChange: roundMoney(monthlyChange),
         txnCountThisMonth,
         statusType: finalDue > 0 ? ('due' as const) : positiveBalance > 0 ? ('positive' as const) : ('no_change' as const),
@@ -667,6 +678,8 @@ export const useExpenseStore = create<ExpenseState>()(
             openingBalance: (acc.openingBalance || 0) + diff,
             balance: isDue ? 0 : explicitReconciledBalance,
             dueAmount: isDue ? explicitReconciledBalance : undefined,
+            // Unbilled can never exceed the reconciled due.
+            unbilledDue: isDue ? Math.min(acc.unbilledDue || 0, Math.max(0, explicitReconciledBalance)) : acc.unbilledDue,
             statusType: isDue 
               ? (explicitReconciledBalance > 0 ? ('due' as const) : ('no_change' as const)) 
               : (explicitReconciledBalance >= 0 ? ('positive' as const) : ('due' as const)),
@@ -1503,18 +1516,29 @@ export const useExpenseStore = create<ExpenseState>()(
     logAction('budget', `Set budgets for ${Object.keys(budgets).length} category(ies)`);
   },
 
+  // Re-derives billed/unbilled split (depends on today's date) without touching any data.
+  refreshCardCycles: () =>
+    set((state) => {
+      if (!state.accounts.some((a) => a.type === 'credit' && a.billingDay)) return state;
+      const next = recomputeAllAccountsHelper(state.accounts, state.transactions, state.selectedMonth);
+      const changed = next.some((a, i) => a.unbilledDue !== state.accounts[i]?.unbilledDue);
+      return changed ? { accounts: next } : state;
+    }),
+
   getTotalBalance: (monthKey) => {
     const { accounts, transactions, selectedMonth } = get();
     const targetKey = monthKey || selectedMonth;
     const now = new Date();
-    const currentMonthKey = monthKeyOf(now);
 
     // If current or future month, return real-time live total balance
-    if (!targetKey || targetKey >= currentMonthKey) {
+    const target = targetKey ? monthKeyToYearMonth(targetKey) : null;
+    // Compare as numbers: month-name strings sort alphabetically ("September" > "October").
+    if (!target || target.year * 12 + target.month >= now.getFullYear() * 12 + now.getMonth()) {
       return roundMoney(
         accounts.reduce((sum, acc) => {
           if (acc.type === 'credit') {
-            return sum + (acc.balance || 0) - (acc.dueAmount || 0);
+            // Unbilled spend isn't payable yet, so it doesn't reduce today's balance.
+            return sum + (acc.balance || 0) - ((acc.dueAmount || 0) - (acc.unbilledDue || 0));
           }
           return sum + (acc.balance || 0);
         }, 0)
@@ -1550,9 +1574,14 @@ export const useExpenseStore = create<ExpenseState>()(
 
         let expSum = 0;
         let incSum = 0;
+        let pastUnbilled = 0;
+        const pastClosing = isCredit && acc.billingDay ? getLastClosingDateStr(acc.billingDay, new Date(endOfTargetMonth)) : null;
         for (const t of pastTxs) {
           const fromThis = isFrom(t);
           const toThis = isTo(t);
+          if (pastClosing && fromThis && t.type !== 'income' && t.type !== 'debt_borrow' && t.type !== 'vault_withdraw' && t.date.slice(0, 10) > pastClosing) {
+            pastUnbilled += t.amount;
+          }
           if (t.type === 'expense' && fromThis) expSum += t.amount;
           else if (t.type === 'income' && fromThis) incSum += t.amount;
           else if (t.type === 'transfer') {
@@ -1568,7 +1597,8 @@ export const useExpenseStore = create<ExpenseState>()(
           const rawDue = startingOpening + expSum - incSum;
           const posBal = rawDue < 0 ? Math.abs(rawDue) : 0;
           const dueAmt = rawDue > 0 ? rawDue : 0;
-          return total + posBal - dueAmt;
+          // Same rule as the live balance: only the billed part reduces cash.
+          return total + posBal - (dueAmt - Math.min(pastUnbilled, dueAmt));
         } else {
           return total + (startingOpening + incSum - expSum);
         }
@@ -1924,3 +1954,8 @@ export const useExpenseStore = create<ExpenseState>()(
 }
 )
 );
+
+// A statement can close while the app sits in the background; refresh the billed/unbilled split on resume.
+AppState.addEventListener('change', (s) => {
+  if (s === 'active') useExpenseStore.getState().refreshCardCycles();
+});

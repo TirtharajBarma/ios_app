@@ -2,7 +2,7 @@ import { Platform, NativeModules, Linking } from 'react-native';
 import { useSettingsStore } from '@/store/useSettingsStore';
 import { useExpenseStore } from '@/store/useExpenseStore';
 import { createPendingTransactionFromText, parseFinancialText } from '@/utils/financialParser';
-import { PendingTransaction, ExpenseTransaction } from '@/types/expense';
+import { PendingTransaction, ExpenseTransaction, ExpenseAccount, ExpenseCategory } from '@/types/expense';
 import { logAction, logException } from '@/utils/auditLog';
 
 // Access optional Android Native Module
@@ -131,29 +131,26 @@ export async function drainPendingNativeTransactions(): Promise<number> {
   }
 }
 
-/**
- * Automatically converts a pending transaction into an official ExpenseTransaction.
- */
-export async function autoApproveTransaction(
+/** Which account a pending transaction will be booked to (shared by the review UI and approval). */
+export function resolvePendingAccount(
   pending: PendingTransaction,
-  overrideAccountId?: string | null
-): Promise<void> {
-  const expenseStore = useExpenseStore.getState();
-  const accounts = expenseStore.accounts;
-  const categories = expenseStore.categories;
-
-  // 1. Resolve Account
+  overrideAccountId: string | null | undefined,
+  accounts: ExpenseAccount[]
+): ExpenseAccount | undefined {
   let targetAccount = accounts.find((a) => a.id === overrideAccountId);
   if (!targetAccount && pending.accountHint) {
     // Try matching last 4 digits
     targetAccount = accounts.find((a) => a.name.includes(pending.accountHint!.replace(/\D/g, '')));
   }
-  if (!targetAccount) {
-    targetAccount = accounts[0]; // Fallback to primary account
-  }
+  return targetAccount || accounts[0]; // Fallback to primary account
+}
 
-  // 2. Automatically Resolve Category
-  let targetCategory: (typeof categories)[0] | undefined;
+/** Which category a pending transaction will be booked under (shared by the review UI and approval). */
+export function resolvePendingCategory(
+  pending: PendingTransaction,
+  categories: ExpenseCategory[]
+): ExpenseCategory | undefined {
+  let targetCategory: ExpenseCategory | undefined;
 
   if (pending.type === 'income') {
     targetCategory = categories.find((c) => c.id === 'cat_income' || c.name.toLowerCase() === 'income');
@@ -194,9 +191,26 @@ export async function autoApproveTransaction(
   if (!targetCategory) {
     targetCategory = categories.find((c) => c.id === 'cat_food') || categories[0];
   }
+  return targetCategory;
+}
 
-  // 3. Deduplication check: verify if an identical transaction was recorded in the last 5 minutes
-  const existingRecent = expenseStore.transactions.some(
+/**
+ * Converts a pending transaction into an official ExpenseTransaction.
+ * Returns false when it was skipped as a duplicate, true when it was added to the ledger.
+ * `manual` = the user explicitly approved it in the review screen, so it is never skipped as a duplicate.
+ */
+export async function autoApproveTransaction(
+  pending: PendingTransaction,
+  overrideAccountId?: string | null,
+  opts?: { manual?: boolean }
+): Promise<boolean> {
+  const expenseStore = useExpenseStore.getState();
+  const targetAccount = resolvePendingAccount(pending, overrideAccountId, expenseStore.accounts);
+  const targetCategory = resolvePendingCategory(pending, expenseStore.categories);
+
+  // Deduplication for fully automatic capture only (the same bank message can arrive as both SMS and notification).
+  // A transaction the user approved by hand must never vanish silently.
+  const existingRecent = !opts?.manual && expenseStore.transactions.some(
     (t) =>
       t.amount === pending.amount &&
       t.type === pending.type &&
@@ -204,10 +218,10 @@ export async function autoApproveTransaction(
       Math.abs(Date.now() - (typeof t.createdAt === 'number' ? t.createdAt : new Date(t.createdAt || 0).getTime())) < 300000
   );
   if (existingRecent) {
-    return;
+    return false;
   }
 
-  // 4. Add to ledger
+  // Add to ledger
   const newTx: Omit<ExpenseTransaction, 'id'> = {
     amount: pending.amount,
     type: pending.type,
@@ -222,6 +236,7 @@ export async function autoApproveTransaction(
 
   await expenseStore.addTransaction(newTx);
   logAction('transaction', `Auto-tracked transaction approved: ${pending.amount}`, { merchant: pending.merchant });
+  return true;
 }
 
 /**

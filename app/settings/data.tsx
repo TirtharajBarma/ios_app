@@ -132,7 +132,7 @@ export default function YourDataScreen() {
         .filter((t) => t.type === 'income')
         .reduce((sum, t) => sum + t.amount, 0);
       const totalSpent = transactions
-        .filter((t) => t.type === 'expense')
+        .filter((t) => t.type === 'expense' && t.categoryId !== 'cat_debt_repayment')
         .reduce((sum, t) => sum + (t.split ? t.split.yourShare : t.amount), 0);
       const netSavings = totalIncome - totalSpent;
 
@@ -167,7 +167,7 @@ export default function YourDataScreen() {
         const opening = acc.openingBalance !== undefined ? acc.openingBalance : 0;
         const current = acc.balance || 0;
         const creditInfo = isCredit
-          ? `<span style="color: #E84040; font-weight: 700;">${sym}${fmt(acc.dueAmount || 0)} due</span>${acc.dueDay ? `<br/><span style="font-size: 10px; color: #777;">Due: ${acc.dueDay}th • Bill: ${acc.billingDay || '—'}th</span>` : ''}`
+          ? `<span style="color: #E84040; font-weight: 700;">${sym}${fmt(acc.dueAmount || 0)} due</span>${(acc.unbilledDue || 0) > 0 ? `<br/><span style="font-size: 10px; color: #777;">incl. ${sym}${fmt(acc.unbilledDue || 0)} not yet billed</span>` : ''}${acc.dueDay ? `<br/><span style="font-size: 10px; color: #777;">Due: ${acc.dueDay}th • Bill: ${acc.billingDay || '—'}th</span>` : ''}`
           : '—';
         const changeSign = acc.monthlyChange > 0 ? '+' : '';
         const changeColor = acc.monthlyChange > 0 ? '#059669' : acc.monthlyChange < 0 ? '#DC2626' : '#6B7280';
