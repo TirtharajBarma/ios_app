@@ -107,7 +107,9 @@ export async function drainPendingNativeTransactions(): Promise<number> {
 
     for (const item of items) {
       const fullText = `${item.title ? item.title + '. ' : ''}${item.text || ''}`;
-      const pendingTx = createPendingTransactionFromText(fullText, item.title || 'Bank Notification', 'notification');
+      // Use the time the bank message arrived, not the time we got around to draining it
+      const receivedAt = Number.isFinite(item.timestamp) && item.timestamp > 0 && item.timestamp <= Date.now() ? item.timestamp : Date.now();
+      const pendingTx = createPendingTransactionFromText(fullText, item.title || 'Bank Notification', 'notification', receivedAt);
 
       if (pendingTx) {
         if (autoTrackAutoApprove) {
@@ -176,8 +178,11 @@ export function resolvePendingCategory(
   }
 
   if (!targetCategory) {
+    // Short aliases ("vi", "ola", "gas") must be whole words, or "via UPI" would match "vi" and "cola" would match "ola"
+    const hasAlias = (hay: string, a: string) =>
+      a.length <= 4 ? new RegExp(`(^|[^a-z0-9])${a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z0-9]|$)`).test(hay) : hay.includes(a);
     for (const [targetCatId, aliases] of Object.entries(categoryAliasMap)) {
-      if (aliases.some((a) => a === catHint || merchantHint.includes(a) || rawTextHint.includes(a))) {
+      if (aliases.some((a) => a === catHint || hasAlias(merchantHint, a) || hasAlias(rawTextHint, a))) {
         targetCategory = categories.find((c) => c.id === targetCatId);
         if (targetCategory) break;
       }
@@ -189,7 +194,8 @@ export function resolvePendingCategory(
   }
 
   if (!targetCategory) {
-    targetCategory = categories.find((c) => c.id === 'cat_food') || categories[0];
+    // Unknown spend is Misc, not Food: guessing Food silently skews the Food budget
+    targetCategory = categories.find((c) => c.id === 'cat_misc') || categories.find((c) => c.id === 'cat_food') || categories[0];
   }
   return targetCategory;
 }
@@ -215,7 +221,7 @@ export async function autoApproveTransaction(
       t.amount === pending.amount &&
       t.type === pending.type &&
       t.date === pending.date &&
-      Math.abs(Date.now() - (typeof t.createdAt === 'number' ? t.createdAt : new Date(t.createdAt || 0).getTime())) < 300000
+      Math.abs(pending.timestamp - (typeof t.createdAt === 'number' ? t.createdAt : new Date(t.createdAt || 0).getTime())) < 300000
   );
   if (existingRecent) {
     return false;

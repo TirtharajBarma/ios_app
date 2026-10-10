@@ -582,9 +582,18 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
                       ? Math.min(Math.round((vault.currentAmount / vault.targetAmount) * 100), 100)
                       : 0;
 
-                    const vaultDepositsThisMonth = transactions
-                      .filter((t) => t.type === 'vault_deposit' && t.vaultId === vault.id)
-                      .reduce((sum, t) => sum + t.amount, 0);
+                    // Monthly pace = deposits so far spread over the months since the first deposit (not a single month)
+                    const vaultDeposits = transactions.filter((t) => t.type === 'vault_deposit' && t.vaultId === vault.id);
+                    const firstDepositMs = vaultDeposits.reduce((min, t) => Math.min(min, new Date(t.date).getTime()), Infinity);
+                    const monthsSaving = Number.isFinite(firstDepositMs)
+                      ? Math.max(
+                          1,
+                          (new Date().getFullYear() - new Date(firstDepositMs).getFullYear()) * 12 +
+                            (new Date().getMonth() - new Date(firstDepositMs).getMonth()) +
+                            1
+                        )
+                      : 1;
+                    const vaultDepositsThisMonth = Math.round(vaultDeposits.reduce((sum, t) => sum + t.amount, 0) / monthsSaving);
 
                     const remainingTarget = Math.max(0, vault.targetAmount - vault.currentAmount);
                     const estimatedMonths = vaultDepositsThisMonth > 0

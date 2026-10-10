@@ -45,6 +45,7 @@ export const MoneyFlowCard: React.FC = () => {
   transactions,
   selectedMonth,
   monthlyBudget,
+  categoryBudgets,
   getTotalIncome,
   getTotalSpent,
   updateTransaction,
@@ -54,6 +55,7 @@ export const MoneyFlowCard: React.FC = () => {
     transactions: s.transactions,
     selectedMonth: s.selectedMonth,
     monthlyBudget: s.monthlyBudget,
+    categoryBudgets: s.categoryBudgets,
     getTotalIncome: s.getTotalIncome,
     getTotalSpent: s.getTotalSpent,
     updateTransaction: s.updateTransaction,
@@ -115,13 +117,21 @@ export const MoneyFlowCard: React.FC = () => {
     ? Math.round((netCashFlow / totalIncome) * 100)
     : 0;
 
-  const averageDailyLimit = monthlyBudget > 0 ? Math.round(monthlyBudget / 30) : 1000;
+  // Same effective budget as the Budget card: the monthly limit, or the sum of category budgets when no limit is set
+  const effectiveBudget =
+    monthlyBudget > 0
+      ? monthlyBudget
+      : Object.values(categoryBudgets || {}).reduce((sum, v) => sum + (v > 0 ? v : 0), 0);
+  const daysInSelectedMonth = new Date(year, month + 1, 0).getDate();
+  const averageDailyLimit = effectiveBudget > 0 ? Math.round(effectiveBudget / daysInSelectedMonth) : 1000;
 
   // Streak Calculation
   const streakDays = useMemo(() => {
     const now = new Date();
     const { year: curY, month: curM } = monthKeyToYearMonth(selectedMonth);
     const isCur = curY === now.getFullYear() && curM === now.getMonth();
+    // A month that has not started has no streak
+    if (curY * 12 + curM > now.getFullYear() * 12 + now.getMonth()) return 0;
     const daysInSelMonth = new Date(curY, curM + 1, 0).getDate();
     const currentDay = isCur ? now.getDate() : daysInSelMonth;
     if (currentDay < 1) return 0;
@@ -131,8 +141,9 @@ export const MoneyFlowCard: React.FC = () => {
       dailySpendMap[d] = 0;
     }
 
+    let anyExpense = false;
     transactions
-      .filter((t) => t.type === 'expense')
+      .filter((t) => t.type === 'expense' && t.categoryId !== 'cat_debt_repayment')
       .forEach((t) => {
         const parts = t.date.match(/^(\d{4})-(\d{2})-(\d{2})/);
         if (parts) {
@@ -140,10 +151,13 @@ export const MoneyFlowCard: React.FC = () => {
           const m = parseInt(parts[2], 10) - 1;
           const day = parseInt(parts[3], 10);
           if (m === curM && y === curY) {
+            anyExpense = true;
             dailySpendMap[day] = (dailySpendMap[day] || 0) + (t.split ? t.split.yourShare : t.amount);
           }
         }
       });
+    // Nothing logged this month: an empty month is not a "discipline streak"
+    if (!anyExpense) return 0;
 
     let streak = 0;
     if (averageDailyLimit <= 0) return 0;
@@ -324,7 +338,7 @@ export const MoneyFlowCard: React.FC = () => {
                 <View>
                   <AppText style={styles.breakdownLabel}>Daily Allowance</AppText>
                   <AppText style={styles.breakdownFormula}>
-                    {monthlyBudget > 0 ? `${sym}${monthlyBudget.toLocaleString('en-IN')} ÷ 30 days` : 'Default baseline'}
+                    {effectiveBudget > 0 ? `${sym}${effectiveBudget.toLocaleString('en-IN')} ÷ ${daysInSelectedMonth} days` : 'Default baseline'}
                   </AppText>
                 </View>
                 <AppText style={styles.breakdownValHighlight}>

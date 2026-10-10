@@ -5,6 +5,7 @@ import type { ExpenseAccount } from "@/types/expense";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
 import { useExpenseStore } from "@/store/useExpenseStore";
+import { getBilledDueDate } from "@/utils/creditCard";
 
 // Safely require expo-notifications inside a try/catch block to prevent crash when module is not compiled/linked yet
 let Notifications: any = null;
@@ -210,41 +211,39 @@ export async function cancelDailyReminders(): Promise<void> {
 export async function scheduleCreditCardDueReminders(accounts: ExpenseAccount[]): Promise<void> {
   if (!isNotificationsAvailable || !Notifications) return;
   const settings = useSettingsStore.getState();
-  if (!settings.notificationsEnabled || !settings.billDueReminderEnabled) {
-    return;
-  }
-
-  const creditCards = accounts.filter((a) => a.type === "credit" && a.dueDay);
+  const creditCards = accounts.filter((a) => a.type === "credit");
+  const remindersOn = settings.notificationsEnabled && settings.billDueReminderEnabled;
   const now = new Date();
 
   for (const card of creditCards) {
+    const identifier = `card-due-${card.id}`;
+    // Always clear first, so switching the reminder off, archiving a card or paying it off never leaves a stale one.
+    await Notifications.cancelScheduledNotificationAsync(identifier).catch(() => {});
+    if (!remindersOn || card.isArchived) continue;
+
     const dueDay = card.dueDay;
     if (!dueDay || dueDay < 1 || dueDay > 31) continue;
 
-    // Calculate upcoming due date for this month or next month
-    let targetDate = new Date(now.getFullYear(), now.getMonth(), dueDay, 10, 0, 0, 0);
-    if (targetDate.getTime() <= now.getTime()) {
-      targetDate = new Date(now.getFullYear(), now.getMonth() + 1, dueDay, 10, 0, 0, 0);
+    // Only the billed part is payable; unbilled spend belongs to a later statement.
+    const billed = Math.max(0, (card.dueAmount || 0) - (card.unbilledDue || 0));
+    if (billed <= 0) continue;
+
+    const dueDate = getBilledDueDate(dueDay, card.billingDay, now);
+    const dueEnd = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate(), 23, 59, 59, 999);
+
+    // Remind 3 days before at 10:00; if that moment has passed, use the next 10:00 slot while the bill is still due.
+    let reminderDate = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate() - 3, 10, 0, 0, 0);
+    while (reminderDate.getTime() <= now.getTime()) {
+      reminderDate = new Date(reminderDate.getFullYear(), reminderDate.getMonth(), reminderDate.getDate() + 1, 10, 0, 0, 0);
     }
-
-    // Remind 3 days before
-    const reminderDate = new Date(targetDate);
-    reminderDate.setDate(reminderDate.getDate() - 3);
-
-    const secondsUntil = differenceInSeconds(reminderDate, now);
-    if (secondsUntil <= 0) continue;
-
-    const identifier = `card-due-${card.id}`;
-    await Notifications.cancelScheduledNotificationAsync(identifier).catch(() => {});
+    if (reminderDate.getTime() > dueEnd.getTime()) continue; // overdue or due today before 10:00: the in-app badge covers it
 
     try {
-      const balance = card.balance || 0;
-      const dueAmountStr = balance < 0 ? ` of ${settings.currencyCode} ${Math.abs(balance).toLocaleString("en-IN")}` : "";
-
+      const dueLabel = dueDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
       await Notifications.scheduleNotificationAsync({
         content: {
           title: `💳 ${card.name} Bill Due Soon`,
-          body: `Your credit card bill payment${dueAmountStr} is due on the ${dueDay}th. Pay on time to avoid interest!`,
+          body: `Your credit card bill of ${settings.currencyCode} ${Math.round(billed).toLocaleString("en-IN")} is due on ${dueLabel}. Pay on time to avoid interest!`,
           sound: true,
           data: { accountId: card.id },
           ...(Platform.OS === "android" ? { channelId: EXPENSE_CHANNEL } : {}),
@@ -263,6 +262,8 @@ export async function scheduleCreditCardDueReminders(accounts: ExpenseAccount[])
 
 export async function scheduleReminder(sub: Subscription): Promise<void> {
   if (!isNotificationsAvailable || !Notifications) return;
+  // Clear first so a disabled, paused or past-due reminder never leaves a stale one scheduled.
+  await Notifications.cancelScheduledNotificationAsync(`reminder-${sub.id}`).catch(() => {});
   const globalEnabled = useSettingsStore.getState().notificationsEnabled;
   const subEnabled = useSettingsStore.getState().subscriptionReminderEnabled;
   if (!globalEnabled || !subEnabled) return;
@@ -343,11 +344,8 @@ export async function rescheduleAllAppNotifications(): Promise<void> {
     await scheduleAllReminders(subs);
   }
 
-  // 3. Credit Card bill reminders
-  if (settings.billDueReminderEnabled) {
-    const accounts = useExpenseStore.getState().accounts;
-    await scheduleCreditCardDueReminders(accounts);
-  }
+  // 3. Credit Card bill reminders (also cancels existing ones when the toggle is off)
+  await scheduleCreditCardDueReminders(useExpenseStore.getState().accounts);
 }
 
 export async function getScheduledReminders(): Promise<any[]> {

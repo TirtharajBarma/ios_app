@@ -93,6 +93,23 @@ function getCycleAwareStatus(
 }
 
 /**
+ * Due date (local midnight) of the bill payable now: the last closed statement when the card has a bill day,
+ * otherwise this month's due day (or next month's once it has passed). Short months clamp the day.
+ */
+export function getBilledDueDate(dueDay: number, billingDay?: number, refDate: Date = new Date()): Date {
+  if (billingDay && billingDay >= 1 && billingDay <= 31) {
+    const [y, m, d] = getLastClosingDateStr(billingDay, refDate).split('-').map(Number);
+    return dueDateFor(new Date(y, m - 1, d), dueDay, billingDay);
+  }
+  const today = new Date(refDate.getFullYear(), refDate.getMonth(), refDate.getDate());
+  const thisMonth = new Date(today.getFullYear(), today.getMonth(), clampDay(today.getFullYear(), today.getMonth(), dueDay));
+  if (thisMonth.getTime() >= today.getTime()) return thisMonth;
+  const ny = today.getFullYear() + (today.getMonth() === 11 ? 1 : 0);
+  const nm = (today.getMonth() + 1) % 12;
+  return new Date(ny, nm, clampDay(ny, nm, dueDay));
+}
+
+/**
  * Computes the live due status, remaining days, and urgency for a credit card.
  */
 export function getCreditCardDueStatus(

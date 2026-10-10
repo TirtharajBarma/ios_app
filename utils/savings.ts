@@ -169,7 +169,7 @@ export async function computeSavings(
     if (sub.isTrial && !sub.isPaused) {
       try {
         const trialEnd = sub.trialEndDate ? parseISO(sub.trialEndDate) : null;
-        if (trialEnd && trialEnd > today) {
+        if (trialEnd && trialEnd >= startOfDay(today)) {
           trialWarnings.push({
             subscriptionId: sub.id,
             name: sub.name,
@@ -210,6 +210,12 @@ export async function computeSavings(
         monthlySaving = (fullPrice - userShare) / 3;
       } else if (cycle === 'weekly') {
         monthlySaving = (fullPrice - userShare) * 4.33;
+      } else if (cycle === 'bi-weekly') {
+        monthlySaving = (fullPrice - userShare) * 2.17;
+      } else if (cycle === 'semi-yearly' || cycle === 'half-yearly') {
+        monthlySaving = (fullPrice - userShare) / 6;
+      } else if (cycle.startsWith('custom') && sub.customIntervalMonths && sub.customIntervalMonths > 0) {
+        monthlySaving = (fullPrice - userShare) / sub.customIntervalMonths;
       }
 
       if (monthlySaving > 0) {
@@ -259,7 +265,7 @@ export async function computeSavings(
       const sub = subscriptions.find((s) => s.id === t.subscriptionId);
       return sum + (sub ? sub.price : 0);
     }, 0);
-    const primaryCurrency = subscriptions[0]?.currency || "USD";
+    const primaryCurrency = subscriptions[0]?.currency || "INR";
     const symbol = getCurrencySymbol(primaryCurrency);
     advisorMessage = `Cancel before ${formattedEnd} to avoid paying ${symbol}${totalTrialCost.toFixed(0)}.`;
   } else if (splitSavings.length > 0) {
@@ -267,7 +273,7 @@ export async function computeSavings(
     advisorType = "splits";
     const totalSplitSaving = splitSavings.reduce((s, sp) => s + sp.monthlySaving, 0);
     const roundSplit = Math.round(totalSplitSaving * 100) / 100;
-    const primaryCurrency = subscriptions[0]?.currency || "USD";
+    const primaryCurrency = subscriptions[0]?.currency || "INR";
     const symbol = getCurrencySymbol(primaryCurrency);
     advisorMessage = `Your shared subscriptions save you ${symbol}${roundSplit.toFixed(0)} every month.`;
   } else {

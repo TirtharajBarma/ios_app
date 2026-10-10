@@ -313,16 +313,19 @@ export const BudgetCard: React.FC = () => {
   const budgetRunway = Math.max(0, effectiveBudget - totalSpent);
   const safeDailyPace = effectiveBudget > 0 && daysRemaining > 0 ? Math.max(0, Math.round(budgetRunway / daysRemaining)) : 0;
 
-  // Over-pacing is strictly based on variable burn rate, requiring at least 3 days elapsed to avoid Day 1 false alarms
+  // Over-pacing: at today's average variable burn, the rest of the month would use more than the budget that is left
+  // (15% tolerance). Needs at least 3 days elapsed to avoid Day 1 false alarms.
+  const daysAfterToday = Math.max(0, daysInMonth - currentDay);
   const isOverPacing =
     isCurrentMonth &&
     currentDay >= 3 &&
     effectiveBudget > 0 &&
     variableSpent > 0 &&
-    variableDailyBurn > safeDailyPace * 1.15 &&
-    budgetRunway > 0;
+    budgetRunway > 0 &&
+    variableDailyBurn * daysAfterToday > budgetRunway * 1.15;
 
-  const isExceeded = effectiveBudget > 0 && totalSpent >= effectiveBudget;
+  // Strictly over: spending exactly the budget leaves ₹0, the same state the donut centre shows
+  const isExceeded = effectiveBudget > 0 && totalSpent > effectiveBudget;
 
   const projectedBurnoutDay =
     variableDailyBurn > 0 && budgetRunway > 0

@@ -99,3 +99,6 @@ export type {
 } from "./NativeLiquidMenu";
 
 export { ProfileAvatar } from "./ProfileAvatar";
+
+export { default as LiquidGlassSegmentedControl } from "./LiquidGlassSegmentedControl";
+export type { LiquidGlassSegmentedControlProps } from "./LiquidGlassSegmentedControl";

@@ -211,6 +211,8 @@ export default function RootLayout() {
         triggerSharedSync();
         drainQuickAdds();
         useExpenseStore.getState().setSelectedMonth(monthKeyOf());
+        useExpenseStore.getState().refreshCardCycles();
+        rescheduleAllAppNotifications().catch(() => {});
       }
       appState.current = nextAppState;
     });

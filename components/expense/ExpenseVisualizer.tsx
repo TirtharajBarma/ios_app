@@ -31,7 +31,7 @@ import {
   Sparkles,
   RotateCcw,
 } from 'lucide-react-native';
-import { AppText } from '@/components/ui';
+import { AppText, LiquidGlassSegmentedControl } from '@/components/ui';
 import { useExpenseStore, getUserCategories, isSystemCategory, monthKeyOf } from '@/store/useExpenseStore';
 import { useShallow } from 'zustand/react/shallow';
 import * as Haptics from 'expo-haptics';
@@ -321,6 +321,26 @@ interface MonthHeatmapGridProps {
   INNER_W: number;
 }
 
+/**
+ * Days of a month on which a subscription renews: weekly and bi-weekly repeat through the month,
+ * and a day that does not exist in a short month (the 31st in April) clamps to the last day.
+ */
+function renewalDaysInMonth(cycle: string, ref: Date, year: number, month: number, daysInMonth: number): number[] {
+  const dayIdx = (y: number, m: number, d: number) => Math.round(Date.UTC(y, m, d) / 86400000);
+  if (cycle === 'weekly' || cycle === 'bi-weekly') {
+    const step = cycle === 'weekly' ? 7 : 14;
+    const refIdx = dayIdx(ref.getFullYear(), ref.getMonth(), ref.getDate());
+    const startIdx = dayIdx(year, month, 1);
+    const first = startIdx + ((((refIdx - startIdx) % step) + step) % step);
+    const days: number[] = [];
+    for (let i = first; i < startIdx + daysInMonth; i += step) days.push(i - startIdx + 1);
+    return days;
+  }
+  if (cycle === 'yearly' && ref.getMonth() !== month) return [];
+  if (cycle !== 'monthly' && cycle !== 'daily' && cycle !== 'yearly' && !(ref.getFullYear() === year && ref.getMonth() === month)) return [];
+  return [Math.min(ref.getDate(), daysInMonth)];
+}
+
 const MonthHeatmapGrid = React.memo(function MonthHeatmapGrid({
   monthKey,
   transactions,
@@ -334,7 +354,7 @@ const MonthHeatmapGrid = React.memo(function MonthHeatmapGrid({
 
   const monthExpenses = useMemo(() => {
     return transactions.filter(tx => {
-      if (tx.type !== 'expense') return false;
+      if (tx.type !== 'expense' || tx.categoryId === 'cat_debt_repayment') return false;
       const txDate = parseTxDate(tx.date);
       return txDate.getFullYear() === year && txDate.getMonth() === month;
     });
@@ -400,19 +420,7 @@ const MonthHeatmapGrid = React.memo(function MonthHeatmapGrid({
       if (!refDateStr) return;
       const d = parseTxDate(refDateStr);
 
-      let recursInThisMonth = false;
-      if (cycle === 'monthly' || cycle === 'weekly' || cycle === 'daily') {
-        recursInThisMonth = true;
-      } else if (cycle === 'yearly') {
-        recursInThisMonth = d.getMonth() === month;
-      } else {
-        recursInThisMonth = d.getFullYear() === year && d.getMonth() === month;
-      }
-
-      if (!recursInThisMonth) return;
-
-      const renewalDay = d.getDate();
-      if (renewalDay >= 1 && renewalDay <= daysInMonth) {
+      renewalDaysInMonth(cycle, d, year, month, daysInMonth).forEach((renewalDay) => {
         if (!map[renewalDay]) map[renewalDay] = [];
         map[renewalDay].push({
           id: sub.id,
@@ -421,7 +429,7 @@ const MonthHeatmapGrid = React.memo(function MonthHeatmapGrid({
           color: subColor,
           cycle,
         });
-      }
+      });
     });
 
     return map;
@@ -751,7 +759,7 @@ export const ExpenseVisualizer: React.FC = () => {
   // Month-filtered expense transactions only
   const monthExpenses = useMemo(() => {
     return transactions.filter(tx => {
-      if (tx.type !== 'expense') return false;
+      if (tx.type !== 'expense' || tx.categoryId === 'cat_debt_repayment') return false;
       const txDate = parseTxDate(tx.date);
       return txDate.getFullYear() === curYear && txDate.getMonth() === curMonth;
     });
@@ -760,13 +768,13 @@ export const ExpenseVisualizer: React.FC = () => {
   // Horizon-filtered expense transactions
   const horizonExpenses = useMemo(() => {
     if (timeHorizon === 'ALL') {
-      return transactions.filter(t => t.type === 'expense');
+      return transactions.filter(t => t.type === 'expense' && t.categoryId !== 'cat_debt_repayment');
     }
     const { start, end } = horizonWindow(timeHorizon, curYear, curMonth, daysInMonth, transactions);
     const startTime = start.getTime();
     const endTime = end.getTime();
     return transactions.filter(t => {
-      if (t.type !== 'expense') return false;
+      if (t.type !== 'expense' || t.categoryId === 'cat_debt_repayment') return false;
       const tDate = parseTxDate(t.date);
       const tTime = tDate.getTime();
       return tTime >= startTime && tTime <= endTime;
@@ -792,19 +800,7 @@ export const ExpenseVisualizer: React.FC = () => {
       if (!refDateStr) return;
       const d = parseTxDate(refDateStr);
 
-      let recursInThisMonth = false;
-      if (cycle === 'monthly' || cycle === 'weekly' || cycle === 'bi-weekly') {
-        recursInThisMonth = true;
-      } else if (cycle === 'yearly') {
-        recursInThisMonth = d.getMonth() === curMonth;
-      } else {
-        recursInThisMonth = d.getFullYear() === curYear && d.getMonth() === curMonth;
-      }
-
-      if (!recursInThisMonth) return;
-
-      const renewalDay = d.getDate();
-      if (renewalDay >= 1 && renewalDay <= daysInMonth) {
+      renewalDaysInMonth(cycle, d, curYear, curMonth, daysInMonth).forEach((renewalDay) => {
         if (!map[renewalDay]) map[renewalDay] = [];
         map[renewalDay].push({
           id: sub.id,
@@ -813,7 +809,7 @@ export const ExpenseVisualizer: React.FC = () => {
           color: subColor,
           cycle,
         });
-      }
+      });
     });
 
     return map;
@@ -840,7 +836,7 @@ export const ExpenseVisualizer: React.FC = () => {
   // Weekend vs Weekday Contrast Algorithm
   const weekendVsWeekday = useMemo(() => {
     const exp = timeHorizon === 'ALL'
-      ? transactions.filter(t => t.type === 'expense')
+      ? transactions.filter(t => t.type === 'expense' && t.categoryId !== 'cat_debt_repayment')
       : horizonExpenses;
 
     let weekdaySum = 0;
@@ -988,7 +984,7 @@ export const ExpenseVisualizer: React.FC = () => {
 
       const spentInMonth = transactions
         .filter(t => {
-          if (t.type !== 'expense') return false;
+          if (t.type !== 'expense' || t.categoryId === 'cat_debt_repayment') return false;
           const tDate = parseTxDate(t.date);
           return tDate.getFullYear() === mYear && tDate.getMonth() === mMonth;
         })
@@ -1087,7 +1083,7 @@ export const ExpenseVisualizer: React.FC = () => {
   // Last month expense transactions for month-over-month comparison
   const lastMonthExpenses = useMemo(() => {
     return transactions.filter(tx => {
-      if (tx.type !== 'expense') return false;
+      if (tx.type !== 'expense' || tx.categoryId === 'cat_debt_repayment') return false;
       const txDate = parseTxDate(tx.date);
       return txDate.getFullYear() === lastYear && txDate.getMonth() === lastMonth;
     });
@@ -1417,7 +1413,7 @@ export const ExpenseVisualizer: React.FC = () => {
 
         const daySpend = transactions
           .filter((t) => {
-            if (t.type !== 'expense') return false;
+            if (t.type !== 'expense' || t.categoryId === 'cat_debt_repayment') return false;
             const tDate = parseTxDate(t.date);
             return (
               tDate.getFullYear() === dYear &&
@@ -1654,24 +1650,13 @@ export const ExpenseVisualizer: React.FC = () => {
           {/* Clean Gap */}
           <View style={{ height: 6 }} />
 
-          {/* ═══ MULTI-HORIZON TIME SWITCHER ═══ */}
-          <View style={st.horizonContainer}>
-            {(['1W', '1M', '6M', '1Y', 'ALL'] as TimeHorizon[]).map((hz) => {
-              const isSelected = timeHorizon === hz;
-              return (
-                <TouchableOpacity
-                  key={hz}
-                  style={[st.horizonPill, isSelected && st.horizonPillActive]}
-                  onPress={() => setTimeHorizon(hz)}
-                  activeOpacity={0.75}
-                >
-                  <AppText style={[st.horizonPillText, isSelected && st.horizonPillTextActive]}>
-                    {hz}
-                  </AppText>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+          {/* ═══ MULTI-HORIZON TIME SWITCHER (APPLE LIQUID GLASS) ═══ */}
+          <LiquidGlassSegmentedControl<TimeHorizon>
+            values={['1W', '1M', '6M', '1Y', 'ALL']}
+            selectedValue={timeHorizon}
+            onValueChange={setTimeHorizon}
+            style={{ marginHorizontal: PAGE_M, marginBottom: 16 }}
+          />
         </Animated.View>
 
         {/* ═══ MULTI-MONTH TREND (6M / 1Y / ALL) ═══ */}
@@ -2013,7 +1998,7 @@ export const ExpenseVisualizer: React.FC = () => {
                 <AppText style={st.insightHead}>NO-SPEND STREAK</AppText>
               </View>
               <AppText style={st.insightVal} numberOfLines={1} adjustsFontSizeToFit>
-                {noSpendStreak} {noSpendStreak === 1 ? 'day' : 'days'}
+                {monthExpenses.length === 0 ? '—' : `${noSpendStreak} ${noSpendStreak === 1 ? 'day' : 'days'}`}
               </AppText>
               <AppText style={st.insightSub}>Consecutive {sym}0 spend days</AppText>
             </View>
@@ -2455,28 +2440,9 @@ export const ExpenseVisualizer: React.FC = () => {
               )}
             </View>
 
-            {momBenchmark.hasBaseline ? (
-              <View style={st.momBenchmarkBanner}>
-                <View style={st.momCol}>
-                  <AppText style={st.momLabel}>
-                    {isCurrentMonthView ? `${thisMonthShort} so far` : `${thisMonthShort} total`}
-                  </AppText>
-                  <AppText style={st.momAmt}>{sym}{Math.round(momBenchmark.thisMonthCumulative).toLocaleString('en-IN')}</AppText>
-                </View>
-                <View style={st.momCol}>
-                  <AppText style={st.momLabel}>
-                    {momBenchmark.isFullLast ? `${lastMonthShort} total` : `${lastMonthShort} 1–${momBenchmark.lastTargetDay}`}
-                  </AppText>
-                  <AppText style={st.momAmt}>{sym}{Math.round(momBenchmark.lastMonthCumulative).toLocaleString('en-IN')}</AppText>
-                </View>
-                {/* A percentage only means something when both sides cover the same days */}
-                {!momBenchmark.isFullLast && !momBenchmark.isEqual && (
-                  <AppText style={st.momPct}>
-                    {momBenchmark.isLower ? '↓' : '↑'} {momBenchmark.pctDiff}%
-                  </AppText>
-                )}
-              </View>
-            ) : (
+            {/* No summary box: the header says what is compared and every row shows its own change.
+                Only explain when there is nothing to compare. */}
+            {!momBenchmark.hasBaseline && (
               <View style={{ paddingVertical: 12, paddingHorizontal: 14, backgroundColor: '#181920', borderRadius: 12, marginBottom: 16 }}>
                 <AppText style={{ color: expenseColors.textMuted, fontSize: 12, lineHeight: 17 }}>
                   {momBenchmark.lastMonthTotal > 0
@@ -2576,7 +2542,7 @@ export const ExpenseVisualizer: React.FC = () => {
               <AppText style={st.cardSub}>
                 {subscriptions.length === 0
                   ? 'No active subscriptions tracked'
-                  : `${subscriptions.length} active subscription${subscriptions.length !== 1 ? 's' : ''} tracked`}
+                  : `${subscriptions.filter((x) => !x.isPaused).length} active subscription${subscriptions.filter((x) => !x.isPaused).length !== 1 ? 's' : ''} tracked${subscriptions.some((x) => x.isPaused) ? ` · ${subscriptions.filter((x) => x.isPaused).length} paused` : ''}`}
               </AppText>
             </View>
             <TouchableOpacity
@@ -3332,18 +3298,6 @@ const st = StyleSheet.create({
   },
 
   // ── MoM Ghost Benchmark ──
-  momBenchmarkBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.03)',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 12,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
-  },
   momPaceSub: {
     color: '#8E919D',
     fontSize: 12,
@@ -3351,10 +3305,6 @@ const st = StyleSheet.create({
     fontWeight: '400',
     marginTop: 1,
   },
-  momCol: { flex: 1 },
-  momLabel: { color: expenseColors.textMuted, fontSize: 11, lineHeight: 15, fontWeight: '500' },
-  momAmt: { color: '#FFFFFF', fontSize: 18, lineHeight: 24, fontWeight: '700' },
-  momPct: { color: expenseColors.textMuted, fontSize: 13, lineHeight: 18, fontWeight: '600' },
 
   // ── VS Last Month ──
   vsSeg: {

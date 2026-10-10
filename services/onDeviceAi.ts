@@ -238,19 +238,16 @@ export function fuzzyMatch(term: string, target: string, threshold = 0.75): bool
   if (!t || !tgt) return false;
   if (t === tgt) return true;
 
-  // Fast Substring check
-  if (t.length >= 3 && tgt.includes(t)) return true;
-  if (tgt.length >= 3 && t.includes(tgt)) return true;
+  // Substring matches only count for words long enough to mean something ("ent" inside "spent" must not match)
+  if (t.length >= 4 && tgt.includes(t)) return true;
+  if (tgt.length >= 4 && t.includes(tgt)) return true;
 
-  // Exact typo distance checks based on word length
+  // Typo tolerance scales with length: none for short words ("show" is not "shop"), more for longer ones
   const maxLen = Math.max(t.length, tgt.length);
+  if (maxLen < 5) return false;
   const dist = levenshteinDistance(t, tgt);
-
-  if (maxLen <= 4 && dist <= 1) return true;
-  if (maxLen <= 7 && dist <= 2) return true;
-  if (maxLen > 7 && dist <= 3) return true;
-
-  return stringSimilarity(t, tgt) >= threshold;
+  const allowed = maxLen <= 7 ? 1 : maxLen <= 8 ? 2 : 3; // "groceries" vs "grocery" differ by 3
+  return dist <= allowed && 1 - dist / maxLen >= threshold - 0.1;
 }
 
 // ─────────────────────────────────────────────────────────────

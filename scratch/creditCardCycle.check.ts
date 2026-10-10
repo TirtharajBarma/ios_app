@@ -27,3 +27,12 @@ eq(r.dueDateFormatted!, 'Mar 31');
 r = st(25, 5, 100, new Date(2026, 9, 28), 0);          // normal case unchanged
 eq(r.dueDateFormatted!, 'Oct 25');
 console.log('ok3');
+
+import { getBilledDueDate as bd } from '../utils/creditCard';
+const ds = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+eq(ds(bd(4, 17, new Date(2026, 9, 19))), '2026-11-04');   // bill 17th closed -> pay Nov 4
+eq(ds(bd(4, 17, new Date(2026, 9, 10))), '2026-10-04');   // Sep statement, due date already passed
+eq(ds(bd(30, 28, new Date(2026, 1, 28))), '2026-03-30');  // short-month clamp
+eq(ds(bd(31, undefined, new Date(2026, 3, 10))), '2026-04-30'); // no bill day: due 31 clamps to Apr 30
+eq(ds(bd(5, undefined, new Date(2026, 11, 20))), '2027-01-05');  // year rollover
+console.log('ok4');

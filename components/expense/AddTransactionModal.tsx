@@ -643,8 +643,10 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
       if (!lower) return;
 
       // 1. Check learned merchant rules from store
-      if (learnedMerchantRules && learnedMerchantRules[lower]) {
-        const learnedCatId = learnedMerchantRules[lower];
+      // Rules are saved under a normalised key (letters and digits only), so look them up the same way
+      const learnedKey = lower.replace(/[^a-z0-9]/g, '').slice(0, 30);
+      if (learnedMerchantRules && learnedKey && learnedMerchantRules[learnedKey]) {
+        const learnedCatId = learnedMerchantRules[learnedKey];
         if (categories.some((c) => c.id === learnedCatId)) {
           setSelectedCategoryId(learnedCatId);
           return;
@@ -653,7 +655,9 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
 
       // 2. Check predefined vendor map
       for (const [key, catId] of Object.entries(VENDOR_CATEGORY_MAP)) {
-        if (lower.includes(key)) {
+        // Short keys ("pan", "tea", "ola") must be whole words, or "Japan" would match "pan"
+        const hit = key.length <= 4 ? new RegExp(`\\b${key}\\b`).test(lower) : lower.includes(key);
+        if (hit) {
           if (categories.some((c) => c.id === catId)) {
             setSelectedCategoryId(catId);
             if (catId === 'cat_subs') {
@@ -667,7 +671,10 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
       // 3. Fuzzy search history in past transactions
       if (lower.length >= 3) {
         const pastMatch = transactions.find(
-          (t) => t.type === 'expense' && (t.note || '').toLowerCase().includes(lower) && t.categoryId
+          (t) =>
+            t.type === 'expense' &&
+            ((t.note || '').toLowerCase().includes(lower) || (t.merchant || '').toLowerCase().includes(lower)) &&
+            t.categoryId
         );
         if (pastMatch && pastMatch.categoryId && categories.some((c) => c.id === pastMatch.categoryId)) {
           setSelectedCategoryId(pastMatch.categoryId);

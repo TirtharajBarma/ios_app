@@ -27,6 +27,11 @@ const PROMOTIONAL_OR_SPAM_PATTERNS = [
   /\b(zero interest|flat \d+% off|limited time offer|discount code)\b/i,
   /\bcredit limit (increased|enhanced|upgraded)\b/i,
   /\b(bill generated|payment is due on|minimum amount due|total amount due)\b/i,
+  // "payment of Rs X due on 15th": a reminder, not a transaction
+  /\bpayment\b[^.]*\bdue\b/i,
+  /\bdue (?:on|by) \d/i,
+  // The card issuer acknowledging a bill payment; the bank-side debit is the real transaction
+  /\b(?:credit\s*card|card)\b[^.]*\bpayment\b[^.]*\b(?:received|successful|posted)\b/i,
 ];
 
 // Currency regex symbols & codes
@@ -60,12 +65,16 @@ const MERCHANT_CATEGORY_KEYWORDS: Record<string, string[]> = {
   ],
 };
 
-function formatTodayDate(): string {
-  const now = new Date();
+function formatTodayDate(now: Date = new Date()): string {
   const year = now.getFullYear();
   const month = `${now.getMonth() + 1}`.padStart(2, '0');
   const day = `${now.getDate()}`.padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+/** Same regex, but the leading optional currency group becomes mandatory. */
+function withRequiredCurrency(re: RegExp): RegExp {
+  return new RegExp(re.source.replace(`(${CURRENCY_REGEX_PART})?`, `(${CURRENCY_REGEX_PART})`), re.flags);
 }
 
 /**
@@ -144,15 +153,22 @@ export function parseFinancialText(
     'i'
   );
 
-  let match = cleanText.match(contextualAmountRegex);
-  if (!match) {
-    match = cleanText.match(reverseContextRegex);
-  }
-  if (!match) {
-    // Fallback: look for any currency followed by amount that is NOT immediately preceded by "bal" / "balance" / "limit"
-    const textWithoutBalance = cleanText.replace(/(?:avail(?:able)?\s*(?:bal(?:ance)?|limit)|bal:?)\s*[^\s,.]+\s*[0-9,.]+/gi, '');
-    match = textWithoutBalance.match(fallbackAmountRegex);
-  }
+  // Balances and limits are never the transaction amount ("Avl Bal INR 5,000.00", "balance is Rs 5,000").
+  const textForAmount = cleanText.replace(
+    new RegExp(
+      `\\b(?:(?:avl|avail(?:able)?|total|closing|current|ledger)\\s+)?(?:bal(?:ance)?|limit)\\b\\s*(?:is|of|:|-)?\\s*(?:${CURRENCY_REGEX_PART})?\\s*[0-9][0-9,]*(?:\\.[0-9]+)?(?:\\s*(?:cr|dr)\\b)?`,
+      'gi'
+    ),
+    ' '
+  );
+
+  // Prefer amounts that carry a currency marker, so a stray number (an a/c or loan number) is never taken.
+  let match =
+    textForAmount.match(withRequiredCurrency(contextualAmountRegex)) ||
+    textForAmount.match(withRequiredCurrency(reverseContextRegex)) ||
+    textForAmount.match(fallbackAmountRegex) ||
+    textForAmount.match(contextualAmountRegex) ||
+    textForAmount.match(reverseContextRegex);
 
   if (match) {
     const rawCurr = match[1];
@@ -211,7 +227,12 @@ export function parseFinancialText(
     for (const regex of merchantRegexes) {
       const mMatch = cleanText.match(regex);
       if (mMatch && mMatch[1]) {
-        let candidate = mMatch[1].trim().replace(/[.,;:]+$/, '');
+        let candidate = mMatch[1].trim();
+        // Stop at the end of the sentence or where a balance statement starts
+        candidate = candidate.split(/\.\s|\s(?:avl|avail(?:able)?|bal(?:ance)?)\b/i)[0].trim().replace(/[.,;:]+$/, '');
+        // "UPI-ZOMATO-123" -> "ZOMATO"
+        const upiWrapped = candidate.match(/^UPI[-/]([A-Za-z][A-Za-z &]*?)(?:[-/]\d+)?$/i);
+        if (upiWrapped) candidate = upiWrapped[1].trim();
         // Disqualify if candidate looks like a currency amount (e.g. "Rs 250.00", "INR 500")
         if (new RegExp(`^${CURRENCY_REGEX_PART}\\s*[0-9]+`, 'i').test(candidate) || /^[0-9,.]+$/.test(candidate)) {
           continue;
@@ -238,8 +259,8 @@ export function parseFinancialText(
     }
   }
 
-  // 8. Extract Date (or use today)
-  const date = formatTodayDate();
+  // 8. Date the message was received (a delayed notification must not be booked on a later day)
+  const date = formatTodayDate(new Date(receivedTimestamp));
 
   return {
     isFinancial: true,
@@ -280,9 +301,10 @@ export function generateTransactionHash(
 export function createPendingTransactionFromText(
   rawText: string,
   sender: string = 'SMS',
-  source: 'sms' | 'notification' | 'manual_test' = 'notification'
+  source: 'sms' | 'notification' | 'manual_test' = 'notification',
+  receivedAt: number = Date.now()
 ): PendingTransaction | null {
-  const parsed = parseFinancialText(rawText, sender);
+  const parsed = parseFinancialText(rawText, sender, receivedAt);
   if (!parsed.isFinancial || !parsed.amount || !parsed.type) {
     return null;
   }
@@ -307,7 +329,7 @@ export function createPendingTransactionFromText(
     accountHint: parsed.accountHint,
     suggestedCategoryId: parsed.categorySuggestion,
     date: parsed.date || formatTodayDate(),
-    timestamp: Date.now(),
+    timestamp: receivedAt,
     status: 'pending',
   };
 }

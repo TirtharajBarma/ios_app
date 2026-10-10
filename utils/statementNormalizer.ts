@@ -128,7 +128,7 @@ export function normalizeDateToISO(dateStr: string): string {
   const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
   // 1a. "MMM DD, YYYY" e.g. "Sep 29, 2026", "September 29, 2026", "Sep 29 2026"
-  const mdyWord = clean.match(/([A-Za-z]{3,9}\.?)\s+(\d{1,2}),?\s+(\d{2,4})/);
+  const mdyWord = clean.match(/([A-Za-z]{3,9}\.?)\s+(\d{1,2}),?\s+(\d{2,4})(?![\d:])/);
   if (mdyWord) {
     const wordClean = mdyWord[1].toLowerCase().replace(/[^a-z]/g, '').slice(0, 3);
     const mIdx = months.indexOf(wordClean);
@@ -234,7 +234,7 @@ export function classifyNarration(
   // Tier 1: Check learned merchant memory
   const normalizedKey = text.replace(/[^a-z0-9]/g, '').slice(0, 30);
   for (const [merchantKey, catId] of Object.entries(learnedRules)) {
-    if (normalizedKey.includes(merchantKey) || merchantKey.includes(normalizedKey)) {
+    if ((merchantKey.length >= 3 && normalizedKey.includes(merchantKey)) || (normalizedKey.length >= 4 && merchantKey.includes(normalizedKey))) {
       const match = categories.find((c) => c.id === catId);
       if (match) {
         return { categoryId: match.id, confidence: 'high' };
@@ -259,43 +259,43 @@ export function classifyNarration(
   }
 
   // Food & Dining & Quick Commerce Groceries
-  if (/swiggy|zomato|mcdonald|kfc|starbucks|burger|pizza|cafe|restaurant|hotel|bhojanalay|blinkit|zepto|instamart|bakery|diner|food|chai|tea|coffee|lunch|dinner|breakfast|snack|biryani|domino/.test(text)) {
+  if (/swiggy|zomato|mcdonald|kfc|starbucks|burger|pizza|cafe|restaurant|hotel|bhojanalay|blinkit|zepto|instamart|bakery|diner|food|chai|coffee|lunch|dinner|breakfast|snack|biryani|domino/.test(text) || /\btea\b/.test(text)) {
     const foodCat = categories.find((c) => c.id === 'cat_food' || c.name.toLowerCase().includes('food'));
     if (foodCat) return { categoryId: foodCat.id, confidence: 'high' };
   }
 
   // Transport & Travel
-  if (/uber|ola|rapido|metro|fuel|petrol|diesel|shell|hpcl|bpcl|irctc|flight|indigo|airindia|toll|fastag|parking|auto|cab|bus|railway|transport|rickshaw/.test(text)) {
+  if (/uber|rapido|metro|fuel|petrol|diesel|shell|hpcl|bpcl|irctc|flight|indigo|airindia|fastag|parking|railway|transport|rickshaw/.test(text) || /\b(?:ola|toll|auto|cab|bus)\b/.test(text)) {
     const transCat = categories.find((c) => c.id === 'cat_trans' || c.name.toLowerCase().includes('trans'));
     if (transCat) return { categoryId: transCat.id, confidence: 'high' };
   }
 
   // Shopping & Ecommerce & Retail
-  if (/amazon|flipkart|myntra|zara|h&m|nykaa|meesho|ajio|croma|reliance|retail|apple|decathlon|store|mart|mall|cloth|apparel|vishal|holder|purchase|pos\s*\d/.test(text)) {
+  if (/amazon|flipkart|myntra|zara|h&m|nykaa|meesho|ajio|croma|reliance|retail|apple|decathlon|dmart|cloth|apparel|vishal|holder|purchase|pos\s*\d/.test(text) || /\b(?:store|mart|mall)\b/.test(text)) {
     const shopCat = categories.find((c) => c.id === 'cat_shop' || c.name.toLowerCase().includes('shop'));
     if (shopCat) return { categoryId: shopCat.id, confidence: 'medium' };
   }
 
   // Entertainment & Subscriptions
-  if (/netflix|spotify|prime|hotstar|youtube|bookmyshow|pvr|inox|steam|playstation|movie|cinema|game|disney|theatre/.test(text)) {
+  if (/netflix|spotify|prime|hotstar|youtube|bookmyshow|pvr|inox|steam|playstation|movie|cinema|disney|theatre/.test(text) || /\bgames?\b/.test(text)) {
     const entCat = categories.find((c) => c.id === 'cat_ent' || c.name.toLowerCase().includes('ent'));
     if (entCat) return { categoryId: entCat.id, confidence: 'high' };
   }
 
   // Utilities & Bills & Recharges
-  if (/electricity|bescom|tata power|airtel|jio|vi\b|vodafone|broadband|wifi|water|gas|cylinder|bill|recharge|dth|postpaid|prepaid/.test(text)) {
+  if (/electricity|bescom|tata power|airtel|jio|vodafone|broadband|wifi|cylinder|recharge|dth|postpaid|prepaid/.test(text) || /\b(?:vi|water|gas|bill)\b/.test(text)) {
     const utilCat = categories.find((c) => c.id === 'cat_util' || c.name.toLowerCase().includes('util'));
     if (utilCat) return { categoryId: utilCat.id, confidence: 'high' };
   }
 
   // Health & Pharmacy
-  if (/apollo|pharmeasy|netmeds|medplus|hospital|clinic|doctor|pharmacy|medicine|dental|pathology|lab|1mg/.test(text)) {
+  if (/apollo|pharmeasy|netmeds|medplus|hospital|clinic|doctor|pharmacy|medicine|dental|pathology|1mg/.test(text) || /\blabs?\b/.test(text)) {
     const healthCat = categories.find((c) => c.id === 'cat_health' || c.name.toLowerCase().includes('health'));
     if (healthCat) return { categoryId: healthCat.id, confidence: 'high' };
   }
 
   // Finance & Banking Fees & Taxes
-  if (/interest|charges|fee|tax|gst|emi|loan|insurance|lic|hdfc bank|sbi bank|penalty|stamp/.test(text)) {
+  if (/interest|charges|gst|loan|insurance|hdfc bank|sbi bank|penalty|stamp/.test(text) || /\b(?:fee|tax|emi|lic)\b/.test(text)) {
     const finCat = categories.find((c) => c.id === 'cat_fin' || c.name.toLowerCase().includes('fin'));
     if (finCat) return { categoryId: finCat.id, confidence: 'medium' };
   }
@@ -556,10 +556,17 @@ export function normalizeStatementData(
             if (val > 0) amountValues.push(val);
           } else {
             const trimmed = it.text.trim();
-            if (/^[0-9]+([.,][0-9]+)?$/.test(trimmed) && !/^\d{4}$/.test(trimmed)) {
+            // Plain ("500.00") or grouped ("2,000.00", "1,23,456.78") amounts; 4-digit bare numbers are usually years
+            const looksLikeAmount = /^[0-9]+([.,][0-9]+)?$/.test(trimmed) || /^[0-9]{1,3}(?:,[0-9]{2,3})+(?:\.[0-9]{1,2})?$/.test(trimmed);
+            // Long or zero-padded integers are reference numbers, not amounts ("0000555", "4012345678")
+            const looksLikeRef = /^0[0-9]+$/.test(trimmed) || /^[0-9]{7,}$/.test(trimmed);
+            if (looksLikeAmount && !looksLikeRef && !/^\d{4}$/.test(trimmed)) {
               const val = parseInternationalAmount(trimmed);
               if (val > 0 && val < 100000000) {
                 amountValues.push(val);
+              } else if (val === 0 && /^0+\.0{1,2}$/.test(trimmed)) {
+                // An empty debit/credit column ("0.00") still marks which column the amount is in
+                amountValues.push(0);
               }
             }
           }
