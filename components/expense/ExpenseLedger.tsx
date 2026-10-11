@@ -12,6 +12,7 @@ import {
   UIManager,
   Keyboard,
   TouchableWithoutFeedback,
+  Alert,
 } from 'react-native';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -312,6 +313,12 @@ export const ExpenseLedger: React.FC = () => {
     return list;
   }, [transactions, activeAccountFilter, smartSearchQuery, accounts, categories, selectedCategoryFilter]);
 
+  // Selected rows that are still visible: a filter or search change must not leave hidden rows selected for bulk actions
+  const visibleSelectedIds = useMemo(() => {
+    const visible = new Set(filteredTxs.map((t) => t.id));
+    return selectedTransactionIds.filter((id) => visible.has(id));
+  }, [filteredTxs, selectedTransactionIds]);
+
   const categoryFilterDropdownActions: MenuAction[] = useMemo(() => {
     const isAll = selectedCategoryFilter === 'All';
     return [
@@ -409,7 +416,7 @@ export const ExpenseLedger: React.FC = () => {
 
         if (existing && existing.folderTxs) {
           existing.folderTxs.push(tx);
-          existing.folderTotal = (existing.folderTotal || 0) + (tx.type === 'expense' ? tx.amount : 0);
+          existing.folderTotal = (existing.folderTotal || 0) + (tx.type === 'expense' ? (tx.split ? tx.split.yourShare : tx.amount) : 0); // your share, as everywhere else
         } else {
           currentGroup.items.push({
             type: 'folder',
@@ -417,7 +424,7 @@ export const ExpenseLedger: React.FC = () => {
             folderName,
             folderEmoji,
             folderTxs: [tx],
-            folderTotal: tx.type === 'expense' ? tx.amount : 0,
+            folderTotal: tx.type === 'expense' ? (tx.split ? tx.split.yourShare : tx.amount) : 0,
           });
         }
       } else {
@@ -934,7 +941,10 @@ export const ExpenseLedger: React.FC = () => {
             toggleSelectTransaction(tx.id);
           } else if (actionId === 'delete') {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
-            removeTransactions([tx.id]);
+            Alert.alert('Delete transaction?', 'This removes it and updates your account balance.', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Delete', style: 'destructive', onPress: () => removeTransactions([tx.id]) },
+            ]);
           }
         }}
         style={{ width: '100%' }}
@@ -1142,8 +1152,21 @@ export const ExpenseLedger: React.FC = () => {
             deleteEventFolder(folderKey);
           } else if (actionId === 'delete') {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
-            removeTransactions(folderTxs.map((t) => t.id));
-            deleteEventFolder(folderKey);
+            Alert.alert(
+              'Delete folder and its transactions?',
+              `${folderTxs.length} transaction${folderTxs.length === 1 ? '' : 's'} in this folder will be deleted too. Use "Dissolve" to keep them.`,
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Delete all',
+                  style: 'destructive',
+                  onPress: () => {
+                    removeTransactions(folderTxs.map((t) => t.id));
+                    deleteEventFolder(folderKey);
+                  },
+                },
+              ]
+            );
           }
         }}
         style={{ width: '100%' }}
@@ -1607,7 +1630,7 @@ export const ExpenseLedger: React.FC = () => {
         <View style={[styles.bottomActionBarContainer, { bottom: insets.bottom + 64 }]}>
           {/* Left: Selected Count */}
           <AppText style={styles.selectedCountText}>
-            {selectedTransactionIds.length} Selected
+            {visibleSelectedIds.length} Selected
           </AppText>
 
           {/* Right Action Buttons: Delete, Category, X */}
@@ -1616,15 +1639,29 @@ export const ExpenseLedger: React.FC = () => {
             <TouchableOpacity
               style={[
                 styles.deleteActionButton,
-                selectedTransactionIds.length === 0 && { opacity: 0.5 },
+                visibleSelectedIds.length === 0 && { opacity: 0.5 },
               ]}
-              disabled={selectedTransactionIds.length === 0}
+              disabled={visibleSelectedIds.length === 0}
               onPress={() => {
-                if (selectedTransactionIds.length > 0) {
+                if (visibleSelectedIds.length > 0) {
                   Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
-                  removeTransactions(selectedTransactionIds);
-                  clearSelectedTransactions();
-                  setIsSelectMode(false);
+                  const ids = [...visibleSelectedIds];
+                  Alert.alert(
+                    `Delete ${ids.length} transaction${ids.length === 1 ? '' : 's'}?`,
+                    'They will be removed and your account balances updated.',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Delete',
+                        style: 'destructive',
+                        onPress: () => {
+                          removeTransactions(ids);
+                          clearSelectedTransactions();
+                          setIsSelectMode(false);
+                        },
+                      },
+                    ]
+                  );
                 }
               }}
               activeOpacity={0.8}
@@ -1639,8 +1676,16 @@ export const ExpenseLedger: React.FC = () => {
               actions={categoryMenuActions}
               style={{ alignSelf: 'flex-start' }}
               onSelect={(catId) => {
-                if (selectedTransactionIds.length > 0) {
-                  updateTransactionsCategory(selectedTransactionIds, catId);
+                if (visibleSelectedIds.length > 0) {
+                  // Only expenses have a category; don't report success for income, transfers or debts
+                  const chosen = new Set(visibleSelectedIds);
+                  const eligible = transactions.filter((t) => chosen.has(t.id) && t.type === 'expense').map((t) => t.id);
+                  if (eligible.length === 0) {
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+                    Alert.alert('Nothing to change', 'Only expenses can be moved to a category.');
+                    return;
+                  }
+                  updateTransactionsCategory(eligible, catId);
                   Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
                   clearSelectedTransactions();
                   setIsSelectMode(false);

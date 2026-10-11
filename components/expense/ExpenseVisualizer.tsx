@@ -723,6 +723,8 @@ export const ExpenseVisualizer: React.FC = () => {
   const animAudit = useRef(new Animated.Value(1)).current;
 
   const barGrowAnim = useRef(new Animated.Value(1)).current;
+  // Soft cross-fade of the cards when the month or range changes (native driver: opacity + translate only)
+  const swapAnim = useRef(new Animated.Value(1)).current;
   const isFirstRender = useRef(true);
 
   useEffect(() => {
@@ -738,6 +740,14 @@ export const ExpenseVisualizer: React.FC = () => {
       duration: 450,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: false,
+    }).start();
+
+    swapAnim.setValue(0);
+    Animated.timing(swapAnim, {
+      toValue: 1,
+      duration: 320,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
     }).start();
   }, [timeHorizon, selectedMonth]);
 
@@ -1659,6 +1669,12 @@ export const ExpenseVisualizer: React.FC = () => {
           />
         </Animated.View>
 
+        <Animated.View
+          style={{
+            opacity: swapAnim.interpolate({ inputRange: [0, 1], outputRange: [0.35, 1] }),
+            transform: [{ translateY: swapAnim.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }],
+          }}
+        >
         {/* ═══ MULTI-MONTH TREND (6M / 1Y / ALL) ═══ */}
         {(timeHorizon === '6M' || timeHorizon === '1Y' || timeHorizon === 'ALL') && (
           <Animated.View
@@ -2460,7 +2476,7 @@ export const ExpenseVisualizer: React.FC = () => {
               </View>
             ) : (
               <View style={st.vsStack}>
-                {vsCategories.filter(c => c.thisAmount > 0).map(cat => (
+                {vsCategories.filter(c => c.thisAmount > 0).map((cat, rowIdx) => (
                   <View key={cat.id} style={st.vsItem}>
                     <View style={st.vsTopRow}>
                       <View style={st.vsLeft}>
@@ -2489,15 +2505,26 @@ export const ExpenseVisualizer: React.FC = () => {
                           st.vsFill,
                           {
                             backgroundColor: cat.color,
+                            // Each row starts a little after the one above it, so the bars unfold in order
                             width: barGrowAnim.interpolate({
-                              inputRange: [0, 1],
+                              inputRange: [Math.min(0.55, rowIdx * 0.08), 1],
                               outputRange: ['0%', `${cat.thisPercent}%`],
+                              extrapolate: 'clamp',
                             }) as any,
                           },
                         ]}
                       />
                       {cat.lastPercent > 0 && (
-                        <View style={[st.vsTick, { left: `${Math.min(cat.lastPercent, 99)}%` }]} />
+                        <Animated.View
+                          style={[
+                            st.vsTick,
+                            {
+                              left: `${Math.min(cat.lastPercent, 99)}%`,
+                              // The tick appears once its bar has mostly grown
+                              opacity: barGrowAnim.interpolate({ inputRange: [0.6, 1], outputRange: [0, 1], extrapolate: 'clamp' }),
+                            },
+                          ]}
+                        />
                       )}
                     </View>
                   </View>
@@ -2615,6 +2642,7 @@ export const ExpenseVisualizer: React.FC = () => {
           )}
         </Animated.View>
 
+        </Animated.View>
       </ScrollView>
     </View>
   );

@@ -6,7 +6,7 @@ import type {
   SubscriptionStats,
 } from "@/types/subscription";
 import * as db from "@/database/database";
-import { toMonthly, toYearly, daysUntil, advanceCycle, advanceCycleDate, getSubscriptionActivePrice, getNextRenewalDate } from "@/utils/date";
+import { toMonthly, toYearly, daysUntil, advanceCycle, advanceCycleDate, getSubscriptionActivePrice, getNextRenewalDate, toLocalDateString } from "@/utils/date";
 import { scheduleReminder, cancelReminder, cancelAllReminders, scheduleAllReminders } from "@/utils/notifications";
 import AsyncStorage from "@/utils/storage";
 import { getExchangeRates, convertCurrency } from "@/utils/currency";
@@ -73,6 +73,16 @@ function computeStats(subscriptions: Subscription[]): SubscriptionStats {
     }
   }
 
+  // Totals are shown in the app currency, so each subscription is converted first (USD + INR must not be added raw)
+  let appCurrency = "INR";
+  try {
+    appCurrency = require("@/store/useSettingsStore").useSettingsStore.getState().currencyCode || "INR";
+  } catch {
+    // settings store unavailable: assume INR
+  }
+  const toAppCurrency = (amount: number, from?: string) =>
+    from && from.toUpperCase() !== appCurrency.toUpperCase() ? convertCurrency(amount, from, appCurrency) : amount;
+
   // Calculate monthly & yearly spends
   const monthlyTotal = subscriptions.reduce(
     (sum, s) => {
@@ -80,7 +90,7 @@ function computeStats(subscriptions: Subscription[]): SubscriptionStats {
       // Do not include free trials in current monthly spending totals
       if (s.isTrial) return sum;
       const activePrice = getSubscriptionActivePrice(s);
-      return sum + toMonthly(activePrice, s.rawBillingCycle || s.billingCycle, s.customIntervalMonths);
+      return sum + toAppCurrency(toMonthly(activePrice, s.rawBillingCycle || s.billingCycle, s.customIntervalMonths), s.currency);
     },
     0
   );
@@ -90,7 +100,7 @@ function computeStats(subscriptions: Subscription[]): SubscriptionStats {
       if (s.isPaused) return sum;
       if (s.isTrial) return sum;
       const activePrice = getSubscriptionActivePrice(s);
-      return sum + toYearly(activePrice, s.rawBillingCycle || s.billingCycle, s.customIntervalMonths);
+      return sum + toAppCurrency(toYearly(activePrice, s.rawBillingCycle || s.billingCycle, s.customIntervalMonths), s.currency);
     },
     0
   );
@@ -207,17 +217,35 @@ async function refreshVault(subscriptions: Subscription[]): Promise<VaultState> 
  * Auto-posts a recurring renewal transaction and its split details into the Expense Store.
  * Ensures strict idempotency by checking if a transaction for this subscription and date already exists.
  */
+/** What the provider actually charges for a cycle (promo price while the promo runs), before any split. */
+function getChargedPrice(sub: Subscription): number {
+  if (sub.promoEnabled && sub.promoPrice !== undefined && sub.promoEndDate) {
+    try {
+      if (startOfDay(new Date()) <= startOfDay(parseISO(sub.promoEndDate))) return sub.promoPrice;
+    } catch {
+      // fall through to the regular price
+    }
+  }
+  return sub.price;
+}
+
 function autoPostRecurringExpense(sub: Subscription, renewalDateISO: string): void {
   try {
     const { useExpenseStore } = require('@/store/useExpenseStore');
     const expenseStore = useExpenseStore.getState();
     if (!expenseStore || typeof expenseStore.addTransaction !== 'function') return;
 
-    const renewalDateStr = renewalDateISO.split('T')[0];
+    // Local calendar day of the renewal (the stored timestamp is UTC, which is a day early in IST)
+    const renewalDateStr = toLocalDateString(renewalDateISO);
+    // Entries posted before this fix carry the previous day; treat them as the same cycle (not for daily cycles)
+    const prev = new Date(`${renewalDateStr}T12:00:00`);
+    prev.setDate(prev.getDate() - 1);
+    const dayBeforeStr = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}-${String(prev.getDate()).padStart(2, '0')}`;
+    const isDaily = String(sub.billingCycle || '').toLowerCase() === 'daily';
 
     // 1. Strict Idempotency Check: Prevent duplicate logging for the same cycle
     const alreadyExists = (expenseStore.transactions || []).some(
-      (t: any) => t.subscriptionId === sub.id && t.date === renewalDateStr
+      (t: any) => t.subscriptionId === sub.id && (t.date === renewalDateStr || (!isDaily && t.date === dayBeforeStr))
     );
     if (alreadyExists) return;
 
@@ -252,10 +280,10 @@ function autoPostRecurringExpense(sub: Subscription, renewalDateISO: string): vo
       const friendsShare =
         freshFriends && freshFriends.length > 0
           ? freshFriends.reduce((sum: number, f: any) => sum + (f.amount || 0), 0)
-          : (prevTx.split.friendsShare || Math.max(0, sub.price - yourShare));
+          : (prevTx.split.friendsShare || Math.max(0, getChargedPrice(sub) - yourShare));
 
       splitDetails = {
-        totalPaid: sub.price || prevTx.split.totalPaid,
+        totalPaid: getChargedPrice(sub) || prevTx.split.totalPaid,
         yourShare,
         friendsShare,
         friendNames: prevTx.split.friendNames,
@@ -264,11 +292,12 @@ function autoPostRecurringExpense(sub: Subscription, renewalDateISO: string): vo
       };
     } else if (sub.splitEnabled) {
       const activePrice = getSubscriptionActivePrice(sub);
-      if (activePrice < sub.price) {
+      const charged = getChargedPrice(sub);
+      if (activePrice < charged) {
         splitDetails = {
-          totalPaid: sub.price,
+          totalPaid: charged,
           yourShare: activePrice,
-          friendsShare: Math.max(0, sub.price - activePrice),
+          friendsShare: Math.max(0, charged - activePrice),
           friendNames: 'Friends',
           settled: false,
         };
@@ -278,7 +307,7 @@ function autoPostRecurringExpense(sub: Subscription, renewalDateISO: string): vo
     const noteBase = prevTx?.note ? prevTx.note.replace(/\s*\(Renewal\)$/i, '') : sub.name;
 
     const appCurrency = expenseStore.currency || 'INR';
-    let finalAmount = sub.price || prevTx?.amount || 0;
+    let finalAmount = getChargedPrice(sub) || prevTx?.amount || 0;
     if (sub.currency && appCurrency && sub.currency.toUpperCase() !== appCurrency.toUpperCase()) {
       finalAmount = Math.round(convertCurrency(finalAmount, sub.currency, appCurrency) * 100) / 100;
     }

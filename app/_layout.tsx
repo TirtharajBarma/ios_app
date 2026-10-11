@@ -46,6 +46,8 @@ export default function RootLayout() {
   const router = useRouter();
   const { loadSettings } = useSettingsStore();
   const [isLocked, setIsLocked] = useState(false);
+  // Hides the screen while the app is inactive/in the background so the app-switcher snapshot shows no financial data
+  const [isObscured, setIsObscured] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [biometricLabel, setBiometricLabel] = useState("Unlock");
   const appState = useRef(AppState.currentState);
@@ -191,6 +193,9 @@ export default function RootLayout() {
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (nextAppState) => {
+      if (useSettingsStore.getState().faceIdEnabled) {
+        setIsObscured(nextAppState !== "active");
+      }
       if (
         appState.current === "background" &&
         nextAppState === "active"
@@ -316,6 +321,8 @@ export default function RootLayout() {
         />
       </Stack>
 
+      {isObscured && !isLocked && <View pointerEvents="none" style={styles.privacyCover} />}
+
       {isLocked && (
         <View style={styles.lockOverlay}>
           <View style={styles.lockContent}>
@@ -348,6 +355,11 @@ export default function RootLayout() {
 }
 
 const styles = StyleSheet.create({
+  privacyCover: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: "#111113",
+    zIndex: 99998,
+  },
   lockOverlay: {
     ...StyleSheet.absoluteFill,
     backgroundColor: "#111113",

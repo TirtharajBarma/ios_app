@@ -26,6 +26,7 @@ import { useSubscriptionStore } from "@/store/useSubscriptionStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { getSubscriptionActivePrice, toMonthly } from "@/utils/date";
 import { parseISO, startOfDay } from "date-fns";
+import { convertCurrency } from "@/utils/currency";
 import type { Subscription } from "@/types/subscription";
 
 function AnalyticsScreen() {
@@ -63,12 +64,13 @@ function AnalyticsScreen() {
       (s) =>
         s.isTrial &&
         s.trialEndDate &&
-        startOfDay(parseISO(s.trialEndDate)).getTime() >= nowTime &&
+        startOfDay(parseISO(s.trialEndDate)).getTime() >= startOfDay(new Date(nowTime)).getTime() && // a trial ending today still counts
         parseISO(s.trialEndDate).getTime() - nowTime < 7 * 24 * 60 * 60 * 1000
     );
   }, [subscriptions, nowTime]);
 
-  const hasSubscriptions = subscriptions.length > 0;
+  // Only paused subscriptions means nothing to analyse yet: show the empty state, not a screen of zeros
+  const hasSubscriptions = subscriptions.some((s) => !s.isPaused);
 
   // Global currency from settings
   const router = useRouter();
@@ -82,12 +84,16 @@ function AnalyticsScreen() {
       if (sub.isTrial || sub.isPaused) continue;
       const cat = sub.category ? sub.category.charAt(0).toUpperCase() + sub.category.slice(1) : "Other";
       const activePrice = getSubscriptionActivePrice(sub);
-      const monthly = toMonthly(activePrice, sub.rawBillingCycle || sub.billingCycle, sub.customIntervalMonths);
+      const rawMonthly = toMonthly(activePrice, sub.rawBillingCycle || sub.billingCycle, sub.customIntervalMonths);
+      // Same currency as the totals above
+      const monthly = sub.currency && sub.currency.toUpperCase() !== currencyCode.toUpperCase()
+        ? convertCurrency(rawMonthly, sub.currency, currencyCode)
+        : rawMonthly;
       categoryMap.set(cat, (categoryMap.get(cat) || 0) + monthly);
     }
     const sorted = Array.from(categoryMap.entries()).sort((a, b) => b[1] - a[1]);
     return { categories: sorted, maxCategorySpend: sorted.length > 0 && sorted[0][1] > 0 ? sorted[0][1] : 1 };
-  }, [subscriptions]);
+  }, [subscriptions, currencyCode]);
 
   return (
     <View style={styles.container}>

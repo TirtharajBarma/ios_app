@@ -18,15 +18,28 @@ import {
 } from "date-fns";
 import type { BillingCycle } from "@/types/subscription";
 
-/** Parse an ISO-8601 date string into a Date (UTC noon normalized to prevent timezone backward shifting). */
+/**
+ * Parse an ISO-8601 string into a local Date at noon.
+ * A date-only string ("2026-10-10") is that local calendar day. A full timestamp ("2026-10-09T18:30:00.000Z",
+ * which is how local-midnight renewals are stored) is converted to the local day, so IST shows Oct 10, not Oct 9.
+ */
 export function toDate(iso: string): Date {
   if (!iso) return today();
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
-  if (m) {
-    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12, 0, 0);
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso.trim());
+  if (dateOnly) {
+    return new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]), 12, 0, 0);
   }
   const parsed = parseISO(iso);
-  return startOfDay(parsed);
+  if (isNaN(parsed.getTime())) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+    return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12, 0, 0) : today();
+  }
+  return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate(), 12, 0, 0);
+}
+
+/** "yyyy-MM-dd" of the local calendar day an ISO string refers to (see toDate). */
+export function toLocalDateString(iso: string): string {
+  return format(toDate(iso), "yyyy-MM-dd");
 }
 
 /** Today at local midnight. */

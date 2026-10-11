@@ -317,17 +317,53 @@ async function readPickedFile(): Promise<BackupPayload> {
  * Restores SQLite subscriptions, restores all AsyncStorage keys,
  * and immediately rehydrates live in-memory Zustand stores!
  */
+/** A file that holds no data at all must not wipe the current data. */
+function assertHasUsableData(p: BackupPayload): void {
+  const hasRows = (Array.isArray(p.subscriptions) && p.subscriptions.length > 0) || (Array.isArray(p.transactions) && p.transactions.length > 0);
+  const hasExpense = !!p.expenseData && (((p.expenseData as any).transactions?.length ?? 0) > 0 || ((p.expenseData as any).accounts?.length ?? 0) > 0);
+  const hasAsync = Object.values(p.async ?? {}).some((v) => v !== null && v !== undefined);
+  if (!hasRows && !hasExpense && !hasAsync) {
+    throw new Error("That backup is empty, so nothing was restored.");
+  }
+}
+
+/**
+ * Saves the current data to a file before a restore overwrites it, so a wrong restore can be undone.
+ * Keeps the last 3. A failure here is logged but does not block the restore.
+ */
+async function snapshotBeforeRestore(): Promise<void> {
+  try {
+    const dir = `${FileSystem.documentDirectory}restore-snapshots/`;
+    await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    const payload = await buildBackupPayload();
+    await FileSystem.writeAsStringAsync(`${dir}before-restore-${stamp}.json`, JSON.stringify(payload), {
+      encoding: FileSystem.EncodingType.UTF8,
+    });
+    const files = (await FileSystem.readDirectoryAsync(dir)).filter((f) => f.startsWith("before-restore-")).sort();
+    for (const old of files.slice(0, Math.max(0, files.length - 3))) {
+      await FileSystem.deleteAsync(`${dir}${old}`, { idempotent: true }).catch(() => {});
+    }
+  } catch (e) {
+    console.warn("Could not save a pre-restore snapshot:", e);
+  }
+}
+
 export async function importBackup(): Promise<BackupSummary> {
   const payload = await readPickedFile();
+  assertHasUsableData(payload);
+  await snapshotBeforeRestore();
   const db = getDatabase();
 
   // 1. Restore SQLite subscriptions & subscription logs safely
   await db.runAsync("PRAGMA foreign_keys = OFF;").catch(() => {});
   try {
     await db.withExclusiveTransactionAsync(async () => {
-      // Clear dependent tables first
-      await db.runAsync("DELETE FROM transactions;");
-      await db.runAsync("DELETE FROM subscriptions;");
+      // Only replace a table when the backup actually has rows for it; an empty or missing list leaves current data alone
+      const hasSubs = Array.isArray(payload.subscriptions) && payload.subscriptions.length > 0;
+      const hasTxs = Array.isArray(payload.transactions) && payload.transactions.length > 0;
+      if (hasTxs || hasSubs) await db.runAsync("DELETE FROM transactions;");
+      if (hasSubs) await db.runAsync("DELETE FROM subscriptions;");
 
       if (Array.isArray(payload.subscriptions)) {
         for (const row of payload.subscriptions) {

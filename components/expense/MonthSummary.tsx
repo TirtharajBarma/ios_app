@@ -8,6 +8,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { expenseColors } from '@/constants/expenseColors';
 import { ExpenseCategory } from '@/types/expense';
 import { CategoryIcon } from './CategoryIcon';
+import { AnimatedAmountText } from '@/components/motion/AnimatedAmountText';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -346,22 +347,24 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
                   : 'Balance at month end'}
               </AppText>
 
-              <AppText
+              {/* Rolls to the new figure when it changes in place (e.g. an expense is added); jumps on month/mode switch */}
+              <AnimatedAmountText
                 numberOfLines={1}
                 style={[
                   styles.balanceAmount,
                   isBudgetMode && effectiveBudget > 0 && remainingBudget < 0 && styles.negativeAmount,
                   !isBudgetMode && totalBalance < 0 && styles.negativeAmount,
                 ]}
-              >
-                {isBudgetMode
-                  ? effectiveBudget > 0
-                    ? remainingBudget < 0
-                      ? formatAmount(Math.abs(remainingBudget))
-                      : formatAmount(remainingBudget)
-                    : formatAmount(totalSpent)
-                  : formatAmount(totalBalance)}
-              </AppText>
+                value={
+                  isBudgetMode
+                    ? effectiveBudget > 0
+                      ? Math.abs(remainingBudget)
+                      : totalSpent
+                    : totalBalance
+                }
+                format={formatAmount}
+                resetKey={`${isBudgetMode ? 'b' : 't'}-${selectedMonth}`}
+              />
 
               {/* Symmetrical Context Badges Row (Same height, zero jump) */}
               <View style={styles.chipsRowContainer}>

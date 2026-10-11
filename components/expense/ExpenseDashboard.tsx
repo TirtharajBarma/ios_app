@@ -21,6 +21,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { expenseColors } from '@/constants/expenseColors';
 import { ExpenseHeader } from './ExpenseHeader';
 import { MonthSummary } from './MonthSummary';
+import { CoachInsightCard } from './CoachInsightCard';
 import { MoneyFlowCard } from './MoneyFlowCard';
 import { SavingsGoalsPill } from './SavingsGoalsPill';
 import { BudgetCard } from './BudgetCard';
@@ -215,6 +216,9 @@ export const ExpenseDashboard: React.FC = () => {
           />
           <MonthSummary onCategorySelect={handleCategorySelect} />
         </Animated.View>
+
+        {/* The one quiet coach line; renders nothing unless there is something worth saying */}
+        {transactions.length > 0 && <CoachInsightCard />}
 
         {/* First-Time User Onboarding Guide Checklist */}
         {transactions.length === 0 && !dismissOnboarding && (

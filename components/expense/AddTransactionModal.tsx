@@ -47,6 +47,7 @@ import * as Haptics from 'expo-haptics';
 import { AppText, NativeLiquidMenu } from '@/components/ui';
 import type { MenuAction } from '@/components/ui';
 import { useExpenseStore, getUserCategories, monthKeyOf } from '@/store/useExpenseStore';
+import { parseAmountInput } from '@/utils/amount';
 import { useShallow } from 'zustand/react/shallow';
 import { useSubscriptionStore } from '@/store/useSubscriptionStore';
 import { createExpense } from '@/services/expense/createExpense';
@@ -484,16 +485,20 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   }, []);
 
   // Auto-calculate friend share
-  const numAmount = parseFloat(amount) || 0;
-  const numYourShare = parseFloat(yourShare) || (numAmount > 0 ? Math.round(numAmount / 2) : 0);
+  const numAmount = parseAmountInput(amount);
+  // An explicit "0" share is valid (the other people pay it all); only a blank falls back to an even split
+  const numYourShare =
+    yourShare.trim() !== ''
+      ? parseAmountInput(yourShare)
+      : numAmount > 0 ? Math.round((numAmount * 100) / 2) / 100 : 0;
   const totalFriendsEntered = splitFriends.reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0);
   const friendsShare = totalFriendsEntered > 0 ? totalFriendsEntered : Math.max(0, numAmount - numYourShare);
 
   const handleAmountChange = (text: string) => {
     setAmount(text);
-    const parsed = parseFloat(text);
-    if (!isNaN(parsed) && parsed > 0 && isSplitEnabled && !yourShare) {
-      setYourShare(Math.round(parsed / 2).toString());
+    const parsed = parseAmountInput(text);
+    if (parsed > 0 && isSplitEnabled && !yourShare) {
+      setYourShare((Math.round((parsed * 100) / 2) / 100).toString());
     }
   };
 
@@ -733,7 +738,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
     setNewPresetAmount('');
   };
 
-  const handleSave = async () => {
+  const handleSaveInner = async () => {
     if (isNaN(numAmount) || numAmount <= 0) {
       Alert.alert('Invalid Amount', 'Please enter a valid amount.');
       return;
@@ -1057,6 +1062,18 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
 
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     onClose();
+  };
+
+  // One save at a time: a second tap while saving must not create duplicate transactions or subscriptions
+  const savingRef = useRef(false);
+  const handleSave = async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    try {
+      await handleSaveInner();
+    } finally {
+      savingRef.current = false;
+    }
   };
 
   const userExpenseCategories = getUserCategories(categories);
