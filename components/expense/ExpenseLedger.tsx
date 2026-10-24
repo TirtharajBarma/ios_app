@@ -51,6 +51,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { expenseColors } from '@/constants/expenseColors';
 import { ExpenseTransaction, ExpenseCategory } from '@/types/expense';
 import { formatMoney } from '@/utils/currency';
+import { parseTxDate } from '@/utils/localDate';
 import { CategoryIcon } from './CategoryIcon';
 import { AccountIcon } from './AccountIcon';
 import { AddTransactionModal, INCOME_CATEGORIES } from './AddTransactionModal';
@@ -308,7 +309,10 @@ export const ExpenseLedger: React.FC = () => {
   const filteredTxs = useMemo(() => {
     let list = getFilteredTransactions();
     if (selectedCategoryFilter !== 'All') {
-      list = list.filter((t) => t.categoryId === selectedCategoryFilter);
+      list = list.filter((t) =>
+        t.categoryId === selectedCategoryFilter ||
+        (selectedCategoryFilter === 'cat_split_return' && Boolean(t.settledTxId?.startsWith('split_settle:')))
+      );
     }
     return list;
   }, [transactions, activeAccountFilter, smartSearchQuery, accounts, categories, selectedCategoryFilter]);
@@ -448,7 +452,7 @@ export const ExpenseLedger: React.FC = () => {
   const renderTransactionItem = (tx: ExpenseTransaction, isLast: boolean) => {
     const cat = getCategoryObj(tx.categoryId, tx.type);
     const isSelected = selectedTransactionIds.includes(tx.id);
-    const formattedDate = new Date(tx.date).toLocaleDateString('en-US', {
+    const formattedDate = parseTxDate(tx.date).toLocaleDateString('en-US', {
       day: 'numeric',
       month: 'short',
     });
@@ -548,7 +552,11 @@ export const ExpenseLedger: React.FC = () => {
       ? (splitIsAllSettled ? styles.rowSettledBg : styles.rowSplitBg)
       : null;
 
-    const isSplitReturn = cat.id === 'cat_split_return' || cat.name?.toLowerCase().includes('split recovery');
+    const isSplitReturn =
+      cat.id === 'cat_split_return' ||
+      cat.name?.toLowerCase().includes('split recovery') ||
+      cat.name?.toLowerCase().includes('split received') ||
+      Boolean(tx.settledTxId?.startsWith('split_settle:'));
     const isDebtRepayment = cat.id === 'cat_debt_repayment' || cat.name?.toLowerCase().includes('debt repayment');
 
     const { displayTitle, displayContext } = (() => {
@@ -586,8 +594,27 @@ export const ExpenseLedger: React.FC = () => {
       // 3. Explicit Merchant field
       if (tx.merchant && tx.merchant.trim()) {
         const isAutoTracked = tx.note?.startsWith('Auto-tracked');
+        const merchantTrim = tx.merchant.trim();
+
+        // Support dot separator in merchant field as well: "From Aditi · Youtube"
+        const matchDotReason = /^From (.+?)\s*·\s*(.+)$/i.exec(merchantTrim);
+        if (matchDotReason) {
+          return {
+            displayTitle: matchDotReason[1].trim().toUpperCase(),
+            displayContext: matchDotReason[2].trim().toUpperCase(),
+          };
+        }
+
+        const matchFromSimple = /^From (.+)$/i.exec(merchantTrim);
+        if (matchFromSimple && (isSplitReturn || isDebtRepayment || isSettled)) {
+          return {
+            displayTitle: matchFromSimple[1].trim().toUpperCase(),
+            displayContext: !isAutoTracked && tx.note && tx.note.trim() ? tx.note.trim().toUpperCase() : null,
+          };
+        }
+
         return {
-          displayTitle: tx.merchant.trim().toUpperCase(),
+          displayTitle: merchantTrim.toUpperCase(),
           displayContext: !isAutoTracked && tx.note && tx.note.trim() ? tx.note.trim().toUpperCase() : null,
         };
       }
@@ -2272,6 +2299,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.2,
     marginBottom: 3,
+    flexShrink: 1,
   },
   badgeRow: {
     flexDirection: 'row',
@@ -2398,8 +2426,7 @@ const styles = StyleSheet.create({
     color: '#A9DFBF',
   },
   splitReturnPill: {
-    maxWidth: '100%',
-    flexShrink: 1,
+    flexShrink: 0,
     backgroundColor: 'rgba(169, 223, 191, 0.12)',
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -2442,6 +2469,7 @@ const styles = StyleSheet.create({
     // overflowed on standalone Android builds.
     maxWidth: '100%',
     flexShrink: 1,
+    minWidth: 0,
     backgroundColor: 'rgba(255, 255, 255, 0.07)',
     paddingHorizontal: 7,
     paddingVertical: 2,

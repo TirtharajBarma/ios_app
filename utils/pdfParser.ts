@@ -80,9 +80,13 @@ export function uint8ToLatin1(bytes: Uint8Array): string {
  * Checks if a PDF is password protected / encrypted
  */
 export function isPdfEncrypted(uint8Data: Uint8Array): boolean {
+  // The /Encrypt entry lives in the trailer (end of file) for most PDFs, so scan head and tail
   const scanLen = Math.min(uint8Data.length, 32768);
   let str = '';
   for (let i = 0; i < scanLen; i++) {
+    str += String.fromCharCode(uint8Data[i]);
+  }
+  for (let i = Math.max(scanLen, uint8Data.length - scanLen); i < uint8Data.length; i++) {
     str += String.fromCharCode(uint8Data[i]);
   }
   return str.includes('/Encrypt') || str.includes('/Filter /Standard');

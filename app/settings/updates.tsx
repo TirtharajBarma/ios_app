@@ -178,10 +178,10 @@ export default function UpdatesScreen() {
                 <View style={styles.updateTitleRow}>
                   <View style={{ flex: 1 }}>
                     <AppText style={styles.heroVersionTitle}>
-                      Monevo {availableRelease?.cleanVersion || 'Update'}
+                      Cashveil {availableRelease?.cleanVersion || 'Update'}
                     </AppText>
                     <AppText style={styles.heroSubText}>
-                      Monevo Inc. · Ready to Install
+                      Cashveil Inc. · Ready to Install
                     </AppText>
                   </View>
                   <View style={styles.badgeSuccess}>
@@ -192,7 +192,7 @@ export default function UpdatesScreen() {
                 <View style={styles.separator} />
 
                 <AppText style={styles.bodyDescription}>
-                  The update has finished downloading and is ready to apply. Restart Monevo to complete the installation.
+                  The update has finished downloading and is ready to apply. Restart Cashveil to complete the installation.
                 </AppText>
 
                 {availableRelease?.notes && availableRelease.notes.length > 0 && (
@@ -233,7 +233,7 @@ export default function UpdatesScreen() {
                 <View style={styles.updateTitleRow}>
                   <View style={{ flex: 1 }}>
                     <AppText style={styles.heroVersionTitle}>
-                      Monevo {availableRelease?.cleanVersion || 'Update'}
+                      Cashveil {availableRelease?.cleanVersion || 'Update'}
                     </AppText>
                     <AppText style={styles.heroSubText}>
                       Downloading update package…
@@ -247,7 +247,7 @@ export default function UpdatesScreen() {
                 </View>
 
                 <AppText style={styles.progressFootnote}>
-                  Please keep Monevo open while files are verified.
+                  Please keep Cashveil open while files are verified.
                 </AppText>
               </View>
             </View>
@@ -263,7 +263,7 @@ export default function UpdatesScreen() {
                       {availableRelease?.version || 'New Build'}
                     </AppText>
                     <AppText style={styles.heroSubText}>
-                      Native Installer Required (.apk / .ipa)
+                      Cashveil Native Release Build (.apk / .ipa)
                     </AppText>
                   </View>
                   <View style={styles.badgeNotice}>
@@ -313,10 +313,10 @@ export default function UpdatesScreen() {
                 <View style={styles.updateTitleRow}>
                   <View style={{ flex: 1 }}>
                     <AppText style={styles.heroVersionTitle}>
-                      Monevo {availableRelease?.cleanVersion || 'Update'}
+                      Cashveil {availableRelease?.cleanVersion || 'Update'}
                     </AppText>
                     <AppText style={styles.heroSubText}>
-                      Monevo Inc. · Over-the-Air Update
+                      Cashveil Inc. · Over-the-Air Update
                     </AppText>
                   </View>
                   <View style={styles.badgeAccent}>
@@ -392,10 +392,10 @@ export default function UpdatesScreen() {
               </View>
 
               <AppText style={styles.upToDateVersionNumber}>
-                Monevo {displayVersion}
+                Cashveil {displayVersion}
               </AppText>
               <AppText style={styles.upToDateStatusLabel}>
-                Monevo is up to date
+                Cashveil is up to date
               </AppText>
               <AppText style={styles.upToDateTimestamp}>
                 Last checked: {formatRelativeTime(lastCheckedAt)}
@@ -626,7 +626,7 @@ export default function UpdatesScreen() {
 
         {/* ── Apple-styled Muted Footer ── */}
         <View style={styles.footerContainer}>
-          <AppText style={styles.footerBrandText}>MONEVO</AppText>
+          <AppText style={styles.footerBrandText}>CASHVEIL</AppText>
           <AppText style={styles.footerAuthorText}>{AUTHOR_CREDIT}</AppText>
         </View>
       </ScrollView>

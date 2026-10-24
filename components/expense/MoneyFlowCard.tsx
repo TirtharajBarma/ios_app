@@ -5,8 +5,11 @@ import { ArrowDownLeft, ArrowUpRight, TrendingUp, Sparkles, Flame, X } from 'luc
 import * as Haptics from 'expo-haptics';
 import { AppText } from '@/components/ui';
 import { useExpenseStore, isInMonth, monthKeyToYearMonth } from '@/store/useExpenseStore';
+import { useSubscriptionStore } from '@/store/useSubscriptionStore';
+import { getUpcomingFixedSubscriptions, isFixedCommitmentCategory } from '@/utils/coachInsight';
 import { useShallow } from 'zustand/react/shallow';
 import { expenseColors } from '@/constants/expenseColors';
+import { parseTxDate } from '@/utils/localDate';
 
 export const formatCompactCurrency = (amount: number, symbol: string = '₹'): string => {
   if (amount === 0) return `${symbol}0`;
@@ -46,28 +49,33 @@ export const MoneyFlowCard: React.FC = () => {
   selectedMonth,
   monthlyBudget,
   categoryBudgets,
+  categories,
+  currencyCode,
   getTotalIncome,
   getTotalSpent,
   updateTransaction,
 } = useExpenseStore(
   useShallow((s) => ({
     currencySymbol: s.currencySymbol,
+    currencyCode: s.currencyCode,
     transactions: s.transactions,
     selectedMonth: s.selectedMonth,
     monthlyBudget: s.monthlyBudget,
     categoryBudgets: s.categoryBudgets,
+    categories: s.categories,
     getTotalIncome: s.getTotalIncome,
     getTotalSpent: s.getTotalSpent,
     updateTransaction: s.updateTransaction,
   }))
 );
 
+  const subscriptions = useSubscriptionStore((s) => s.subscriptions);
   const sym = currencySymbol || '₹';
 
   const { year, month } = useMemo(() => monthKeyToYearMonth(selectedMonth), [selectedMonth]);
 
-  const totalIncome = getTotalIncome();
-  const totalSpent = getTotalSpent();
+  const totalIncome = getTotalIncome(selectedMonth);
+  const totalSpent = getTotalSpent(selectedMonth);
 
   const priorMonthUnallocatedSalary = useMemo(() => {
     if (totalIncome > 0) return null;
@@ -123,7 +131,20 @@ export const MoneyFlowCard: React.FC = () => {
       ? monthlyBudget
       : Object.values(categoryBudgets || {}).reduce((sum, v) => sum + (v > 0 ? v : 0), 0);
   const daysInSelectedMonth = new Date(year, month + 1, 0).getDate();
-  const averageDailyLimit = effectiveBudget > 0 ? Math.round(effectiveBudget / daysInSelectedMonth) : 1000;
+  const averageDailyLimit = effectiveBudget > 0 ? Math.round(effectiveBudget / daysInSelectedMonth) : 0; // no budget: no daily limit, no streak
+
+  const now = new Date();
+  const isCurMonth = year === now.getFullYear() && month === now.getMonth();
+  const currentDay = isCurMonth ? now.getDate() : daysInSelectedMonth;
+  const daysRemaining = isCurMonth ? Math.max(1, daysInSelectedMonth - currentDay + 1) : 0;
+  const upcomingFixed = isCurMonth
+    ? getUpcomingFixedSubscriptions(subscriptions, now, currencyCode || 'INR')
+    : 0;
+  const budgetRunway = Math.max(0, effectiveBudget - totalSpent);
+  const netBudgetRunway = Math.max(0, budgetRunway - upcomingFixed);
+  const safeDailyPace = effectiveBudget > 0 && daysRemaining > 0
+    ? Math.max(0, Math.round(netBudgetRunway / daysRemaining))
+    : 0;
 
   // Streak Calculation
   const streakDays = useMemo(() => {
@@ -143,7 +164,12 @@ export const MoneyFlowCard: React.FC = () => {
 
     let anyExpense = false;
     transactions
-      .filter((t) => t.type === 'expense' && t.categoryId !== 'cat_debt_repayment')
+      .filter((t) => {
+        if (t.type !== 'expense' || t.categoryId === 'cat_debt_repayment') return false;
+        const cat = categories.find((c) => c.id === t.categoryId);
+        if (isFixedCommitmentCategory(cat)) return false;
+        return true;
+      })
       .forEach((t) => {
         const parts = t.date.match(/^(\d{4})-(\d{2})-(\d{2})/);
         if (parts) {
@@ -263,7 +289,7 @@ export const MoneyFlowCard: React.FC = () => {
             <View style={styles.allocateLeft}>
               <Sparkles size={12} color={pastelColors.mint} />
               <AppText style={styles.allocateText} numberOfLines={1}>
-                {sym}{priorMonthUnallocatedSalary.amount.toLocaleString('en-IN')} on {new Date(priorMonthUnallocatedSalary.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                {sym}{priorMonthUnallocatedSalary.amount.toLocaleString('en-IN')} on {parseTxDate(priorMonthUnallocatedSalary.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
               </AppText>
             </View>
             <TouchableOpacity
@@ -328,7 +354,7 @@ export const MoneyFlowCard: React.FC = () => {
               <View style={styles.breakdownRow}>
                 <AppText style={styles.breakdownLabel}>Monthly Budget</AppText>
                 <AppText style={styles.breakdownVal}>
-                  {monthlyBudget > 0 ? `${sym}${monthlyBudget.toLocaleString('en-IN')}` : 'Not set'}
+                  {monthlyBudget > 0 ? `${sym} ${monthlyBudget.toLocaleString('en-IN')}` : 'Not set'}
                 </AppText>
               </View>
 
@@ -336,32 +362,40 @@ export const MoneyFlowCard: React.FC = () => {
 
               <View style={styles.breakdownRow}>
                 <View>
-                  <AppText style={styles.breakdownLabel}>Daily Allowance</AppText>
+                  <AppText style={styles.breakdownLabel}>Day-1 Baseline Target</AppText>
                   <AppText style={styles.breakdownFormula}>
-                    {effectiveBudget > 0 ? `${sym}${effectiveBudget.toLocaleString('en-IN')} ÷ ${daysInSelectedMonth} days` : 'Default baseline'}
+                    {effectiveBudget > 0 ? `${sym} ${effectiveBudget.toLocaleString('en-IN')} ÷ ${daysInSelectedMonth} days` : 'Default baseline'}
+                  </AppText>
+                </View>
+                <AppText style={styles.breakdownVal}>
+                  {sym} {averageDailyLimit.toLocaleString('en-IN')}/day
+                </AppText>
+              </View>
+
+              <View style={styles.breakdownDivider} />
+
+              <View style={styles.breakdownRow}>
+                <View>
+                  <AppText style={styles.breakdownLabel}>Today's Safe Pace</AppText>
+                  <AppText style={styles.breakdownFormula}>
+                    {isCurMonth && safeDailyPace > 0
+                      ? `${daysRemaining} days left • bills reserved`
+                      : 'Active month pace'}
                   </AppText>
                 </View>
                 <AppText style={styles.breakdownValHighlight}>
-                  {sym}{averageDailyLimit.toLocaleString('en-IN')}/day
-                </AppText>
-              </View>
-
-              <View style={styles.breakdownDivider} />
-
-              <View style={styles.breakdownRow}>
-                <View>
-                  <AppText style={styles.breakdownLabel}>Daily Grace Limit</AppText>
-                  <AppText style={styles.breakdownFormula}>125% buffer for small spikes</AppText>
-                </View>
-                <AppText style={styles.breakdownVal}>
-                  {sym}{Math.round(averageDailyLimit * 1.25).toLocaleString('en-IN')}/day
+                  {isCurMonth && safeDailyPace > 0
+                    ? `${sym} ${safeDailyPace.toLocaleString('en-IN')}/day`
+                    : `${sym} ${averageDailyLimit.toLocaleString('en-IN')}/day`}
                 </AppText>
               </View>
             </View>
 
             {/* Explanatory Rule Note */}
             <AppText style={styles.modalFooterNote}>
-              Each consecutive day your total spending stays under {sym}{Math.round(averageDailyLimit * 1.25).toLocaleString('en-IN')} adds +1 to your streak. Spending over this limit resets it.
+              {isCurMonth && safeDailyPace > 0 && safeDailyPace < averageDailyLimit
+                ? `You've kept a ${streakDays}-day streak of disciplined daily spending! Earlier expenses used most of this month's budget, so aim for ${sym} ${safeDailyPace.toLocaleString('en-IN')}/day to keep your streak and budget intact.`
+                : `Each consecutive day your total spending stays under ${sym} ${Math.round(averageDailyLimit * 1.25).toLocaleString('en-IN')} adds +1 to your streak. Spending over this limit resets it.`}
             </AppText>
 
             {/* Action Button */}

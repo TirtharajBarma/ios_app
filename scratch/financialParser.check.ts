@@ -18,6 +18,8 @@ const cases: [string, Exp][] = [
   ['Payment of Rs.2000 due on 15th for card XX1234', { fin: false }],
   ['Your a/c XX1234 balance is Rs 5,000.00. Debit card used at ATM', { fin: false }],
   ['Rs 1,200.00 debited from a/c XX1234. Info: UPI-ZOMATO-123. Avl Bal INR 5,000.00', { fin: true, type: 'expense', amount: 1200, merchant: /^zomato$/i }],
+  ['Transaction of Rs 500 credited to a/c XX1234', { fin: true, type: 'income', amount: 500 }],
+  ['Rs 300 spent at STARBUCKS', { fin: true, type: 'expense', amount: 300, merchant: /^starbucks$/i }],
 ];
 
 let bad = 0;

@@ -121,9 +121,10 @@ export function parseFinancialText(
     } else if (/\b(?:debited\s+from|spent\s+on|paid\s+to|charged\s+to)\b/i.test(cleanText)) {
       type = 'expense';
     } else {
-      const debitIdx = cleanText.search(/\b(debited|spent|paid|withdrawn|transferred|txn|tranx|swiped)\b/i);
+      // "txn"/"transaction" are nouns, not directions: only real verbs take part in the tie-break
+      const debitIdx = cleanText.search(/\b(debited|spent|paid|withdrawn|transferred|swiped)\b/i);
       const creditIdx = cleanText.search(/\b(credited|received|deposited)\b/i);
-      type = debitIdx < creditIdx ? 'expense' : 'income';
+      type = debitIdx < 0 ? 'income' : creditIdx < 0 ? 'expense' : debitIdx < creditIdx ? 'expense' : 'income';
     }
   } else {
     // Neither debit nor credit found
@@ -215,11 +216,11 @@ export function parseFinancialText(
       // "by UPI/Swiggy" or "towards UPI/swiggy@icici" or "UPI/P2M/123/Swiggy"
       /(?:towards|by|via)\s+upi\/(?:[A-Za-z0-9_]+\/)?([A-Za-z0-9\s&'.-]{2,25})/i,
       // "at STARBUCKS", "for AMAZON", "merchant ZOMATO"
-      /(?:at|for|merchant)\s+([A-Za-z0-9\s&'.-]{2,30}?)(?:\s+(?:on|via|ref|upi|bal|available|\.|\band\b|$))/i,
+      /(?:at|for|merchant)\s+([A-Za-z0-9\s&'.-]{2,30}?)(?:\s+(?:on|via|ref|upi|bal|available|\.|\band\b)|$)/i,
       // "paid to STARBUCKS", "transferred to JOHN", "sent to RAMESH"
-      /(?:paid\s+to|transfer(?:red)?\s+to|sent\s+to)\s+([A-Za-z0-9\s&'.-]{2,30}?)(?:\s+(?:on|via|ref|upi|bal|available|at|\.|\band\b|$))/i,
+      /(?:paid\s+to|transfer(?:red)?\s+to|sent\s+to)\s+([A-Za-z0-9\s&'.-]{2,30}?)(?:\s+(?:on|via|ref|upi|bal|available|at|\.|\band\b)|$)/i,
       // "to STARBUCKS"
-      /\bto\s+([A-Za-z0-9\s&'.-]{2,30}?)(?:\s+(?:on|via|ref|upi|bal|available|at|\.|\band\b|$))/i,
+      /\bto\s+([A-Za-z0-9\s&'.-]{2,30}?)(?:\s+(?:on|via|ref|upi|bal|available|at|\.|\band\b)|$)/i,
       // "info: POS 1234 STARBUCKS"
       /(?:info[:\s]+)([A-Za-z0-9\s&'.-]{2,30})/i,
     ];

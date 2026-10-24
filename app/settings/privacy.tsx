@@ -204,7 +204,7 @@ export default function PrivacyScreen() {
             100% Private, On-Device Financial Intelligence
           </AppText>
           <AppText variant="footnote" color={colors.textMuted} style={{ lineHeight: 18 }}>
-            Your bank statements, account balances, transaction records, and personal budgets are processed and stored exclusively on your device. We do not operate remote servers for financial storage.
+            Cashveil processes and stores your bank statements, account balances, transaction records, and personal budgets exclusively on your device. We do not operate remote servers for financial storage.
           </AppText>
         </View>
 
@@ -218,7 +218,7 @@ export default function PrivacyScreen() {
               icon={<Fingerprint size={18} color="#fff" />}
               iconBg="#9DC6EB"
               label={authType}
-              description={`Require ${authType} to unlock the app when opened`}
+              description={`Require ${authType} to unlock Cashveil when opened`}
               statusText={faceIdStatus}
               statusColor={faceIdColor}
               value={faceIdEnabled}
@@ -309,6 +309,16 @@ export default function PrivacyScreen() {
           </View>
           <AppText variant="caption2" color={colors.textMuted} style={styles.footnote}>
             Analytics and crash reports never include transaction details, account numbers, notes, or balances.
+          </AppText>
+        </View>
+
+        {/* Brand Footer */}
+        <View style={{ alignItems: "center", marginTop: spacing[12], marginBottom: spacing[8] }}>
+          <AppText variant="caption1" weight="700" color={colors.textMuted} style={{ letterSpacing: 1.2 }}>
+            CASHVEIL
+          </AppText>
+          <AppText variant="caption2" color={colors.textMuted} style={{ marginTop: 2 }}>
+            100% On-Device Financial Intelligence & Privacy
           </AppText>
         </View>
       </ScrollView>

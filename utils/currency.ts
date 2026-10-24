@@ -132,10 +132,11 @@ export function convertCurrency(
   if (src === dst) return amount;
 
   const rateTable = { ...FALLBACK_EXCHANGE_RATES, ...(rates || {}) };
-  const fromRate = rateTable[src] ?? FALLBACK_EXCHANGE_RATES[src] ?? 1.0;
-  const toRate = rateTable[dst] ?? FALLBACK_EXCHANGE_RATES[dst] ?? 1.0;
+  const fromRate = rateTable[src];
+  const toRate = rateTable[dst];
 
-  if (fromRate <= 0) return amount;
+  // Unknown currency: return the original amount unconverted (never invent a 1:1 rate)
+  if (!fromRate || !toRate || fromRate <= 0 || toRate <= 0) return amount;
 
   // Convert source -> USD -> destination
   const amountInUSD = amount / fromRate;
@@ -197,9 +198,9 @@ export function formatMoney(
     return options?.showCurrency !== false ? `${symbol}0` : "0";
   }
 
-  const isNegative = amount < 0;
   const absAmount = Math.abs(amount);
   const rounded = Math.round((absAmount + Number.EPSILON) * 100) / 100;
+  const isNegative = amount < 0 && rounded > 0; // no "-₹0" for tiny negatives
 
   const isWhole = rounded % 1 === 0;
   const locale = options?.locale || (symbol === "₹" || symbol === "INR" ? "en-IN" : "en-US");

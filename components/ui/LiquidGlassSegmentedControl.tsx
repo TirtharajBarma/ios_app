@@ -28,7 +28,7 @@ export interface LiquidGlassSegmentedControlProps<T extends string = string> {
   onValueChange: (value: T) => void;
   /** Optional outer container style overrides */
   style?: StyleProp<ViewStyle>;
-  /** Accent tint color for the active indicator (defaults to Monevo brand peach #FF9D66) */
+  /** Accent tint color for the active indicator (defaults to Cashveil brand peach #FF9D66) */
   tintColor?: string;
   /** Background glow color for the active indicator */
   indicatorGlowColor?: string;
@@ -40,7 +40,7 @@ export interface LiquidGlassSegmentedControlProps<T extends string = string> {
  * Implements Apple Native Hardware Liquid Glass matching the bottom tab bar:
  * - iOS UIKit `systemMaterialDark` Metal frosted glass blur via Expo Blur
  * - 120fps hardware-accelerated spring sliding indicator pill
- * - Monevo navbar brand peach luminescence (`rgba(255, 157, 102, 0.18)`)
+ * - Cashveil navbar brand peach luminescence (`rgba(255, 157, 102, 0.18)`)
  * - Native iOS tactile selection haptic feedback (`Haptics.selectionAsync()`)
  */
 export const LiquidGlassSegmentedControl = <T extends string = string>({

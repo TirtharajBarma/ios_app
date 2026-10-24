@@ -125,7 +125,7 @@ export async function sendTestNotification(): Promise<boolean> {
 
     await Notifications.scheduleNotificationAsync({
       content: {
-        title: "🔔 Monevo Notification Test",
+        title: "🔔 Cashveil Notification Test",
         body: "Notifications are working perfectly! You will receive daily check-ins and bill reminders on schedule.",
         sound: true,
         ...(Platform.OS === "android" ? { channelId: EXPENSE_CHANNEL } : {}),

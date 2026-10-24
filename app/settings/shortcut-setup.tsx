@@ -36,6 +36,7 @@ const SAVE_STEPS = [
   "Tap the Search bar or scroll to the App section, and look for “Add Expense”.",
   "Tap “Add Expense” (or long-press and select “Add to Shortcuts”) to add it to your Shortcuts list.",
   "Once it appears under “My Shortcuts”, iOS Back Tap can recognize and run it.",
+  "Leave the Category slot empty (or set it to “Ask Each Time”) so the list always shows your current categories. If it looks out of date, delete the “Add Expense” action and add it again.",
 ];
 
 const BACK_TAP_STEPS = [

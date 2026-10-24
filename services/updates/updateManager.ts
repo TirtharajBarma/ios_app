@@ -927,7 +927,7 @@ export function useAppUpdateManager(): AppUpdateInfo {
   // Contact Admin via WhatsApp
   const handleContactAdmin = useCallback(async (targetVersion?: string) => {
     const ver = targetVersion || availableRelease?.version || activeVersion;
-    const msg = `Hey ${ADMIN_NAME}! I saw a new native build (${ver}) for Monevo is available. Could you please share the new APK / IPA installer? Thanks!`;
+    const msg = `Hey ${ADMIN_NAME}! I saw a new native build (${ver}) for Cashveil is available. Could you please share the new APK / IPA installer? Thanks!`;
     const encoded = encodeURIComponent(msg);
     const whatsappAppUrl = `whatsapp://send?text=${encoded}`;
     const webFallbackUrl = `https://api.whatsapp.com/send?text=${encoded}`;

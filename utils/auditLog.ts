@@ -27,7 +27,9 @@ export type AuditScope =
   | "import"
   | "security"
   | "database"
-  | "system";
+  | "system"
+  | "calculation"
+  | "settlement";
 
 export interface AuditLogEntry {
   id: string;
@@ -65,27 +67,76 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+/** Formats timestamp to full Indian Standard Time (IST, UTC+05:30) */
+export function formatIstTimestamp(isoOrDate: string | Date | number): string {
+  try {
+    const date = typeof isoOrDate === "string" || typeof isoOrDate === "number" ? new Date(isoOrDate) : isoOrDate;
+    if (isNaN(date.getTime())) return String(isoOrDate);
+    const formatter = new Intl.DateTimeFormat("en-IN", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: true,
+    });
+    return `${formatter.format(date)} IST`;
+  } catch {
+    return typeof isoOrDate === "string" ? isoOrDate : new Date(isoOrDate).toISOString();
+  }
+}
+
+/** Formats timestamp to compact Indian Standard Time (IST, UTC+05:30) for log row cards */
+export function formatIstShortTime(isoOrDate: string | Date | number): string {
+  try {
+    const date = typeof isoOrDate === "string" || typeof isoOrDate === "number" ? new Date(isoOrDate) : isoOrDate;
+    if (isNaN(date.getTime())) return String(isoOrDate);
+    const formatter = new Intl.DateTimeFormat("en-IN", {
+      timeZone: "Asia/Kolkata",
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+    return `${formatter.format(date)} IST`;
+  } catch {
+    return typeof isoOrDate === "string" ? isoOrDate : new Date(isoOrDate).toISOString();
+  }
+}
+
 // ── Secret redaction (logs are local, but never trust the input) ──────
 const SECRET_KEY_RE = /(password|passwd|secret|token|apikey|api[_-]?key|auth|authorization|authorisation|cookie|session|cvv|cvc|private[_-]?key|access[_-]?key|supabase.*key)/i;
 const CARD_RE = /\b(?:\d[ -]?){13,19}\b/g;
 const SECRET_HINT_RE = /(Bearer\s+|Basic\s+|sk-[A-Za-z0-9]+|eyJ[A-Za-z0-9_-]{10,})/g;
 
+// key=value / key: value / "key":"value" secrets inside free text (URLs, error messages, JSON strings).
+const KV_SECRET_RE = /\b(access_token|refresh_token|id_token|apikey|api_key|password|secret)(["']?\s*[=:]\s*["']?)[^\s&"',;]+/gi;
+
 function redactString(value: string): string {
   return value
     .replace(SECRET_HINT_RE, (m) => (m.startsWith("Bearer") || m.startsWith("Basic") ? "[REDACTED]" : "[REDACTED]"))
+    .replace(KV_SECRET_RE, (_m, k: string, sep: string) => `${k}${sep}[REDACTED]`)
     .replace(CARD_RE, "[REDACTED_CARD]");
 }
 
 function sanitizeValue(value: unknown): unknown {
   if (value === null || value === undefined) return value;
-  if (typeof value === "string") return redactString(value);
+  if (typeof value === "string") {
+    // Keep disk footprint lean: truncate any massive payload strings to 500 chars
+    const compactStr = value.length > 500 ? value.slice(0, 500) + "… [TRUNCATED]" : value;
+    return redactString(compactStr);
+  }
   if (value instanceof Error) {
     return {
       name: value.name,
       message: redactString(value.message),
     };
   }
-  if (Array.isArray(value)) return value.map(sanitizeValue);
+  if (Array.isArray(value)) return value.slice(0, 30).map(sanitizeValue);
   if (typeof value === "object") {
     const out: Record<string, unknown> = {};
     for (const key of Object.keys(value as Record<string, unknown>)) {
@@ -153,8 +204,8 @@ function queueWrite(entry: AuditLogEntry): void {
         entry.meta
       );
       writeCounter += 1;
-      // Prune roughly every 75 writes (cheap: avoids unbounded growth).
-      if (writeCounter % 75 === 0) {
+      // Prune roughly every 50 writes (cheap: avoids unbounded growth).
+      if (writeCounter % 50 === 0) {
         await pruneOverflow(db);
       }
     } catch {
@@ -183,6 +234,7 @@ export async function initAuditLogs(): Promise<void> {
   initPromise = (async () => {
     const db = await SQLite.openDatabaseAsync(DB_NAME);
     await db.execAsync(`
+      PRAGMA journal_mode = WAL;
       CREATE TABLE IF NOT EXISTS app_logs (
         id TEXT PRIMARY KEY,
         ts TEXT NOT NULL,
@@ -350,11 +402,99 @@ export async function exportAuditLogsText(limit = 5000): Promise<string> {
     );
     const lines = rows.map((r) => {
       const meta = r.meta ? `  ${r.meta}` : "";
-      return `[${r.ts}] ${r.level.toUpperCase()} ${r.scope}  ${r.message}${meta}`;
+      return `[${formatIstTimestamp(r.ts)}] [${r.ts}] ${r.level.toUpperCase()} [${r.scope}] ${r.message}${meta}`;
     });
     return lines.join("\n");
   } catch {
     return "Audit log is unavailable.";
+  }
+}
+
+export interface ExportAuditLogJsonOptions {
+  level?: AuditLevel;
+  scope?: AuditScope | string;
+  query?: string;
+  limit?: number;
+}
+
+/** Renders filtered logs (or all logs) as structured JSON with IST timestamps and parsed metadata */
+export async function exportAuditLogsJson(options?: ExportAuditLogJsonOptions): Promise<string> {
+  const db = await ensureReady();
+  if (!db) {
+    return JSON.stringify({ error: "Audit log database is unavailable" }, null, 2);
+  }
+
+  const where: string[] = [];
+  const params: (string | number)[] = [];
+  if (options?.level) {
+    where.push("level = ?");
+    params.push(options.level);
+  }
+  if (options?.scope) {
+    where.push("scope = ?");
+    params.push(options.scope);
+  }
+  if (options?.query && options.query.trim()) {
+    where.push("(message LIKE ? OR meta LIKE ? OR scope LIKE ?)");
+    const q = `%${options.query.trim()}%`;
+    params.push(q, q, q);
+  }
+
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const limit = Math.min(Math.max(options?.limit ?? 5000, 1), 5000);
+
+  try {
+    const rows = await db.getAllAsync<AuditLogEntry>(
+      `SELECT id, ts, level, scope, message, meta FROM app_logs
+       ${whereSql} ORDER BY ts DESC, id DESC LIMIT ${limit};`,
+      ...params
+    );
+
+    const now = new Date();
+    const formattedRows = rows.map((r) => {
+      let parsedMeta: unknown = null;
+      if (r.meta) {
+        try {
+          parsedMeta = JSON.parse(r.meta);
+        } catch {
+          parsedMeta = r.meta;
+        }
+      }
+      return {
+        id: r.id,
+        timestamp_utc: r.ts,
+        timestamp_ist: formatIstTimestamp(r.ts),
+        level: r.level,
+        scope: r.scope,
+        message: r.message,
+        meta: parsedMeta,
+      };
+    });
+
+    const exportPayload = {
+      app: "Cashveil Financial Ledger",
+      exported_at_utc: now.toISOString(),
+      exported_at_ist: formatIstTimestamp(now),
+      filter: {
+        level: options?.level || "all",
+        scope: options?.scope || "all",
+        query: options?.query || null,
+        limit,
+      },
+      total_exported: formattedRows.length,
+      logs: formattedRows,
+    };
+
+    return JSON.stringify(exportPayload, null, 2);
+  } catch (err) {
+    return JSON.stringify(
+      {
+        error: "Failed to export audit logs",
+        details: err instanceof Error ? err.message : String(err),
+      },
+      null,
+      2
+    );
   }
 }
 

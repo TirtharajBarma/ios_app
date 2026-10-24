@@ -1,5 +1,6 @@
 import { getDatabase } from "./connection";
 import type { DbSubscription } from "./schema";
+import { toLocalDateString } from "@/utils/date";
 
 /**
  * Creates a new subscription in the database.
@@ -234,7 +235,38 @@ export async function createTransaction(tx: {
     await db.runAsync(sql, tx.id, tx.subscriptionId, tx.amount, tx.currency, tx.date, now);
   } catch (error) {
     console.error("Database: Failed to write transaction record", error);
+    throw error;
   }
+}
+
+/** Payment rows of a subscription whose calendar day (YYYY-MM-DD, local or stored) equals `day`. */
+async function findPaymentRowsOnDay(subscriptionId: string, day: string): Promise<any[]> {
+  const rows = await getTransactionsBySubscriptionId(subscriptionId);
+  return rows.filter((r) => String(r.date).slice(0, 10) === day || toLocalDateString(r.date) === day);
+}
+
+/** Update amount/date of the payment row on `oldDay` (first match). Returns whether a row was updated. */
+export async function updatePaymentRowOnDay(
+  subscriptionId: string,
+  oldDay: string,
+  changes: { amount?: number; date?: string }
+): Promise<boolean> {
+  const [row] = await findPaymentRowsOnDay(subscriptionId, oldDay);
+  if (!row) return false;
+  await getDatabase().runAsync(
+    "UPDATE transactions SET amount = ?, date = ? WHERE id = ?;",
+    changes.amount ?? row.amount,
+    changes.date ?? row.date,
+    row.id
+  );
+  return true;
+}
+
+/** Delete the payment row(s) of a subscription on a given calendar day (used when a ledger entry is removed). */
+export async function deletePaymentRowsOnDay(subscriptionId: string, day: string): Promise<void> {
+  const rows = await findPaymentRowsOnDay(subscriptionId, day);
+  const db = getDatabase();
+  for (const r of rows) await db.runAsync("DELETE FROM transactions WHERE id = ?;", r.id);
 }
 
 export async function getTransactionsBySubscriptionId(subscriptionId: string): Promise<any[]> {

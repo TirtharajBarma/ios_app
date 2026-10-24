@@ -4,7 +4,13 @@ import * as DocumentPicker from "expo-document-picker";
 
 import AsyncStorage from "@/utils/storage";
 import { getDatabase } from "@/database/database";
-import { useExpenseStore, recomputeAllAccountsHelper, INITIAL_CATEGORIES } from "@/store/useExpenseStore";
+import {
+  useExpenseStore,
+  recomputeAllAccountsHelper,
+  INITIAL_CATEGORIES,
+  isSystemCategory,
+  monthKeyOf,
+} from "@/store/useExpenseStore";
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import type {
@@ -49,9 +55,10 @@ const ASYNC_KEYS = [
   "@legacy_exchange_rates_v2",
   "@onboarding_complete",
   "@db_cleanup_done_v4",
-  "@expense_shared_remote_ids_v2",
-  "@expense_shared_pending_deletes_v1",
 ] as const;
+
+/** Device-local sync bookkeeping: never backed up, cleared on restore so the next sync rebuilds it. */
+const SYNC_LOCAL_KEYS = ["@expense_shared_remote_ids_v2", "@expense_shared_pending_deletes_v1"] as const;
 
 export interface BackupSummary {
   subscriptions: number;
@@ -82,6 +89,9 @@ export interface BackupPayload {
     learnedMerchantRules?: Record<string, string>;
     hasSeenWalkthrough?: boolean;
     statementSetup?: Record<string, unknown>;
+    selectedMonth?: string;
+    themeMode?: string;
+    ruleCount?: number;
   };
   settings?: Record<string, unknown>;
   async: Record<string, string | null>;
@@ -113,6 +123,9 @@ export async function buildBackupPayload(): Promise<BackupPayload> {
     learnedMerchantRules: expenseState.learnedMerchantRules || {},
     hasSeenWalkthrough: expenseState.hasSeenWalkthrough ?? true,
     statementSetup: (expenseState.statementSetup as unknown as Record<string, unknown>) || {},
+    selectedMonth: expenseState.selectedMonth,
+    themeMode: expenseState.themeMode,
+    ruleCount: expenseState.ruleCount,
   };
 
   // Capture current settings state directly
@@ -147,12 +160,17 @@ export async function buildBackupPayload(): Promise<BackupPayload> {
 
   // Ensure @expense_data_v1 and @expense_settings_v3 contain the freshest state
   async["@expense_data_v1"] = JSON.stringify({ state: expenseData, version: 0 });
-  async["@expense_settings_v3"] = JSON.stringify(settings);
+  // Merge over the stored blob so keys not listed above (shareGroups, autoTrack*, pendingTransactions) survive.
+  let storedSettings: Record<string, unknown> = {};
+  try {
+    storedSettings = JSON.parse(async["@expense_settings_v3"] || "{}") || {};
+  } catch {}
+  async["@expense_settings_v3"] = JSON.stringify({ ...storedSettings, ...settings });
 
   return {
     version: BACKUP_VERSION,
     createdAt: new Date().toISOString(),
-    app: "monevo",
+    app: "cashveil",
     subscriptions,
     transactions,
     expenseData,
@@ -204,7 +222,7 @@ export async function exportBackup(): Promise<BackupSummary> {
   const summary = summarise(payload);
 
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-  const filename = `monevo-full-backup-${stamp}.json`;
+  const filename = `cashveil-full-backup-${stamp}.json`;
   const uri = `${FileSystem.cacheDirectory}${filename}`;
 
   await FileSystem.writeAsStringAsync(uri, JSON.stringify(payload, null, 2), {
@@ -218,15 +236,16 @@ export async function exportBackup(): Promise<BackupSummary> {
 
     await Sharing.shareAsync(uri, {
       mimeType: "application/json",
-      dialogTitle: "Save your Monevo complete backup",
+      dialogTitle: "Save your Cashveil complete backup",
       UTI: "public.json",
     });
 
     return summary;
   } finally {
-    try {
-      await FileSystem.deleteAsync(uri, { idempotent: true });
-    } catch {}
+    // Delayed so a share target still reading the file doesn't race the delete; the OS also purges cache.
+    setTimeout(() => {
+      FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
+    }, 60_000);
   }
 }
 
@@ -279,6 +298,16 @@ function assertValid(input: unknown): asserts input is BackupPayload {
   }
   if (!Array.isArray(p.subscriptions) && !p.expenseData && !p.async) {
     throw new Error("That backup is missing its data tables.");
+  }
+  // Shape checks run before anything is wiped, so a malformed file can't leave us half-restored.
+  const isRows = (v: unknown) => v === undefined || (Array.isArray(v) && v.every((r) => typeof r === "object" && r !== null));
+  const e = p.expenseData as Record<string, unknown> | undefined;
+  if (
+    !isRows(p.subscriptions) ||
+    !isRows(p.transactions) ||
+    (e !== undefined && (typeof e !== "object" || e === null || !isRows(e.accounts) || !isRows(e.transactions)))
+  ) {
+    throw new Error("That backup file is damaged, so nothing was restored.");
   }
 }
 
@@ -394,30 +423,71 @@ export async function importBackup(): Promise<BackupSummary> {
     } catch {}
   }
 
-  // 3. Restore all AsyncStorage keys
+  // 3. Restore all AsyncStorage keys (settings are merged in step 5, so keep the current blob for it)
+  const existingSettingsRaw = await AsyncStorage.getItem("@expense_settings_v3");
   for (const [key, value] of Object.entries(payload.async ?? {})) {
     if (value === null || value === undefined) continue;
     if (!(ASYNC_KEYS as readonly string[]).includes(key)) continue;
+    if (key === "@expense_settings_v3") continue;
     await AsyncStorage.setItem(key, value);
+  }
+  for (const key of SYNC_LOCAL_KEYS) {
+    await AsyncStorage.removeItem(key).catch(() => {});
   }
 
   // If payload had expenseData directly, ensure @expense_data_v1 is populated
   if (expData) {
-    await AsyncStorage.setItem(
-      "@expense_data_v1",
-      JSON.stringify({ state: expData, version: 0 })
-    );
-
     // 4. Immediately hydrate useExpenseStore in-memory with category migration and balance reconciliation!
     const importedCats = expData.categories || [];
-    const catMap = new Map<string, ExpenseCategory>();
-    INITIAL_CATEGORIES.forEach((c) => catMap.set(c.id, c));
-    importedCats.forEach((c) => catMap.set(c.id, c));
-    const mergedCategories = Array.from(catMap.values());
+    let mergedCategories: ExpenseCategory[];
+    if (importedCats.length > 0) {
+      // Preserve the user's exact category order, custom categories, icons, and colors!
+      mergedCategories = [...importedCats];
+      // Only append missing system categories (like cat_subs, cat_goal, etc.)
+      INITIAL_CATEGORIES.forEach((ic) => {
+        if (isSystemCategory(ic.id) && !mergedCategories.some((c) => c.id === ic.id)) {
+          mergedCategories.push(ic);
+        }
+      });
+    } else {
+      mergedCategories = [...INITIAL_CATEGORIES];
+    }
+
+    // Determine the target month for account activity calculation and initial dashboard view:
+    // 1. If payload explicitly specified selectedMonth, use it
+    // 2. Otherwise, check the most recent transaction date
+    // 3. Fallback to current calendar month
+    let targetMonth: string | undefined = expData.selectedMonth as string | undefined;
+    if (!targetMonth && Array.isArray(expData.transactions) && expData.transactions.length > 0) {
+      const sortedDates = (expData.transactions as ExpenseTransaction[])
+        .map((t) => t.date)
+        .filter(Boolean)
+        .sort()
+        .reverse();
+      if (sortedDates[0]) {
+        targetMonth = monthKeyOf(new Date(sortedDates[0]));
+      }
+    }
+    if (!targetMonth) {
+      targetMonth = monthKeyOf(new Date());
+    }
 
     const recomputedAccounts = recomputeAllAccountsHelper(
       expData.accounts || [],
-      expData.transactions || []
+      expData.transactions || [],
+      targetMonth
+    );
+
+    await AsyncStorage.setItem(
+      "@expense_data_v1",
+      JSON.stringify({
+        state: {
+          ...expData,
+          categories: mergedCategories,
+          selectedMonth: targetMonth,
+        },
+        version: 0,
+      })
     );
 
     useExpenseStore.setState({
@@ -438,6 +508,9 @@ export async function importBackup(): Promise<BackupSummary> {
         openingBalancesConfigured: true,
         budgetConfigured: true,
       },
+      selectedMonth: targetMonth,
+      themeMode: (expData.themeMode as any) || "dark",
+      ruleCount: (expData.ruleCount as number) || 0,
       selectedTransactionIds: [],
       activeAccountFilter: "All",
       smartSearchQuery: "",
@@ -445,11 +518,22 @@ export async function importBackup(): Promise<BackupSummary> {
   }
 
   // 5. Restore settings if present
-  if (payload.settings) {
-    await AsyncStorage.setItem(
-      "@expense_settings_v3",
-      JSON.stringify(payload.settings)
-    );
+  {
+    let incoming: Record<string, unknown> | undefined = payload.settings;
+    if (!incoming && payload.async?.["@expense_settings_v3"]) {
+      try {
+        incoming = JSON.parse(payload.async["@expense_settings_v3"]);
+      } catch {}
+    }
+    if (incoming && typeof incoming === "object") {
+      let existing: Record<string, unknown> = {};
+      try {
+        existing = JSON.parse(existingSettingsRaw || "{}") || {};
+      } catch {}
+      // Device-bound state (joined groups, queued auto-tracked items) stays as it is on this device.
+      const { shareGroups: _g, shareGroup: _g1, pendingTransactions: _p, ...rest } = incoming as Record<string, unknown>;
+      await AsyncStorage.setItem("@expense_settings_v3", JSON.stringify({ ...existing, ...rest }));
+    }
   }
 
   // 6. Immediately rehydrate Zustand in-memory stores

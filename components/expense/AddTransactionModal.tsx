@@ -46,10 +46,13 @@ import {
 import * as Haptics from 'expo-haptics';
 import { AppText, NativeLiquidMenu } from '@/components/ui';
 import type { MenuAction } from '@/components/ui';
-import { useExpenseStore, getUserCategories, monthKeyOf } from '@/store/useExpenseStore';
+import { useExpenseStore, getUserCategories, monthKeyOf, DEFAULT_INCOME_CATEGORIES } from '@/store/useExpenseStore';
 import { parseAmountInput } from '@/utils/amount';
 import { useShallow } from 'zustand/react/shallow';
 import { useSubscriptionStore } from '@/store/useSubscriptionStore';
+import { useSettingsStore } from '@/store/useSettingsStore';
+import { advanceCycleDate, getNextRenewalDate, toDate } from '@/utils/date';
+import { normalizeSubName, toSubscriptionCategory } from '@/utils/subscriptionUtils';
 import { createExpense } from '@/services/expense/createExpense';
 import * as db from '@/database/database';
 import { expenseColors } from '@/constants/expenseColors';
@@ -77,15 +80,7 @@ type BillingCycle = 'monthly' | 'yearly';
 
 const SUGGESTED_TAGS = ['🌴 Goa Trip', '🎉 Night Out', '💍 Wedding', '☕ Work Lunch', '🚗 Road Trip'];
 
-export const INCOME_CATEGORIES: ExpenseCategory[] = [
-  { id: 'cat_salary', name: 'Salary', emoji: '💼', color: '#8CD9C8', iconName: 'Briefcase' },
-  { id: 'cat_freelance', name: 'Freelance', emoji: '💻', color: '#9DC6EB', iconName: 'Laptop' },
-  { id: 'cat_invest', name: 'Investments', emoji: '📈', color: '#F4CD89', iconName: 'TrendingUp' },
-  { id: 'cat_bonus', name: 'Bonus', emoji: '🎁', color: '#F2AEC4', iconName: 'Gift' },
-  { id: 'cat_rental', name: 'Rental', emoji: '🏠', color: '#C4A7E7', iconName: 'Home' },
-  { id: 'cat_refund', name: 'Refund', emoji: '🔄', color: '#82D0D8', iconName: 'RefreshCw' },
-  { id: 'cat_other_inc', name: 'Other Income', emoji: '💰', color: '#A8B8E8', iconName: 'Coins' },
-];
+export const INCOME_CATEGORIES: ExpenseCategory[] = DEFAULT_INCOME_CATEGORIES;
 
 const VENDOR_CATEGORY_MAP: Record<string, string> = {
   // Food & Dining
@@ -271,7 +266,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   }))
 );
   const sym = currencySymbol || '₹';
-  const { subscriptions, addSubscription, updateSubscription } = useSubscriptionStore();
+  const { subscriptions, addSubscription, updateSubscription, removeSubscription } = useSubscriptionStore();
+  const currencyCode = useSettingsStore((s) => s.currencyCode) || 'INR';
 
   const insets = useSafeAreaInsets();
   const androidTopPadding = Platform.OS === 'android' ? Math.max(insets.top, StatusBar.currentHeight || 0, 24) + 10 : 0;
@@ -315,11 +311,26 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   // Subscription toggle & fields
   const [isSubscription, setIsSubscription] = useState<boolean>(false);
   const [billingCycle, setBillingCycle] = useState<BillingCycle>('monthly');
-  const [nextBillDate, setNextBillDate] = useState<Date>(() => {
-    const d = new Date();
-    d.setMonth(d.getMonth() + 1);
-    return d;
-  });
+  const [nextBillDate, setNextBillDate] = useState<Date>(() => advanceCycleDate(new Date(), 'monthly'));
+  // True once nextBillDate was loaded from a sub or picked by the user; otherwise it follows txDate + cycle
+  const nextBillTouched = useRef(false);
+  // Undo hook for a subscription created during the current save (cleared when the save finishes)
+  const rollbackRef = useRef<null | (() => Promise<void>)>(null);
+  useEffect(() => {
+    if (!nextBillTouched.current) {
+      // First renewal after today (backdated payments must not leave a past "next bill")
+      const now = new Date();
+      setNextBillDate(getNextRenewalDate(txDate, billingCycle, 1, txDate > now ? txDate : now));
+    }
+  }, [txDate, billingCycle]);
+
+  /** Single path for picking a category: the subscription toggle follows it (user may still flip it afterwards). */
+  const isSubsCategory = (catId: string) =>
+    catId === 'cat_subs' || (categories.find((c) => c.id === catId)?.name?.toLowerCase().includes('subscript') ?? false);
+  const applyCategory = (catId: string) => {
+    setSelectedCategoryId(catId);
+    setIsSubscription(isSubsCategory(catId));
+  };
 
   // Goal creation sheet & multi-goal allocation
   const [goalAllocations, setGoalAllocations] = useState<Record<string, string>>({});
@@ -381,8 +392,14 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
         }
         setSelectedAccountId(tx.accountId || '');
         setToAccountId(tx.toAccountId || '');
+        const isSplitSettle = tx.categoryId === 'cat_split_return' || Boolean(tx.settledTxId?.startsWith('split_settle:'));
+        const isDebtRepaySettle = tx.categoryId === 'cat_debt_repayment' || Boolean(tx.settledTxId?.startsWith('debt_settle:'));
         setSelectedCategoryId(
-          tx.categoryId && (isIncomeTx ? INCOME_CATEGORIES.some((c) => c.id === tx.categoryId) : categories.some((c) => c.id === tx.categoryId))
+          isSplitSettle
+            ? 'cat_split_return'
+            : isDebtRepaySettle
+            ? 'cat_debt_repayment'
+            : tx.categoryId && (isIncomeTx ? INCOME_CATEGORIES.some((c) => c.id === tx.categoryId) : categories.some((c) => c.id === tx.categoryId))
             ? tx.categoryId
             : isIncomeTx
             ? 'cat_salary'
@@ -420,12 +437,22 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
           setIsAllocateToNextMonth(false);
         }
 
-        if (tx.subscriptionId || tx.categoryId === 'cat_subs') {
-          setIsSubscription(true);
+        setIsSubscription(!!tx.subscriptionId || tx.categoryId === 'cat_subs');
+        // Show the linked subscription's real schedule so saving does not overwrite it with form defaults
+        const linkedSub = tx.subscriptionId
+          ? useSubscriptionStore.getState().subscriptions.find((x) => x.id === tx.subscriptionId)
+          : undefined;
+        if (linkedSub) {
+          nextBillTouched.current = true;
+          // The form only offers monthly/yearly; other cycles keep the sub's own value on save
+          setBillingCycle(linkedSub.billingCycle === 'yearly' ? 'yearly' : 'monthly');
+          setNextBillDate(toDate(linkedSub.nextBillingDate));
         } else {
-          setIsSubscription(false);
+          nextBillTouched.current = false;
+          setBillingCycle('monthly');
         }
       } else {
+        nextBillTouched.current = false;
         setTabMode(initialTab || 'expense');
         setDebtType('lend');
         setAmount(initialAmount !== undefined && initialAmount > 0 ? initialAmount.toString() : '');
@@ -441,9 +468,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
         setIsAllocateToNextMonth(nowDate.getDate() >= 25);
         setToAccountId(initialToAccountId || '');
         setBillingCycle('monthly');
-        const nextBill = new Date();
-        nextBill.setMonth(nextBill.getMonth() + 1);
-        setNextBillDate(nextBill);
+        setNextBillDate(advanceCycleDate(nowDate, 'monthly'));
         setNote('');
         setSelectedTag('');
         setCustomTagInput('');
@@ -653,7 +678,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
       if (learnedMerchantRules && learnedKey && learnedMerchantRules[learnedKey]) {
         const learnedCatId = learnedMerchantRules[learnedKey];
         if (categories.some((c) => c.id === learnedCatId)) {
-          setSelectedCategoryId(learnedCatId);
+          applyCategory(learnedCatId);
           return;
         }
       }
@@ -664,10 +689,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
         const hit = key.length <= 4 ? new RegExp(`\\b${key}\\b`).test(lower) : lower.includes(key);
         if (hit) {
           if (categories.some((c) => c.id === catId)) {
-            setSelectedCategoryId(catId);
-            if (catId === 'cat_subs') {
-              setIsSubscription(true);
-            }
+            applyCategory(catId);
             return;
           }
         }
@@ -682,7 +704,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             t.categoryId
         );
         if (pastMatch && pastMatch.categoryId && categories.some((c) => c.id === pastMatch.categoryId)) {
-          setSelectedCategoryId(pastMatch.categoryId);
+          applyCategory(pastMatch.categoryId);
           if (pastMatch.accountId && accounts.some((a) => a.id === pastMatch.accountId) && !selectedAccountId) {
             setSelectedAccountId(pastMatch.accountId);
           }
@@ -694,10 +716,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   const handleApplyPreset = (preset: QuickExpensePreset) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     setAmount(preset.amount.toString());
-    setSelectedCategoryId(preset.categoryId);
-    if (preset.categoryId === 'cat_subs') {
-      setIsSubscription(true);
-    }
+    applyCategory(preset.categoryId);
     if (preset.accountId && accounts.some((a) => a.id === preset.accountId)) {
       setSelectedAccountId(preset.accountId);
     }
@@ -837,55 +856,71 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
         });
       }
     } else if (tabMode === 'expense') {
-      const isSubscriptionExpense =
-        selectedCategoryId === 'cat_subs' ||
-        selectedCatObj?.name?.toLowerCase().includes('subscript') ||
-        isSubscription;
+      // The toggle is the single source of truth (it follows the category, and the user can opt out)
+      const isSubscriptionExpense = isSubscription;
+      const dayStr = format(txDate, 'yyyy-MM-dd');
 
-      let linkedSubscriptionId: string | undefined = initialTransaction?.subscriptionId;
+      let linkedSubscriptionId: string | undefined = isSubscriptionExpense ? initialTransaction?.subscriptionId : undefined;
 
       if (isSubscriptionExpense) {
-        const trimmedName = finalMerchant || finalNote || selectedCatObj?.name || 'Subscription';
-        const matchedSub = subscriptions.find(
-          (s) =>
-            (initialTransaction?.subscriptionId && s.id === initialTransaction.subscriptionId) ||
-            s.name.trim().toLowerCase() === trimmedName.toLowerCase()
-        );
+        const typedName = finalMerchant || finalNote;
+        const trimmedName = typedName || selectedCatObj?.name || 'Subscription';
+        const nameKey = normalizeSubName(typedName);
+        // A linked id always wins; name matching is only used with a real, normalised name
+        const matchedSub =
+          (initialTransaction?.subscriptionId && subscriptions.find((s) => s.id === initialTransaction.subscriptionId)) ||
+          (nameKey ? subscriptions.find((s) => normalizeSubName(s.name) === nameKey) : undefined);
 
         const effectiveSubShare = isSplitEnabled ? numYourShare : undefined;
+        const paidAmount = isSplitEnabled ? numYourShare : numAmount;
 
         if (matchedSub) {
           linkedSubscriptionId = matchedSub.id;
-          await updateSubscription(matchedSub.id, {
-            name: trimmedName,
-            price: numAmount,
-            paymentMethod: fromAccObj?.name || matchedSub.paymentMethod,
-            billingCycle: matchedSub.billingCycle || billingCycle,
-            nextBillingDate: format(nextBillDate, 'yyyy-MM-dd'),
-            splitEnabled: isSplitEnabled,
-            splitType: isSplitEnabled ? 'share' : undefined,
-            splitValue: effectiveSubShare,
-          }).catch(() => {});
-
-          if (!initialTransaction) {
+          if (initialTransaction) {
+            // Editing: touch the subscription only for what the user actually changed
+            const patch: Record<string, any> = {};
+            if (numAmount !== initialTransaction.amount) patch.price = numAmount;
+            if ((matchedSub.billingCycle === 'monthly' || matchedSub.billingCycle === 'yearly') && billingCycle !== matchedSub.billingCycle) {
+              patch.billingCycle = billingCycle;
+            }
+            if (format(nextBillDate, 'yyyy-MM-dd') !== format(toDate(matchedSub.nextBillingDate), 'yyyy-MM-dd')) {
+              patch.nextBillingDate = format(nextBillDate, 'yyyy-MM-dd');
+            }
+            const prevSplit = initialTransaction.split;
+            if (isSplitEnabled !== !!prevSplit || (isSplitEnabled && numYourShare !== prevSplit?.yourShare)) {
+              patch.splitEnabled = isSplitEnabled;
+              patch.splitType = isSplitEnabled ? 'share' : undefined;
+              patch.splitValue = effectiveSubShare;
+            }
+            if (Object.keys(patch).length > 0) await updateSubscription(matchedSub.id, patch);
+            // Keep the payment row in step with the edited ledger entry
+            if (initialTransaction.date) {
+              await db.updatePaymentRowOnDay(matchedSub.id, initialTransaction.date.slice(0, 10), {
+                amount: paidAmount,
+                date: dayStr,
+              });
+            }
+          } else {
+            // Repeat payment for an existing subscription: schedule/price/split stay as they are
             await db.createTransaction({
-              id: `${matchedSub.id}-tx-${Date.now()}`,
+              id: `${matchedSub.id}-tx-${dayStr}`,
               subscriptionId: matchedSub.id,
-              amount: isSplitEnabled ? numYourShare : numAmount,
-              currency: matchedSub.currency || 'INR',
-              date: format(txDate, 'yyyy-MM-dd'),
-            }).catch(() => {});
+              amount: paidAmount,
+              currency: matchedSub.currency || currencyCode,
+              date: dayStr,
+            });
           }
         } else {
           const cat = categories.find((c) => c.id === selectedCategoryId);
           const newSub = await addSubscription({
             name: trimmedName,
             price: numAmount,
-            currency: 'INR' as any,
+            currency: currencyCode as any,
             billingCycle: billingCycle,
-            category: (cat?.name as any) || 'Other',
+            category: toSubscriptionCategory(cat?.name),
             paymentMethod: fromAccObj?.name || 'Default',
             color: cat?.color || '#FF9D66',
+            startDate: dayStr,
             nextBillingDate: format(nextBillDate, 'yyyy-MM-dd'),
             reminderEnabled: false,
             reminderDays: 1,
@@ -895,14 +930,19 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             splitValue: effectiveSubShare,
           });
           linkedSubscriptionId = newSub.id;
+          rollbackRef.current = async () => {
+            await removeSubscription(newSub.id).catch(() => {});
+          };
 
+          // addSubscription back-fills history rows; keep exactly one payment row dated txDate
+          await db.deleteTransactionsBySubscriptionId(newSub.id);
           await db.createTransaction({
-            id: `${newSub.id}-tx-${Date.now()}`,
+            id: `${newSub.id}-tx-${dayStr}`,
             subscriptionId: newSub.id,
-            amount: isSplitEnabled ? numYourShare : numAmount,
-            currency: 'INR',
-            date: format(txDate, 'yyyy-MM-dd'),
-          }).catch(() => {});
+            amount: paidAmount,
+            currency: currencyCode,
+            date: dayStr,
+          });
         }
       }
 
@@ -999,19 +1039,37 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             subscriptionId: linkedSubscriptionId,
           });
           if (!quickAddResult.ok) {
+            await rollbackRef.current?.();
             Alert.alert('Could not save', quickAddResult.error);
             return;
           }
         }
       }
     } else if (tabMode === 'income') {
-      const finalIncomeCatId =
-        selectedCategoryId && INCOME_CATEGORIES.some((c) => c.id === selectedCategoryId)
-          ? selectedCategoryId
-          : 'cat_salary';
+      const isSplitSettle =
+        selectedCategoryId === 'cat_split_return' ||
+        initialTransaction?.categoryId === 'cat_split_return' ||
+        Boolean(initialTransaction?.settledTxId?.startsWith('split_settle:'));
+
+      const isDebtRepaySettle =
+        selectedCategoryId === 'cat_debt_repayment' ||
+        initialTransaction?.categoryId === 'cat_debt_repayment' ||
+        Boolean(initialTransaction?.settledTxId?.startsWith('debt_settle:'));
+
+      const finalIncomeCatId = isSplitSettle
+        ? 'cat_split_return'
+        : isDebtRepaySettle
+        ? 'cat_debt_repayment'
+        : selectedCategoryId && INCOME_CATEGORIES.some((c) => c.id === selectedCategoryId)
+        ? selectedCategoryId
+        : 'cat_salary';
 
       const effectiveAccId = selectedAccountId || accounts[0]?.id || 'acc_primary';
       const finalAllocatedMonth = isAllocateToNextMonth ? nextMonthKey : undefined;
+
+      const isSplitDotFormat = Boolean(finalMerchant && /^From (.+?)\s*·\s*(.+)$/i.test(finalMerchant));
+      const effectiveMerchant = isSplitSettle && isSplitDotFormat ? undefined : (finalMerchant || undefined);
+      const effectiveNote = isSplitSettle && isSplitDotFormat ? finalMerchant : (finalNote || (finalMerchant ? undefined : 'Income'));
 
       if (initialTransaction) {
         updateTransaction(initialTransaction.id, {
@@ -1021,8 +1079,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
           accountId: effectiveAccId,
           date: format(txDate, 'yyyy-MM-dd'),
           allocatedMonth: finalAllocatedMonth,
-          merchant: finalMerchant || undefined,
-          note: finalNote || (finalMerchant ? undefined : 'Income'),
+          merchant: effectiveMerchant,
+          note: effectiveNote,
           tag: finalTag || undefined,
         });
       } else {
@@ -1071,14 +1129,33 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
     savingRef.current = true;
     try {
       await handleSaveInner();
+    } catch (e) {
+      // Undo a subscription created earlier in this save so it is not left without a ledger entry
+      await rollbackRef.current?.();
+      console.error('Failed to save transaction', e);
+      Alert.alert('Could not save', e instanceof Error ? e.message : 'Something went wrong. Please try again.');
     } finally {
+      rollbackRef.current = null;
       savingRef.current = false;
     }
   };
 
+  const isSystemPredefinedTx = Boolean(
+    initialTransaction &&
+    (initialTransaction.categoryId === 'cat_split_return' ||
+      initialTransaction.categoryId === 'cat_debt_repayment' ||
+      initialTransaction.settledTxId?.startsWith('split_settle:') ||
+      initialTransaction.settledTxId?.startsWith('debt_settle:'))
+  );
+
   const userExpenseCategories = getUserCategories(categories);
   const activeCategories = tabMode === 'income' ? INCOME_CATEGORIES : userExpenseCategories;
-  const selectedCatObj = activeCategories.find((c) => c.id === selectedCategoryId) || null;
+  const selectedCatObj =
+    (isSystemPredefinedTx && selectedCategoryId === 'cat_split_return')
+      ? { id: 'cat_split_return', name: 'Split Received', color: expenseColors.accentGreen, iconName: 'Users' }
+      : (isSystemPredefinedTx && selectedCategoryId === 'cat_debt_repayment')
+      ? { id: 'cat_debt_repayment', name: 'Debt Repayment', color: '#88C0D0', iconName: 'Coins' }
+      : activeCategories.find((c) => c.id === selectedCategoryId) || null;
   const fromAccObj = accounts.find((a) => a.id === selectedAccountId) || null;
   const toAccObj = accounts.find((a) => a.id === toAccountId) || null;
   const isCreditCardPayment = toAccObj?.statusType === 'due' || toAccObj?.type === 'credit';
@@ -1107,6 +1184,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
           ? 'gift.fill'
           : cat.id === 'cat_rental'
           ? 'house.fill'
+          : cat.id === 'cat_refund'
+          ? 'arrow.clockwise'
           : 'banknote.fill') as any,
         state: (selectedCategoryId === cat.id ? 'on' : 'off') as 'on' | 'off',
       }))
@@ -1595,20 +1674,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
               {/* Left Column: Category Dropdown */}
               <View style={styles.dropdownColumn}>
                 <AppText style={styles.label}>CATEGORY</AppText>
-                <NativeLiquidMenu
-                  title="Category"
-                  actions={categoryActions}
-                  onSelect={(catId) => {
-                    Haptics.selectionAsync().catch(() => {});
-                    setSelectedCategoryId(catId);
-                    if (tabMode === 'expense') {
-                      const isSubCat = catId === 'cat_subs' || (categories.find(c => c.id === catId)?.name?.toLowerCase().includes('subscript') ?? false);
-                      setIsSubscription(isSubCat);
-                    }
-                  }}
-                  style={{ alignSelf: 'stretch' }}
-                >
-                  <View style={styles.dropdownTrigger}>
+                {isSystemPredefinedTx ? (
+                  <View style={[styles.dropdownTrigger, styles.dropdownTriggerLocked]}>
                     <View style={styles.dropdownTriggerLeft}>
                       {selectedCatObj && (
                         <View
@@ -1627,12 +1694,47 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                         </View>
                       )}
                       <AppText style={styles.dropdownTriggerValue} numberOfLines={1}>
-                        {selectedCatObj ? selectedCatObj.name.toUpperCase() : 'Select'}
+                        {selectedCatObj ? selectedCatObj.name.toUpperCase() : 'PREDEFINED'}
                       </AppText>
                     </View>
-                    <ChevronDown size={15} color="#7E8394" />
                   </View>
-                </NativeLiquidMenu>
+                ) : (
+                  <NativeLiquidMenu
+                    title="Category"
+                    actions={categoryActions}
+                    onSelect={(catId) => {
+                      Haptics.selectionAsync().catch(() => {});
+                      if (tabMode === 'expense') applyCategory(catId);
+                      else setSelectedCategoryId(catId);
+                    }}
+                    style={{ alignSelf: 'stretch' }}
+                  >
+                    <View style={styles.dropdownTrigger}>
+                      <View style={styles.dropdownTriggerLeft}>
+                        {selectedCatObj && (
+                          <View
+                            style={[
+                              styles.dropdownIconCircle,
+                              { backgroundColor: getCategoryBgColor(selectedCatObj.color, '25') },
+                            ]}
+                          >
+                            <CategoryIcon
+                              category={selectedCatObj}
+                              size={14}
+                              color={selectedCatObj.color}
+                              strokeWidth={2}
+                              fill
+                            />
+                          </View>
+                        )}
+                        <AppText style={styles.dropdownTriggerValue} numberOfLines={1}>
+                          {selectedCatObj ? selectedCatObj.name.toUpperCase() : 'Select'}
+                        </AppText>
+                      </View>
+                      <ChevronDown size={15} color="#7E8394" />
+                    </View>
+                  </NativeLiquidMenu>
+                )}
               </View>
 
               {/* Right Column: Account Dropdown */}
@@ -2235,10 +2337,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                           billingCycle === 'monthly' && styles.cycleBtnActive,
                         ]}
                         onPress={() => {
+                          nextBillTouched.current = false;
                           setBillingCycle('monthly');
-                          const d = new Date(txDate);
-                          d.setMonth(d.getMonth() + 1);
-                          setNextBillDate(d);
                         }}
                       >
                         <AppText
@@ -2256,10 +2356,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                           billingCycle === 'yearly' && styles.cycleBtnActive,
                         ]}
                         onPress={() => {
+                          nextBillTouched.current = false;
                           setBillingCycle('yearly');
-                          const d = new Date(txDate);
-                          d.setFullYear(d.getFullYear() + 1);
-                          setNextBillDate(d);
                         }}
                       >
                         <AppText
@@ -2408,7 +2506,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
         <DatePickerModal
           visible={showNextBillDatePicker}
           selectedDate={nextBillDate}
-          onSelectDate={setNextBillDate}
+          onSelectDate={(d: Date) => { nextBillTouched.current = true; setNextBillDate(d); }}
           onClose={() => setShowNextBillDatePicker(false)}
           title="Next Billing Date"
         />
@@ -3259,6 +3357,11 @@ const styles = StyleSheet.create({
   dropdownTriggerActive: {
     borderColor: '#FF9D66',
     backgroundColor: '#1C1F2D',
+  },
+  dropdownTriggerLocked: {
+    opacity: 0.9,
+    backgroundColor: '#181A22',
+    borderColor: 'rgba(255, 255, 255, 0.05)',
   },
   dropdownTriggerLeft: {
     flexDirection: 'row',

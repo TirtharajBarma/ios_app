@@ -24,7 +24,7 @@ import {
 import SummaryCard from "@/components/cards/SummaryCard";
 import { useSubscriptionStore } from "@/store/useSubscriptionStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
-import { getSubscriptionActivePrice, toMonthly } from "@/utils/date";
+import { getSubscriptionActivePrice, toMonthly, formatDate } from "@/utils/date";
 import { parseISO, startOfDay } from "date-fns";
 import { convertCurrency } from "@/utils/currency";
 import type { Subscription } from "@/types/subscription";
@@ -63,6 +63,7 @@ function AnalyticsScreen() {
     return subscriptions.filter(
       (s) =>
         s.isTrial &&
+        !s.isPaused &&
         s.trialEndDate &&
         startOfDay(parseISO(s.trialEndDate)).getTime() >= startOfDay(new Date(nowTime)).getTime() && // a trial ending today still counts
         parseISO(s.trialEndDate).getTime() - nowTime < 7 * 24 * 60 * 60 * 1000
@@ -94,6 +95,11 @@ function AnalyticsScreen() {
     const sorted = Array.from(categoryMap.entries()).sort((a, b) => b[1] - a[1]);
     return { categories: sorted, maxCategorySpend: sorted.length > 0 && sorted[0][1] > 0 ? sorted[0][1] : 1 };
   }, [subscriptions, currencyCode]);
+
+  // Totals follow the current app currency (store stats are frozen at the currency of their last recompute)
+  const monthlyTotal = React.useMemo(() => categories.reduce((sum, [, v]) => sum + v, 0), [categories]);
+  const yearlyTotal = monthlyTotal * 12;
+  const mostExpensive = React.useMemo(() => getMostExpensive(subscriptions, currencyCode), [subscriptions, currencyCode]);
 
   return (
     <View style={styles.container}>
@@ -141,13 +147,13 @@ function AnalyticsScreen() {
               <View style={styles.statsRow}>
                 <SummaryCard
                   title="MONTHLY SPEND"
-                  amount={`${currencySymbol}${stats.monthlyTotal.toFixed(2)}`}
+                  amount={`${currencySymbol}${monthlyTotal.toFixed(2)}`}
                   icon={<TrendingUp size={14} color={colors.white} />}
                   gradient="hero"
                 />
                 <SummaryCard
                   title="YEARLY SPEND"
-                  amount={`${currencySymbol}${stats.yearlyTotal.toFixed(2)}`}
+                  amount={`${currencySymbol}${yearlyTotal.toFixed(2)}`}
                   icon={<CreditCard size={14} color={colors.white} />}
                   gradient="blue"
                 />
@@ -242,7 +248,7 @@ function AnalyticsScreen() {
                       AVG PER SUB
                     </AppText>
                     <AppText variant="title2" weight="800" color={colors.white}>
-                      {currencySymbol}{stats.activeCount > 0 ? (stats.monthlyTotal / stats.activeCount).toFixed(2) : "0.00"}
+                      {currencySymbol}{stats.activeCount > 0 ? (monthlyTotal / stats.activeCount).toFixed(2) : "0.00"}
                     </AppText>
                   </View>
                   <View style={styles.costDivider} />
@@ -251,7 +257,7 @@ function AnalyticsScreen() {
                       MOST EXPENSIVE
                     </AppText>
                     <AppText variant="title2" weight="800" color={colors.white}>
-                      {currencySymbol}{getMostExpensive(subscriptions)}
+                      {currencySymbol}{mostExpensive}
                     </AppText>
                   </View>
                 </View>
@@ -271,7 +277,7 @@ function AnalyticsScreen() {
                           {sub.name}
                         </AppText>
                         <AppText variant="caption2" color={colors.textMuted}>
-                          Ends {sub.trialEndDate ? new Date(sub.trialEndDate).toLocaleDateString() : "soon"}
+                          Ends {sub.trialEndDate ? formatDate(sub.trialEndDate, "P") : "soon"}
                         </AppText>
                       </View>
                     </View>
@@ -314,12 +320,15 @@ function getCategoryColor(index: number): string {
   return palette[index % palette.length];
 }
 
-function getMostExpensive(subs: Subscription[]): string {
+function getMostExpensive(subs: Subscription[], currencyCode: string): string {
   let max = 0;
   for (const sub of subs) {
     if (sub.isTrial || sub.isPaused) continue;
     const effectivePrice = getSubscriptionActivePrice(sub);
-    const monthly = toMonthly(effectivePrice, sub.rawBillingCycle || sub.billingCycle, sub.customIntervalMonths);
+    const rawMonthly = toMonthly(effectivePrice, sub.rawBillingCycle || sub.billingCycle, sub.customIntervalMonths);
+    const monthly = sub.currency && sub.currency.toUpperCase() !== currencyCode.toUpperCase()
+      ? convertCurrency(rawMonthly, sub.currency, currencyCode)
+      : rawMonthly;
     if (monthly > max) max = monthly;
   }
   return max > 0 ? max.toFixed(2) : "0.00";

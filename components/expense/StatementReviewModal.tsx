@@ -127,6 +127,10 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
       : `${name} STATEMENT`;
   }, [result?.bankName]);
 
+  const accountsRef = useRef(accounts);
+  accountsRef.current = accounts;
+  const initialBalanceInputsRef = useRef<Record<string, string>>({});
+
   // Reset / initialize state whenever modal opens or result changes
   useEffect(() => {
     if (visible && result) {
@@ -136,6 +140,7 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
       if (result.transactions) {
         setStagedList(result.transactions);
       }
+      const accounts = accountsRef.current;
       if (accounts.length > 0) {
         setDefaultTargetAccount(accounts[0].id);
       }
@@ -145,7 +150,8 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
       const initialTypes: Record<string, 'savings' | 'credit' | 'wallet'> = {};
 
       accounts.forEach((acc) => {
-        initialMap[acc.id] = acc.balance > 0 ? acc.balance.toString() : '';
+        // Pre-fill from the stored opening balance (not the live balance, which already includes transactions)
+        initialMap[acc.id] = acc.openingBalance && acc.openingBalance > 0 ? acc.openingBalance.toString() : '';
         initialTypes[acc.id] =
           (acc.type as 'savings' | 'credit' | 'wallet') ||
           (acc.statusType === 'due' ? 'credit' : 'savings');
@@ -161,6 +167,7 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
         });
       }
 
+      initialBalanceInputsRef.current = initialMap;
       setBalanceInputs(initialMap);
       setAccountTypes(initialTypes);
       setIsAddingNewAcc(false);
@@ -168,7 +175,7 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
       setNewAccBalance('');
       setAddedCustomAccounts([]);
     }
-  }, [visible, result, accounts]);
+  }, [visible, result]);
 
   const goToStep = (step: 0 | 1 | 2) => {
     Keyboard.dismiss();
@@ -251,16 +258,12 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
 
   const setTxCategory = (txnId: string, catId: string) => {
     Haptics.selectionAsync();
+    const target = stagedList.find((t) => t.id === txnId);
+    if (target) saveLearnedMerchantRule(target.narration, catId);
     setStagedList((prev) =>
-      prev.map((t) => {
-        if (t.id !== txnId) return t;
-        saveLearnedMerchantRule(t.narration, catId);
-        return {
-          ...t,
-          categoryId: catId,
-          categoryConfidence: 'high',
-        };
-      })
+      prev.map((t) =>
+        t.id === txnId ? { ...t, categoryId: catId, categoryConfidence: 'high' } : t
+      )
     );
     setActiveCategoryPickerTxnId(null);
   };
@@ -352,6 +355,9 @@ export const StatementReviewModal: React.FC<StatementReviewModalProps> = ({
     // Prepare opening balances for existing and detected accounts
     const parsedBalances: Record<string, number> = {};
     Object.entries(balanceInputs).forEach(([accKey, strVal]) => {
+      // Existing accounts: only write an opening balance the user actually edited
+      const isExisting = accounts.some((a) => a.id === accKey);
+      if (isExisting && strVal === initialBalanceInputsRef.current[accKey]) return;
       if (strVal && strVal.trim().length > 0) {
         const num = parseFloat(strVal.trim().replace(/,/g, ''));
         if (!isNaN(num) && num >= 0) {

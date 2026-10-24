@@ -17,7 +17,7 @@ export function parseAmountInput(raw: string | number | undefined | null): numbe
   if (s.includes(',')) {
     const grouped = /^\d{1,3}(?:,\d{2,3})+(?:\.\d+)?$/.test(s);
     const decimalComma = /^\d+,\d{1,2}$/.test(s) && !s.includes('.');
-    s = grouped ? s.replace(/,/g, '') : decimalComma ? s.replace(',', '.') : s.replace(/,/g, '');
+    s = decimalComma ? s.replace(',', '.') : grouped ? s.replace(/,/g, '') : s.replace(/,/g, '');
   }
   const n = parseFloat(s);
   const v = n * mult;

@@ -43,6 +43,7 @@ import {
   NormalizedStatementResult,
   StagedStatementTxn,
 } from '@/utils/statementNormalizer';
+import { logAction, logWarn, logException } from '@/utils/auditLog';
 import { StatementReviewModal, OpeningBalancesData } from './StatementReviewModal';
 import { SetOpeningBalancesModal } from './SetOpeningBalancesModal';
 import { SetBudgetModal } from './SetBudgetModal';
@@ -342,6 +343,9 @@ export const ExpenseImport: React.FC = () => {
     // Also create any custom accounts added during step 1
     if (openingBalances?.newAccounts && openingBalances.newAccounts.length > 0) {
       openingBalances.newAccounts.forEach((cAcc) => {
+        // Skip a name that already exists (or was just queued above): duplicates would make transaction matching ambiguous
+        const nameKey = cAcc.name.trim().toLowerCase();
+        if ([...accounts, ...newAccountsToCreate].some((a) => a.name.trim().toLowerCase() === nameKey)) return;
         const isCredit = cAcc.type === 'credit';
         newAccountsToCreate.push({
           id: `acc_${cAcc.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -399,12 +403,10 @@ export const ExpenseImport: React.FC = () => {
         const isCredit = assignedType === 'credit';
         const numBal = openingBalances.balances[acc.id];
 
-        const updates: Partial<ExpenseAccount> = {
-          type: assignedType,
-          statusType: isCredit && (numBal ?? 0) > 0 ? 'due' : 'positive',
-        };
+        const updates: Partial<ExpenseAccount> = { type: assignedType };
 
         if (numBal !== undefined && !isNaN(numBal) && numBal >= 0) {
+          updates.statusType = isCredit && numBal > 0 ? 'due' : 'positive';
           if (isCredit) {
             updates.dueAmount = numBal;
             updates.balance = 0;
@@ -433,9 +435,18 @@ export const ExpenseImport: React.FC = () => {
     });
 
     setImportedTxnCount(selectedTxs.length);
-    setImportedTotalAmount(selectedTxs.reduce((sum, t) => sum + t.amount, 0));
+    const totalImportedAmt = selectedTxs.reduce((sum, t) => sum + t.amount, 0);
+    setImportedTotalAmount(totalImportedAmt);
     setIsReviewModalVisible(false);
     setImportStatus('success');
+
+    logAction('import', `Imported ${selectedTxs.length} statement transactions (${parsedStatementResult?.bankName || 'Statement'})`, {
+      bank: parsedStatementResult?.bankName,
+      txnCount: selectedTxs.length,
+      totalAmount: totalImportedAmt,
+      duplicateCount: parsedStatementResult?.duplicateCount || 0,
+      accountsCreated: newAccountsToCreate.length,
+    });
   };
 
   return (

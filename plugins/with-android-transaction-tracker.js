@@ -6,7 +6,7 @@ const {
   AndroidConfig,
 } = require('@expo/config-plugins');
 
-const SERVICE_NAME = '.MonevoNotificationListenerService';
+const SERVICE_NAME = '.CashveilNotificationListenerService';
 const PERMISSION_NAME = 'android.permission.BIND_NOTIFICATION_LISTENER_SERVICE';
 const ACTION_NAME = 'android.service.notification.NotificationListenerService';
 

@@ -1,6 +1,14 @@
 import { forecastMonthEnd, safeToSpendToday } from './coach';
+import { getSubscriptionActivePrice, toLocalDateString } from './date';
+import { convertCurrency } from './currency';
 
 export type CoachInsightType = 'bill' | 'over' | 'category' | 'forecast' | 'recap' | 'safe';
+
+export interface CoachInsightAction {
+  type: 'pay_bill' | 'open_goals' | 'filter_category';
+  accountId?: string;
+  categoryId?: string;
+}
 
 export interface CoachInsight {
   /** Ends with the day (yyyy-MM-dd) for daily insights or the month (yyyy-MM) for monthly ones, so a dismissal lasts that long. */
@@ -8,6 +16,7 @@ export interface CoachInsight {
   type: CoachInsightType;
   title: string;
   sub: string;
+  action?: CoachInsightAction;
 }
 
 export interface CoachInput {
@@ -19,7 +28,7 @@ export interface CoachInput {
   dailySpend: number[];
   upcomingFixed: number; // subscriptions still to renew this month
   /** Credit cards with a billed amount to pay, with days until it is due (0 = today). */
-  bills: { name: string; billed: number; dueInDays: number }[];
+  bills: { id?: string; name: string; billed: number; dueInDays: number }[];
   liquid: number; // money in non-credit accounts
   /** Categories that have their own monthly budget, with this month's spend. */
   categories: { id: string; name: string; spent: number; budget: number }[];
@@ -28,15 +37,86 @@ export interface CoachInput {
   format: (n: number) => string;
 }
 
+/**
+ * Calculates upcoming subscriptions for the rest of the current month.
+ * Fully accounts for active promos, trial states, and split billing rules
+ * (personal share: people, percentage, or exact share amount).
+ */
+export function getUpcomingFixedSubscriptions(
+  subscriptions: Array<{
+    isPaused?: boolean;
+    isTrial?: boolean;
+    nextBillingDate?: string;
+    price: number;
+    currency?: string;
+    splitEnabled?: boolean;
+    splitType?: 'people' | 'percentage' | 'share';
+    splitValue?: number;
+    promoEnabled?: boolean;
+    promoPrice?: number;
+    promoEndDate?: string;
+  }>,
+  now: Date,
+  currencyCode: string = 'INR'
+): number {
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+  let upcomingFixed = 0;
+  for (const sub of subscriptions || []) {
+    if (sub.isPaused || sub.isTrial || !sub.nextBillingDate) continue;
+    const due = new Date(`${toLocalDateString(sub.nextBillingDate)}T12:00:00`);
+    if (due > now && due <= monthEnd) {
+      const price = getSubscriptionActivePrice(sub);
+      upcomingFixed += sub.currency && sub.currency.toUpperCase() !== currencyCode.toUpperCase()
+        ? convertCurrency(price, sub.currency, currencyCode)
+        : price;
+    }
+  }
+  return upcomingFixed;
+}
+
+/**
+ * Detects fixed non-discretionary commitments (Rent, Utilities, Bills, Subscriptions, EMIs, Loans, Insurance, Fees, Maintenance).
+ * These are lump sums that occur periodically, NOT daily repeatable lifestyle spending habits.
+ */
+export function isFixedCommitmentCategory(cat?: { id?: string; name?: string } | null): boolean {
+  if (!cat) return false;
+  const n = (cat.name || '').toLowerCase();
+  const id = (cat.id || '').toLowerCase();
+  return (
+    id.includes('rent') ||
+    id.includes('util') ||
+    id.includes('bill') ||
+    id.includes('subs') ||
+    id.includes('emi') ||
+    id.includes('loan') ||
+    id.includes('insur') ||
+    n.includes('rent') ||
+    n.includes('electric') ||
+    n.includes('power') ||
+    n.includes('utility') ||
+    n.includes('wifi') ||
+    n.includes('broadband') ||
+    n.includes('recharge') ||
+    n.includes('subscription') ||
+    n.includes('emi') ||
+    n.includes('loan') ||
+    n.includes('insurance') ||
+    n.includes('mortgage') ||
+    n.includes('fee') ||
+    n.includes('tuition') ||
+    n.includes('tax') ||
+    n.includes('maintenance')
+  );
+}
+
 const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 /**
- * The single most useful thing to tell the user right now, or null when there is nothing worth saying.
+ * All useful insights for the user right now, sorted by urgency.
  * Priority: a bill they may not cover > over budget > a category over budget > on pace to overspend >
  * a category near its limit > month-end / month-start recap > today's safe amount.
- * Quiet by design: little data means no insight, and wording hedges ("may", "about") where it is a prediction.
  */
-export function buildCoachInsight(i: CoachInput): CoachInsight | null {
+export function getAllCoachInsights(i: CoachInput): CoachInsight[] {
   const today = dayKey(i.now);
   const month = today.slice(0, 7);
   const day = i.now.getDate();
@@ -55,6 +135,7 @@ export function buildCoachInsight(i: CoachInput): CoachInsight | null {
         type: 'bill',
         title: `${soon.name} bill of ${i.format(soon.billed)} is due ${when}`,
         sub: `Your accounts hold ${i.format(Math.max(0, i.liquid))}, so you may fall short by about ${i.format(soon.billed - i.liquid)}.`,
+        action: soon.id ? { type: 'pay_bill', accountId: soon.id } : undefined,
       },
     });
   }
@@ -68,7 +149,7 @@ export function buildCoachInsight(i: CoachInput): CoachInsight | null {
           id: `over:${today}`,
           type: 'over',
           title: `${i.format(i.spentToDate - i.budget)} over this month's budget`,
-          sub: daysRemaining > 1 ? `${daysRemaining - 1} days left in the month. A low-spend day helps.` : 'The month ends today.',
+          sub: daysRemaining > 1 ? `${daysRemaining - 1} day${daysRemaining === 2 ? '' : 's'} left in the month. A low-spend day helps.` : 'The month ends today.',
         },
       });
     } else {
@@ -81,6 +162,7 @@ export function buildCoachInsight(i: CoachInput): CoachInsight | null {
         upcomingFixed: i.upcomingFixed,
         daysRemaining,
       });
+      let isOverPaceWarning = false;
       if (enoughHistory) {
         const f = forecastMonthEnd({
           spentToDate: i.spentToDate,
@@ -89,6 +171,7 @@ export function buildCoachInsight(i: CoachInput): CoachInsight | null {
           upcomingFixed: i.upcomingFixed,
         });
         if (f && f.low > i.budget * 1.03) {
+          isOverPaceWarning = true;
           candidates.push({
             p: 4,
             insight: {
@@ -109,10 +192,13 @@ export function buildCoachInsight(i: CoachInput): CoachInsight | null {
             type: 'recap',
             title: `${i.format(i.budget - i.spentToDate)} of this month's budget is unspent`,
             sub: 'Moving it into a goal makes it saved before it gets spent.',
+            action: { type: 'open_goals' },
           },
         });
       }
-      if (safe && day >= 3) {
+      // Only show safe allowance card when NOT already displaying the over-pace forecast warning,
+      // avoiding duplicate and contradictory advice in the deck.
+      if (safe && day >= 3 && !isOverPaceWarning) {
         candidates.push({
           p: 8,
           insight: {
@@ -131,7 +217,7 @@ export function buildCoachInsight(i: CoachInput): CoachInsight | null {
     .filter((c) => c.budget > 0 && c.spent >= c.budget * 0.8)
     .sort((a, b) => b.spent / b.budget - a.spent / a.budget)[0];
   if (hot) {
-    const over = hot.spent >= hot.budget;
+    const over = hot.spent > hot.budget; // exactly 100% is used up, not over
     const pct = Math.round((hot.spent / hot.budget) * 100);
     const perDay = daysRemaining > 0 ? Math.max(0, (hot.budget - hot.spent) / daysRemaining) : 0;
     candidates.push({
@@ -141,8 +227,9 @@ export function buildCoachInsight(i: CoachInput): CoachInsight | null {
         type: 'category',
         title: over ? `${hot.name} is ${i.format(hot.spent - hot.budget)} over its budget` : `${hot.name} has used ${pct}% of its budget`,
         sub: over
-          ? `${daysRemaining > 1 ? `${daysRemaining - 1} days` : 'No days'} left in the month.`
+          ? `${daysRemaining > 1 ? `${daysRemaining - 1} day${daysRemaining === 2 ? '' : 's'}` : 'No days'} left in the month.`
           : `${i.format(hot.budget - hot.spent)} left with ${daysRemaining} day${daysRemaining === 1 ? '' : 's'} to go, about ${i.format(perDay)} a day.`,
+        action: { type: 'filter_category', categoryId: hot.id },
       },
     });
   }
@@ -161,5 +248,20 @@ export function buildCoachInsight(i: CoachInput): CoachInsight | null {
   }
 
   candidates.sort((a, b) => a.p - b.p);
-  return candidates[0]?.insight ?? null;
+  return candidates.map((c) => c.insight);
+}
+
+/**
+ * The single most useful thing to tell the user right now, or null when there is nothing worth saying.
+ */
+export function buildCoachInsight(i: CoachInput): CoachInsight | null {
+  const all = getAllCoachInsights(i);
+  return all[0] ?? null;
+}
+
+export const COACH_DISMISSED_STORAGE_KEY = '@coach_dismissed_v1';
+
+export async function resetDismissedCoachInsights(): Promise<void> {
+  const AsyncStorage = (await import('@/utils/storage')).default;
+  await AsyncStorage.removeItem(COACH_DISMISSED_STORAGE_KEY);
 }

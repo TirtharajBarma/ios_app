@@ -83,10 +83,10 @@ export default function TransactionDetailScreen() {
 
   const category = useMemo((): ExpenseCategory => {
     if (!transaction) return { id: 'unknown', name: 'General', color: '#8E919D', iconName: 'MoreHorizontal' };
-    const found = categories.find((c) => c.id === transaction.categoryId);
-    if (found) return found;
-    if (transaction.type === 'income') return { id: 'cat_income', name: 'Income', color: expenseColors.accentGreen, iconName: 'Coins' };
-    return { id: transaction.categoryId, name: 'Expense', color: '#8E919D', iconName: 'MoreHorizontal' };
+    if (transaction.categoryId === 'cat_split_return' || transaction.settledTxId?.startsWith('split_settle:')) {
+      return { id: 'cat_split_return', name: 'Split Received', color: expenseColors.accentGreen, iconName: 'Users' };
+    }
+    return useExpenseStore.getState().getCategoryById(transaction.categoryId);
   }, [categories, transaction]);
 
   const fromAccount = useMemo((): ExpenseAccount | null => {

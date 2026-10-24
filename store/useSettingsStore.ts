@@ -95,14 +95,19 @@ const STORAGE_KEY = "@expense_settings_v3";
 const LEGACY_STORAGE_KEY_V3 = "@legacy_settings_v3";
 const LEGACY_STORAGE_KEY_V2 = "@legacy_settings_v2";
 
-async function save(patch: Record<string, unknown>) {
-  try {
-    const current = await AsyncStorage.getItem(STORAGE_KEY);
-    const parsed = current ? JSON.parse(current) : {};
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ ...parsed, ...patch }));
-  } catch (e) {
-    console.warn("Failed to save setting:", e);
-  }
+// Serialised so concurrent read-modify-write saves can't clobber each other's keys.
+let saveChain: Promise<void> = Promise.resolve();
+function save(patch: Record<string, unknown>): Promise<void> {
+  saveChain = saveChain.then(async () => {
+    try {
+      const current = await AsyncStorage.getItem(STORAGE_KEY);
+      const parsed = current ? JSON.parse(current) : {};
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ ...parsed, ...patch }));
+    } catch (e) {
+      console.warn("Failed to save setting:", e);
+    }
+  });
+  return saveChain;
 }
 
 /** Best-effort: keep every group's member list showing the latest display name. */
@@ -253,6 +258,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       customCategories: [],
       shareGroups: [],
       shareGroup: null,
+      shortcutSaved: false,
+      autoTrackSmsEnabled: false,
+      autoTrackAutoApprove: false,
+      autoTrackDefaultAccountId: null as string | null,
+      pendingTransactions: [] as PendingTransaction[],
     };
     set(cleanSettings);
     await AsyncStorage.removeItem(STORAGE_KEY);

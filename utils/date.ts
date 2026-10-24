@@ -70,10 +70,11 @@ export function relativeLabel(iso: string): string {
 export function advanceCycle(
   iso: string,
   cycle: BillingCycle | string,
-  customMonths = 1
+  customMonths = 1,
+  anchorDay?: number
 ): string {
   const base = toDate(iso);
-  const next = advanceCycleDate(base, cycle, customMonths);
+  const next = advanceCycleDate(base, cycle, customMonths, anchorDay);
   return next.toISOString();
 }
 

@@ -149,7 +149,9 @@ export const CategoryIcon: React.FC<CategoryIconProps> = ({
   if (resolvedName === 'Shield') return <Shield {...props} />;
   if (resolvedName === 'Smile') return <Smile {...props} />;
   if (resolvedName === 'Folder') return <Folder {...props} />;
-  if (resolvedName === 'Users') return <Users {...props} />;
+  if (resolvedName === 'Users' || (!resolvedName && (resolvedId === 'cat_split_return' || resolvedId === 'cat_split'))) {
+    return <Users {...props} />;
+  }
   if (resolvedName === 'Wallet') return <Wallet {...props} />;
   if (resolvedName === 'Landmark') return <Landmark {...props} />;
   if (resolvedName === 'TrendingUp') return <TrendingUp {...props} />;

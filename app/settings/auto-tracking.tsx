@@ -246,7 +246,7 @@ export default function AutoTrackingScreen() {
         {/* Section 1 Footnote */}
         <View style={styles.sectionFooterWrap}>
           <AppText style={styles.sectionFooterText}>
-            Bank SMS alerts are parsed 100% on your device using local pattern recognition. OTPs and personal messages are discarded. Financial data never leaves your phone.
+            Cashveil listens for transaction notifications and parses bank alerts 100% on your device using local pattern recognition. OTPs and personal messages are discarded. Financial data never leaves your phone.
           </AppText>
         </View>
 
@@ -272,7 +272,7 @@ export default function AutoTrackingScreen() {
                     <AppText style={styles.rowSubtitle}>
                       {hasPermission
                         ? 'Granted · Background listener active'
-                        : 'Required to read incoming financial SMS'}
+                        : 'Tap "Cashveil" and toggle on "Allow notification access"'}
                     </AppText>
                   </View>
                 </View>
@@ -288,6 +288,14 @@ export default function AutoTrackingScreen() {
                   </View>
                 )}
               </TouchableOpacity>
+            </View>
+
+            <View style={styles.sectionFooterWrap}>
+              <AppText style={styles.sectionFooterText}>
+                {hasPermission
+                  ? 'Cashveil listens for transaction notifications in real-time. Notification contents never leave your device.'
+                  : 'Tap "Enable", find "Cashveil" in the list and toggle on "Allow notification access" so incoming bank alerts can be captured automatically.'}
+              </AppText>
             </View>
           </>
         ) : (
@@ -309,7 +317,7 @@ export default function AutoTrackingScreen() {
                   <View style={{ flex: 1, marginRight: 8 }}>
                     <AppText style={styles.rowTitle}>iOS Siri Shortcut</AppText>
                     <AppText style={styles.rowSubtitle}>
-                      Apple sandboxes SMS from apps. Use Monevo Shortcut to log expenses instantly.
+                      Apple sandboxes SMS from apps. Use Cashveil Shortcut to log expenses instantly.
                     </AppText>
                   </View>
                 </View>
@@ -348,7 +356,7 @@ export default function AutoTrackingScreen() {
         {/* ── FOOTER CAPTION ── */}
         <View style={styles.footerNoteWrap}>
           <AppText style={styles.footerNoteText}>
-            Monevo On-Device Engine • Zero Cloud Telemetry • Private & Secure
+            Cashveil On-Device Engine • Zero Cloud Telemetry • Private & Secure
           </AppText>
         </View>
       </ScrollView>

@@ -1013,11 +1013,11 @@ export const ExpenseSettings: React.FC = () => {
         {/* Footer Credit & Version */}
         <View style={styles.footerCreditWrap}>
           <Image
-            source={require('@/assets/images/monevo-logo.png')}
+            source={require('@/assets/images/cashveil-logo.png')}
             style={styles.footerBrandLogo}
             resizeMode="contain"
           />
-          <AppText style={styles.footerBrandTitle}>MONEVO</AppText>
+          <AppText style={styles.footerBrandTitle}>CASHVEIL</AppText>
           <AppText style={styles.footerVersionText}>
             Version {updateInfo.activeVersion || CURRENT_RELEASE_VERSION} {updateInfo.isEmbeddedLaunch ? '· Base' : '· OTA'}
           </AppText>

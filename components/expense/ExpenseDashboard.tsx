@@ -68,12 +68,11 @@ export const ExpenseDashboard: React.FC = () => {
   // Standard HIG tap active tab to scroll to top
   useScrollToTop(scrollRef);
 
-  // Reset scroll to top ONLY when actively switching tabs from another tab + sync month
+  // Reset scroll to top ONLY when actively switching tabs from another tab + initialize month if needed
   useFocusEffect(
     useCallback(() => {
-      const currentCalMonth = monthKeyOf(new Date());
-      if (useExpenseStore.getState().selectedMonth !== currentCalMonth) {
-        useExpenseStore.getState().setSelectedMonth(currentCalMonth);
+      if (!useExpenseStore.getState().selectedMonth) {
+        useExpenseStore.getState().setSelectedMonth(monthKeyOf(new Date()));
       }
       handleTabFocus('index', () => {
         scrollRef.current?.scrollTo({ y: 0, animated: false });
@@ -167,6 +166,11 @@ export const ExpenseDashboard: React.FC = () => {
     setShowAccountsModal(true);
   };
 
+  const handleOpenGoals = () => {
+    setAccountsModalTab('goals');
+    setShowAccountsModal(true);
+  };
+
   const handleAccountPress = (acc: ExpenseAccount) => {
     Haptics.selectionAsync().catch(() => {});
     router.push(`/account/${acc.id}`);
@@ -174,6 +178,14 @@ export const ExpenseDashboard: React.FC = () => {
 
   const handleCategorySelect = (_catId: string) => {
     // Tapping category in arc inspects category spend only, does not open Add Transaction modal
+  };
+
+  const handleCoachCategoryFilter = (catId: string) => {
+    const cat = useExpenseStore.getState().categories.find((c) => c.id === catId);
+    if (cat) {
+      useExpenseStore.getState().setSmartSearchQuery(cat.name);
+      router.push('/(tabs)/ledger');
+    }
   };
 
   return (
@@ -218,7 +230,13 @@ export const ExpenseDashboard: React.FC = () => {
         </Animated.View>
 
         {/* The one quiet coach line; renders nothing unless there is something worth saying */}
-        {transactions.length > 0 && <CoachInsightCard />}
+        {transactions.length > 0 && (
+          <CoachInsightCard
+            onPayBill={handlePayBill}
+            onOpenGoals={handleOpenGoals}
+            onFilterCategory={handleCoachCategoryFilter}
+          />
+        )}
 
         {/* First-Time User Onboarding Guide Checklist */}
         {transactions.length === 0 && !dismissOnboarding && (

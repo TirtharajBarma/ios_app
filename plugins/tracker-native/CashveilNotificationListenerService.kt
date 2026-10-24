@@ -9,11 +9,11 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-class MonevoNotificationListenerService : NotificationListenerService() {
+class CashveilNotificationListenerService : NotificationListenerService() {
 
     companion object {
-        private const val TAG = "MonevoNotifListener"
-        const val PREFS_NAME = "monevo_financial_inbox"
+        private const val TAG = "CashveilNotifListener"
+        const val PREFS_NAME = "cashveil_financial_inbox"
         const val KEY_NOTIFICATIONS = "pending_notifications"
         private const val MAX_QUEUE_SIZE = 100
     }

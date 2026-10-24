@@ -48,10 +48,10 @@ class TransactionTrackerModule(private val reactContext: ReactApplicationContext
     fun getPendingNotifications(promise: Promise) {
         try {
             val prefs = reactContext.getSharedPreferences(
-                MonevoNotificationListenerService.PREFS_NAME,
+                CashveilNotificationListenerService.PREFS_NAME,
                 Context.MODE_PRIVATE
             )
-            val raw = prefs.getString(MonevoNotificationListenerService.KEY_NOTIFICATIONS, "[]") ?: "[]"
+            val raw = prefs.getString(CashveilNotificationListenerService.KEY_NOTIFICATIONS, "[]") ?: "[]"
             promise.resolve(raw)
         } catch (e: Exception) {
             promise.reject("ERR_READ_NOTIFICATIONS", e.message, e)
@@ -62,10 +62,10 @@ class TransactionTrackerModule(private val reactContext: ReactApplicationContext
     fun ackNotification(id: String, promise: Promise) {
         try {
             val prefs = reactContext.getSharedPreferences(
-                MonevoNotificationListenerService.PREFS_NAME,
+                CashveilNotificationListenerService.PREFS_NAME,
                 Context.MODE_PRIVATE
             )
-            val raw = prefs.getString(MonevoNotificationListenerService.KEY_NOTIFICATIONS, "[]") ?: "[]"
+            val raw = prefs.getString(CashveilNotificationListenerService.KEY_NOTIFICATIONS, "[]") ?: "[]"
             val array = JSONArray(raw)
             val updated = JSONArray()
 
@@ -76,7 +76,7 @@ class TransactionTrackerModule(private val reactContext: ReactApplicationContext
                 }
             }
 
-            prefs.edit().putString(MonevoNotificationListenerService.KEY_NOTIFICATIONS, updated.toString()).apply()
+            prefs.edit().putString(CashveilNotificationListenerService.KEY_NOTIFICATIONS, updated.toString()).apply()
             promise.resolve(true)
         } catch (e: Exception) {
             promise.reject("ERR_ACK_NOTIFICATION", e.message, e)
@@ -87,10 +87,10 @@ class TransactionTrackerModule(private val reactContext: ReactApplicationContext
     fun clearNotifications(promise: Promise) {
         try {
             val prefs = reactContext.getSharedPreferences(
-                MonevoNotificationListenerService.PREFS_NAME,
+                CashveilNotificationListenerService.PREFS_NAME,
                 Context.MODE_PRIVATE
             )
-            prefs.edit().putString(MonevoNotificationListenerService.KEY_NOTIFICATIONS, "[]").apply()
+            prefs.edit().putString(CashveilNotificationListenerService.KEY_NOTIFICATIONS, "[]").apply()
             promise.resolve(true)
         } catch (e: Exception) {
             promise.reject("ERR_CLEAR_NOTIFICATIONS", e.message, e)

@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "Monevo",
+    "name": "Cashveil",
     "slug": "subscription",
-    "version": "1.1.8",
+    "version": "1.2.3",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "monevo",
+    "scheme": "cashveil",
     "userInterfaceStyle": "dark",
     "ios": {
       "icon": "./assets/images/icon.png",
@@ -85,12 +85,12 @@
       },
       "supabaseUrl": "https://nvsjrfzzessvynnuurcg.supabase.co",
       "supabaseAnonKey": "sb_publishable_hmdnizlu8wzE6EwOj2IJvw_0mc9qG7J",
-      "updateVersion": "v1.1.8",
-      "updateDescription": "Fix Safe to spend amount visibility and smooth dynamic calendar carousel",
+      "updateVersion": "v1.2.3",
+      "updateDescription": "Fix split settlement category persistence, lock predefined categories against manipulation, and fix participant layout for long names",
       "updateNotes": [
-        "Fix Safe to spend amount visibility and smooth dynamic calendar carousel"
+        "Fix split settlement category persistence, lock predefined categories against manipulation, and fix participant layout for long names"
       ],
-      "easUpdateMessage": "v1.1.8: Fix Safe to spend amount visibility and smooth dynamic calendar carousel"
+      "easUpdateMessage": "v1.2.3: Fix split settlement category persistence, lock predefined categories against manipulation, and fix participant layout for long names"
     },
     "owner": "tirtharaj_barma",
     "runtimeVersion": "1",

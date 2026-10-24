@@ -2,8 +2,10 @@ import AppIntents
 
 /// A category the user actually has in their ledger.
 ///
-/// Filters out system categories (income, split returns, debt repayment) and
-/// hidden categories so only active user expense categories appear in Siri and Shortcuts.
+/// Mirrors `getUserCategories` in store/useExpenseStore.ts: only the system
+/// categories are hidden, by id. Names are never inspected, so every category the
+/// user adds in Settings shows up here. Keep `systemCategoryIds` in sync with
+/// `SYSTEM_CATEGORY_IDS` (plus `cat_cig`) in that file.
 @available(iOS 16.0, *)
 struct ExpenseCategoryEntity: AppEntity, Identifiable {
   static var typeDisplayRepresentation = TypeDisplayRepresentation(name: "Expense Category")
@@ -28,21 +30,8 @@ private let systemCategoryIds: Set<String> = [
 
 private func isUserExpenseCategory(_ raw: [String: Any]) -> Bool {
   let id = string(raw["id"])
-  let name = string(raw["name"]).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-  if systemCategoryIds.contains(id) { return false }
-  if name == "income"
-    || name.contains("split")
-    || name.contains("debt")
-    || name.contains("borrow")
-    || name.contains("lent")
-    || name.contains("lend")
-    || name.contains("goal")
-    || name.contains("vault")
-    || name.contains("cigarette")
-  {
-    return false
-  }
-  return !id.isEmpty && !name.isEmpty
+  let name = string(raw["name"]).trimmingCharacters(in: .whitespacesAndNewlines)
+  return !id.isEmpty && !name.isEmpty && !systemCategoryIds.contains(id)
 }
 
 @available(iOS 16.0, *)
@@ -56,6 +45,7 @@ private let defaultCategories: [ExpenseCategoryEntity] = [
   ExpenseCategoryEntity(id: "cat_fin", name: "Finance"),
   ExpenseCategoryEntity(id: "cat_util", name: "Utilities"),
   ExpenseCategoryEntity(id: "cat_misc", name: "Misc"),
+  ExpenseCategoryEntity(id: "cat_other", name: "Other"),
 ]
 
 @available(iOS 16.0, *)
@@ -65,30 +55,33 @@ private let defaultAccounts: [ExpenseAccountEntity] = [
   ExpenseAccountEntity(id: "acc_card", name: "Credit Card", kind: "credit"),
 ]
 
+/// The user's categories in Settings order. The built-in list is used only when
+/// no categories could be read at all (app never run, or the file is unreadable);
+/// a readable store whose categories are all hidden yields an empty list.
+@available(iOS 16.0, *)
+private func userCategoryEntities() -> [ExpenseCategoryEntity] {
+  guard let snapshot = ExpenseStore.load(), !snapshot.categories.isEmpty else {
+    return defaultCategories
+  }
+  return snapshot.categories
+    .filter { isUserExpenseCategory($0) }
+    .map { ExpenseCategoryEntity(id: string($0["id"]), name: string($0["name"])) }
+}
+
 @available(iOS 16.0, *)
 struct ExpenseCategoryQuery: EntityStringQuery {
 
   func entities(for identifiers: [ExpenseCategoryEntity.ID]) async throws -> [ExpenseCategoryEntity] {
-    let all = (ExpenseStore.load()?.categories ?? []).filter { isUserExpenseCategory($0) }
-    let mapped = all
-      .filter { identifiers.contains(string($0["id"])) }
-      .map { ExpenseCategoryEntity(id: string($0["id"]), name: string($0["name"])) }
-    return mapped.isEmpty ? defaultCategories.filter { identifiers.contains($0.id) } : mapped
+    userCategoryEntities().filter { identifiers.contains($0.id) }
   }
 
   func suggestedEntities() async throws -> [ExpenseCategoryEntity] {
-    let fromStore = (ExpenseStore.load()?.categories ?? [])
-      .filter { isUserExpenseCategory($0) }
-      .map { ExpenseCategoryEntity(id: string($0["id"]), name: string($0["name"])) }
-    return fromStore.isEmpty ? defaultCategories : fromStore
+    userCategoryEntities()
   }
 
   func entities(matching query: String) async throws -> [ExpenseCategoryEntity] {
     let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    let fromStore = (ExpenseStore.load()?.categories ?? [])
-      .filter { isUserExpenseCategory($0) }
-      .map { ExpenseCategoryEntity(id: string($0["id"]), name: string($0["name"])) }
-    let list = fromStore.isEmpty ? defaultCategories : fromStore
+    let list = userCategoryEntities()
     guard !needle.isEmpty else { return list }
     return list.filter { $0.name.lowercased().contains(needle) }
   }

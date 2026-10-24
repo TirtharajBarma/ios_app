@@ -6,6 +6,7 @@ import { useSettingsStore } from "@/store/useSettingsStore";
 import {
   deleteSharedSubscriptionRemote,
   fetchSharedSubscriptions,
+  getCurrentUserId,
   isSupabaseConfigured,
   subscribeToSharedChanges,
   upsertSharedSubscription,
@@ -50,6 +51,17 @@ async function addPendingDelete(id: string, groupId: string): Promise<void> {
   }
 }
 
+/** Drop a tombstone (e.g. the user re-shared a sub they had un-shared offline). */
+async function removePendingDelete(id: string, groupId: string): Promise<void> {
+  try {
+    const pending = await readPendingDeletes();
+    const next = pending.filter((p) => !(p.id === id && p.groupId === groupId));
+    if (next.length !== pending.length) await AsyncStorage.setItem(PENDING_DELETE_KEY, JSON.stringify(next));
+  } catch (e) {
+    console.warn("Shared: failed to clear pending delete", e);
+  }
+}
+
 /** Attempt to send queued deletions; drops entries that succeeded. */
 export async function flushPendingDeletes(groupId?: string): Promise<void> {
   try {
@@ -71,6 +83,17 @@ export async function flushPendingDeletes(groupId?: string): Promise<void> {
 }
 
 let syncInFlight = false;
+let syncRerun = false;
+
+/** True when the local sub already carries every field the server row holds (stops pull/push ping-pong). */
+function sameAsRow(local: Subscription, row: SharedRow): boolean {
+  const r = rowToSubscription(row);
+  const keys = [
+    "name", "price", "currency", "rawBillingCycle", "nextBillingDate", "category", "color",
+    "isTrial", "trialEndDate", "splitEnabled", "splitType", "splitValue", "isPaused", "note", "website", "logoIcon",
+  ] as const;
+  return keys.every((k) => (local[k] ?? null) === (r[k] ?? null));
+}
 
 /** Converts a server row into a full local Subscription (shared copies). */
 export function rowToSubscription(row: SharedRow): Subscription {
@@ -174,6 +197,9 @@ export async function pushSharedSubscription(
     const groupId = isInGroups(sub.sharedGroupId) ? sub.sharedGroupId! : null;
     if (!groupId) return;
 
+    // Re-sharing something un-shared while offline: the stale tombstone must not delete it again.
+    await removePendingDelete(sub.id, groupId);
+
     const ok = await upsertSharedSubscription(subscriptionToPayload(sub));
     if (!ok) return; // temporary failure → next sync's "never pushed" path repairs it
 
@@ -203,10 +229,27 @@ export async function pushSharedSubscription(
 export async function syncSharedSubscriptions(): Promise<number> {
   const groups = useSettingsStore.getState().shareGroups;
   if (!groups.length || !isSupabaseConfigured()) return 0;
-  if (syncInFlight) return 0;
+  if (syncInFlight) {
+    syncRerun = true; // coalesce: run once more after the current pass instead of dropping this trigger
+    return 0;
+  }
 
   syncInFlight = true;
+  let total = 0;
   try {
+    do {
+      syncRerun = false;
+      total += await syncOnce();
+    } while (syncRerun);
+    return total;
+  } finally {
+    syncInFlight = false;
+  }
+}
+
+async function syncOnce(): Promise<number> {
+  const groups = useSettingsStore.getState().shareGroups;
+  {
     // Throws on network/rpc failure (see api/supabase.ts) so we never treat a
     // failed fetch as "everything was deleted".
     const rows = await fetchSharedSubscriptions();
@@ -220,10 +263,17 @@ export async function syncSharedSubscriptions(): Promise<number> {
 
     // Remote-id tracking is per group so that leaving one group doesn't clobber
     // the delete-detection state of the other groups the user belongs to.
-    const storedRemote: unknown = JSON.parse((await AsyncStorage.getItem(REMOTE_IDS_KEY)) || "{}");
+    let storedRemote: unknown = {};
+    try {
+      storedRemote = JSON.parse((await AsyncStorage.getItem(REMOTE_IDS_KEY)) || "{}");
+    } catch {}
+    let myId: string | null = null;
+    try {
+      myId = await getCurrentUserId();
+    } catch {}
     const rawByGroup = Array.isArray(storedRemote)
       ? { [groups[0]?.id ?? ""]: storedRemote } // legacy array → first group
-      : (storedRemote as Record<string, string[]>) ?? {};
+      : ((storedRemote as Record<string, string[]>) ?? {});
 
     const remoteIdsByGroup = new Map<string, Set<string>>();
     for (const row of rows) {
@@ -257,18 +307,31 @@ export async function syncSharedSubscriptions(): Promise<number> {
         continue;
       }
 
+      // Our own published sub: the local copy is the source of truth, never overwrite it from the echo.
+      const mine = !!myId && row.publisher_user_id === myId;
       const remoteTime = new Date(row.updated_at).getTime();
       const localTime = new Date(local.updatedAt).getTime();
-      if (remoteTime > localTime) {
-        // Remote is newer → pull it down.
+      if (remoteTime > localTime && !mine) {
+        // Remote is newer → pull it down, keeping device-local fields.
         const sub = rowToSubscription(row);
-        await db.updateSubscription(sub.id, toInput(sub));
-        await scheduleReminder(sub).catch(() => {});
+        const input: Partial<NewSubscriptionInput> = toInput(sub);
+        delete input.reminderEnabled;
+        delete input.reminderDays;
+        delete input.serviceId;
+        delete input.brandVariant;
+        delete input.logoImageUri;
+        // Any logo field in the update rewrites all logo columns; keep the local logo if it has one.
+        if (local.serviceId || local.logoImageUri || local.brandVariant) delete input.logoIcon;
+        await db.updateSubscription(sub.id, input);
+        await scheduleReminder({ ...local, ...input, id: sub.id } as Subscription).catch(() => {});
         applied += 1;
         notifySharedChange("updated", row.name, row.publisher_name);
-      } else if (localTime > remoteTime) {
-        // Local is newer (e.g. offline edit) → push it up.
-        await upsertSharedSubscription(subscriptionToPayload(local)).catch(() => {});
+      } else if (localTime > remoteTime && !sameAsRow(local, row)) {
+        // Local is newer (e.g. offline edit) → push it up, but only if we're allowed to edit that row.
+        const iOwnGroup = groups.find((g) => g.id === row.group_id)?.ownerUserId === myId;
+        if (!row.publisher_user_id || mine || iOwnGroup) {
+          await upsertSharedSubscription(subscriptionToPayload(local)).catch(() => {});
+        }
       }
     }
 
@@ -288,7 +351,11 @@ export async function syncSharedSubscriptions(): Promise<number> {
         ? knownBeforeByGroup.get(groupId)?.has(id) ?? false
         : Array.from(knownBeforeByGroup.values()).some((s) => s.has(id));
 
-      if (isKnownBefore) {
+      if (groupId && !groups.some((g) => g.id === groupId)) {
+        // We left / were removed / the group is gone: keep the user's data as a plain local subscription.
+        await db.updateSubscription(id, { isShared: false, sharedGroupId: "" });
+        applied += 1;
+      } else if (isKnownBefore) {
         // Known on server before, gone now → remotely deleted.
         await db.deleteSubscription(id);
         await cancelReminder(id).catch(() => {});
@@ -311,8 +378,6 @@ export async function syncSharedSubscriptions(): Promise<number> {
     for (const [g, set] of remoteIdsByGroup) nextByGroup[g] = [...set];
     await AsyncStorage.setItem(REMOTE_IDS_KEY, JSON.stringify(nextByGroup));
     return applied;
-  } finally {
-    syncInFlight = false;
   }
 }
 

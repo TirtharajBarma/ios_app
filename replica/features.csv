@@ -1,0 +1,26 @@
+feature,area,priority,original,clone,notes
+Import CSV statements,Import,must,yes,yes,utils/csv.ts
+Import XLSX/XLS statements,Import,must,yes,no,no xlsx parser found
+Import PDF statements,Import,must,yes,yes,utils/pdfParser.ts
+Password-protected PDF,Import,should,yes,yes,PdfPasswordModal
+Multilingual column headings,Import,could,yes,partial,locale code exists; languages unverified
+Debit/credit and Dr/Cr columns,Import,should,yes,partial,debit handling present; Dr/Cr unverified
+Duplicate detection on re-import,Import,must,yes,yes,StatementReviewModal
+Receipt scan with camera,Import,should,yes,partial,ocr/receipt code present; unverified
+Keyword rules auto-categorise,Organize,should,yes,partial,rules code present; unverified
+Accounts cards wallets with balances,Track,must,yes,yes,AccountsSection
+Overall and per-category budget,Track,must,yes,yes,BudgetCard SetBudgetModal
+Subscriptions list with reminders,Track,should,yes,yes,core of this app
+Transfers not counted as spending,Track,must,yes,yes,transfer logic present
+Money-flow chart,Insights,should,yes,yes,MoneyFlowCard
+Spending by category and month compare,Insights,must,yes,yes,ExpenseVisualizer
+Daily calendar and weekday pattern,Insights,could,yes,yes,
+Natural-language search,Insights,could,yes,partial,onDeviceAi.ts; unverified
+Custom categories colour and icon,Organize,should,yes,yes,IconPicker CategoryIcon
+Bulk select recategorise delete,Organize,should,yes,partial,ledger selection exists; recategorise unverified
+Export CSV or PDF,Privacy,should,yes,partial,JSON backup confirmed; CSV/PDF unverified
+Siri and Shortcuts quick add,Quick entry,should,yes,yes,app-intents/
+iCloud sync no account,Privacy,could,yes,partial,iCloud code present; Supabase also used
+On-device data no account,Privacy,must,yes,yes,SQLite
+Biometric app lock,Privacy,could,no,yes,added feature
+Android auto-tracking from notifications,Track,could,no,yes,added feature

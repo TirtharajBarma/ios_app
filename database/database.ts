@@ -11,6 +11,8 @@ import {
   createTransaction,
   getTransactionsBySubscriptionId,
   deleteTransactionsBySubscriptionId,
+  updatePaymentRowOnDay,
+  deletePaymentRowsOnDay,
 } from "./queries";
 import type { DbSubscription } from "./schema";
 import type { Subscription, NewSubscriptionInput } from "@/types/subscription";
@@ -319,4 +321,4 @@ export async function deleteAllSubscriptions(): Promise<void> {
   await dbDeleteAllSubscriptions();
 }
 
-export { createTransaction, getTransactionsBySubscriptionId, deleteTransactionsBySubscriptionId };
+export { createTransaction, getTransactionsBySubscriptionId, deleteTransactionsBySubscriptionId, updatePaymentRowOnDay, deletePaymentRowsOnDay };

@@ -19,6 +19,8 @@ export interface StagedStatementTxn {
   balance?: number;
   isDuplicate: boolean;
   compositeHash: string;
+  /** Direction for transfers (incoming = true); lets reconciliation count them as credits. */
+  isCredit?: boolean;
   rawLine?: string;
 }
 
@@ -75,8 +77,10 @@ export function generateCompositeHash(
  */
 export function parseInternationalAmount(str: string): number {
   if (!str) return 0;
+  // Accounting negative "(1,234.50)"
+  if (/^\s*\(.*\)\s*$/.test(str)) return -parseInternationalAmount(str.replace(/[()]/g, ''));
   // Remove currency symbols and surrounding whitespace
-  let clean = str.replace(/[₹$€£¥Rs.]/gi, (m) => (m === '.' ? '.' : '')).replace(/\s+/g, '').trim();
+  let clean = str.replace(/(?:Rs\.?|INR|[₹$€£¥])/gi, '').replace(/\s+/g, '').trim();
   if (!clean) return 0;
 
   const hasComma = clean.includes(',');
@@ -120,62 +124,52 @@ export function parseInternationalAmount(str: string): number {
 }
 
 // Convert various date formats into standardized ISO "YYYY-MM-DD"
+// Returns '' when the input is not a valid calendar date (never silently "today").
 export function normalizeDateToISO(dateStr: string): string {
-  const clean = dateStr.trim();
-  const now = new Date();
-  const todayISO = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  // Strip a trailing time part ("2026-10-11 14:30:00", "11/10/2026T10:00Z")
+  const clean = dateStr.trim().replace(/[T\s]+\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?\s*(?:[ap]m)?\s*Z?$/i, '');
+  const build = (y: string, m: string | number, d: string | number): string => {
+    const yr = y.length === 2 ? 2000 + Number(y) : Number(y);
+    const mo = Number(m);
+    const dy = Number(d);
+    if (!/^\d{2}$|^\d{4}$/.test(y) || mo < 1 || mo > 12 || dy < 1 || dy > new Date(yr, mo, 0).getDate()) return '';
+    return `${yr}-${String(mo).padStart(2, '0')}-${String(dy).padStart(2, '0')}`;
+  };
 
-  const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  // 3-letter prefixes: English, German, Spanish, French, Portuguese, Turkish
+  const MONTH_BY_PREFIX: Record<string, number> = {
+    jan: 1, ene: 1, oca: 1, feb: 2, fev: 2, fév: 2, şub: 2, mar: 3, mär: 3, mrz: 3, apr: 4, abr: 4, avr: 4, nis: 4,
+    may: 5, mai: 5, haz: 6, jun: 6, jui: 6, jul: 7, tem: 7, aug: 8, ago: 8, aou: 8, aoû: 8, agu: 8, ağu: 8, juil: 7, sep: 9, set: 9, eyl: 9,
+    oct: 10, okt: 10, out: 10, eki: 10, nov: 11, kas: 11, dec: 12, dez: 12, dic: 12, déc: 12, ara: 12,
+  };
+  const monthOf = (w: string) => {
+    const k = w.toLowerCase().replace(/[^\p{L}]/gu, '');
+    return MONTH_BY_PREFIX[k.slice(0, 4)] ?? MONTH_BY_PREFIX[k.slice(0, 3)] ?? 0;
+  };
 
   // 1a. "MMM DD, YYYY" e.g. "Sep 29, 2026", "September 29, 2026", "Sep 29 2026"
-  const mdyWord = clean.match(/([A-Za-z]{3,9}\.?)\s+(\d{1,2}),?\s+(\d{2,4})(?![\d:])/);
-  if (mdyWord) {
-    const wordClean = mdyWord[1].toLowerCase().replace(/[^a-z]/g, '').slice(0, 3);
-    const mIdx = months.indexOf(wordClean);
-    const month = (mIdx >= 0 ? mIdx + 1 : 1).toString().padStart(2, '0');
-    const day = mdyWord[2].padStart(2, '0');
-    let year = mdyWord[3];
-    if (year.length === 2) year = `20${year}`;
-    return `${year}-${month}-${day}`;
+  const mdyWord = clean.match(/(\p{L}{3,9}\.?)\s+(\d{1,2}),?\s+(\d{2,4})(?![\d:])/u);
+  if (mdyWord && monthOf(mdyWord[1])) {
+    return build(mdyWord[3], monthOf(mdyWord[1]), mdyWord[2]);
   }
 
   // 1b. "DD MMM YYYY" e.g. "13 Sep 2026", "21-Sept-2026", "21/Sep./26", "15 September 2026"
-  const dmyWord = clean.match(/(\d{1,2})[\s\-/]+([A-Za-z]{3,9}\.?)[\s\-/]+(\d{2,4})/);
-  if (dmyWord) {
-    const day = dmyWord[1].padStart(2, '0');
-    const wordClean = dmyWord[2].toLowerCase().replace(/[^a-z]/g, '').slice(0, 3);
-    const mIdx = months.indexOf(wordClean);
-    const month = (mIdx >= 0 ? mIdx + 1 : 1).toString().padStart(2, '0');
-    let year = dmyWord[3];
-    if (year.length === 2) year = `20${year}`;
-    return `${year}-${month}-${day}`;
+  const dmyWord = clean.match(/(\d{1,2})[\s\-/]+(\p{L}{3,9}\.?)[\s\-/]+(\d{2,4})/u);
+  if (dmyWord && monthOf(dmyWord[2])) {
+    return build(dmyWord[3], monthOf(dmyWord[2]), dmyWord[1]);
   }
 
-  // 2. "DD/MM/YYYY" or "MM/DD/YYYY" or "YYYY-MM-DD"
-  const parts = clean.split(/[-/.]/);
-  if (parts.length === 3) {
-    if (parts[0].length === 4) {
-      // YYYY-MM-DD
-      return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
-    }
-    const p0 = parseInt(parts[0], 10);
-    const p1 = parseInt(parts[1], 10);
-    let year = parts[2];
-    if (year.length === 2) year = `20${year}`;
-
-    // Disambiguate MM/DD/YYYY vs DD/MM/YYYY
-    if (p0 > 12 && p1 <= 12) {
-      // Must be DD/MM/YYYY
-      return `${year}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
-    } else if (p1 > 12 && p0 <= 12) {
-      // Must be MM/DD/YYYY
-      return `${year}-${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}`;
-    }
-    // Default to DD/MM/YYYY for Indian/UK format
-    return `${year}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+  // 2. "DD/MM/YYYY" or "MM/DD/YYYY" or "YYYY-MM-DD" (separators: - / . or space)
+  const parts = clean.split(/[-/.\s]+/);
+  if (parts.length === 3 && parts.every((p) => /^\d+$/.test(p))) {
+    if (parts[0].length === 4) return build(parts[0], parts[1], parts[2]); // YYYY-MM-DD
+    const p0 = Number(parts[0]);
+    const p1 = Number(parts[1]);
+    // MM/DD/YYYY only when the second part can't be a month; default DD/MM/YYYY (Indian/UK)
+    return p1 > 12 && p0 <= 12 ? build(parts[2], p0, p1) : build(parts[2], p1, p0);
   }
 
-  return todayISO;
+  return '';
 }
 
 /**
@@ -195,6 +189,12 @@ export function cleanUpiNarration(raw: string): string {
     if (merchant.length > 1 && !/^\d+$/.test(merchant)) {
       return merchant;
     }
+  }
+
+  // 1b. UPI-MERCHANT or UPI/MERCHANT or UPI_MERCHANT
+  const simpleUpiMatch = clean.match(/^UPI[-/_]([A-Za-z0-9\s]+)/i);
+  if (simpleUpiMatch && simpleUpiMatch[1]) {
+    return simpleUpiMatch[1].trim();
   }
 
   // 2. UPI/REVERSAL/...
@@ -465,7 +465,7 @@ export function normalizeStatementData(
 
       // 3. Statement Period detection (e.g. "01 Sep 2026 to 25 Sep 2026")
       const periodMatch = lineStr.match(
-        /(\d{1,2}[\s\-/]+[A-Za-z]{3}[\s\-/]+\d{2,4}|\d{1,2}[\s\-/]+\d{1,2}[\s\-/]+\d{2,4})\s*(?:Ñ|to|-|–|—|through)\s*(\d{1,2}[\s\-/]+[A-Za-z]{3}[\s\-/]+\d{2,4}|\d{1,2}[\s\-/]+\d{1,2}[\s\-/]+\d{2,4})/i
+        /(\d{1,2}[\s\-/]+\p{L}{3}[\s\-/]+\d{2,4}|\d{1,2}[\s\-/]+\d{1,2}[\s\-/]+\d{2,4})\s*(?:Ñ|to|-|–|—|through)\s*(\d{1,2}[\s\-/]+\p{L}{3}[\s\-/]+\d{2,4}|\d{1,2}[\s\-/]+\d{1,2}[\s\-/]+\d{2,4})/iu
       );
       if (periodMatch && !statementPeriod) {
         statementPeriod = `${periodMatch[1]} to ${periodMatch[2]}`;
@@ -530,12 +530,13 @@ export function normalizeStatementData(
       // Check if row begins with a valid date token
       const firstTwo = row.items.slice(0, 2).map((x) => x.text).join(' ');
       const dateMatch = firstTwo.match(
-        /(\d{1,2}[\s\-/]+[A-Za-z]{3}[\s\-/]+\d{2,4}|\d{1,2}[\s\-/]+[A-Za-z]{3,9}[\s\-/]+\d{2,4}|\d{1,2}[\s\-/]+\d{1,2}[\s\-/]+\d{2,4}|\d{4}[\s\-/]+\d{2}[\s\-/]+\d{2}|[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4})/
+        /(\d{1,2}[\s\-/]+\p{L}{3}[\s\-/]+\d{2,4}|\d{1,2}[\s\-/]+\p{L}{3,9}[\s\-/]+\d{2,4}|\d{1,2}[\s\-/]+\d{1,2}[\s\-/]+\d{2,4}|\d{4}[\s\-/]+\d{2}[\s\-/]+\d{2}|\p{L}{3,9}\s+\d{1,2},?\s+\d{4})/u
       );
 
       if (dateMatch) {
         const rawDate = dateMatch[1];
         const isoDate = normalizeDateToISO(rawDate);
+        if (!isoDate) continue;
 
         // Collect all currency/amount values in this row
         const amountValues: number[] = [];
@@ -644,7 +645,7 @@ export function normalizeStatementData(
           for (const known of allKnownNames) {
             if (
               known.toLowerCase() !== currentAccountName.toLowerCase() &&
-              new RegExp(`\\b${known}\\b`, 'i').test(lineStr)
+              new RegExp(`\\b${known.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(lineStr)
             ) {
               toAccName = known;
               break;
@@ -652,33 +653,85 @@ export function normalizeStatementData(
           }
         }
 
-        // Extract narration tokens (exclude dates, amounts, "Debit", "Credit", dashes)
+        // Extract narration tokens (exclude dates, amounts, transaction types, noise)
+        const TYPE_NOISE = new Set([
+          'DEBIT', 'CREDIT', 'DR', 'CR',
+          'EXPENSE', 'EXPENSES', 'INCOME', 'TRANSFER',
+          'LENT', 'BORROWED', 'BORROW', 'LEND',
+          'VAULT DEPOSIT', 'VAULT WITHDRAW',
+          '--', '-', '+', ',', '🚬', 'NULL', '—'
+        ]);
+
         const cleanTokens = row.items
           .filter(
             (x) =>
-              !x.text.match(/(\d{1,2}[\s\-/]+[A-Za-z]{3}[\s\-/]+\d{2,4}|\d{1,2}[\s\-/]+\d{1,2}[\s\-/]+\d{2,4}|[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4})/) &&
+              !x.text.match(/(\d{1,2}[\s\-/]+\p{L}{3}[\s\-/]+\d{2,4}|\d{1,2}[\s\-/]+\d{1,2}[\s\-/]+\d{2,4}|\p{L}{3,9}\s+\d{1,2},?\s+\d{4})/u) &&
               !x.text.includes('₹') &&
               !x.text.includes('$') &&
               !/^[0-9,.\s\-+]+$/.test(x.text) &&
-              !['DEBIT', 'CREDIT', 'DR', 'CR', 'EXPENSES', 'INCOME', '--', '-', '+', ',', '🚬', 'NULL'].includes(x.text.toUpperCase())
+              !TYPE_NOISE.has(x.text.toUpperCase().trim())
           )
-          .map((x) => x.text);
+          .map((x) => x.text.trim())
+          .filter((t) => t.length > 0);
 
         let rowAccountName = currentAccountName;
-        let rawNarration = cleanTokens[0] || (isIncome ? 'Income' : 'Transaction');
-        let categorySuggestion = cleanTokens.length > 1 ? cleanTokens[1] : undefined;
+        let categorySuggestion: string | undefined;
+        let rawNarration = isIncome ? 'Income' : 'Transaction';
 
-        // Check if row matches App Export Table format: [Category, Account, Note / Merchant]
-        const matchedAcc = existingAccounts.find(
-          (a) => cleanTokens.length >= 2 && a.name.toLowerCase() === cleanTokens[1].toLowerCase()
-        );
+        // Check if any token or item specifies transfer accounts (e.g. "HDFC Bank → SBI")
+        const arrowItem = row.items.find((it) => it.text.includes('→'));
+        if (arrowItem) {
+          const [fromA, toA] = arrowItem.text.split('→').map((s) => s.trim());
+          if (fromA) rowAccountName = fromA;
+          if (toA) toAccName = toA;
+        }
 
-        if (matchedAcc && cleanTokens.length >= 2) {
-          categorySuggestion = cleanTokens[0];
-          rowAccountName = matchedAcc.name;
-          rawNarration = cleanTokens.slice(2).join(' ') || categorySuggestion;
-        } else if (cleanTokens.length >= 2 && !categorySuggestion) {
-          categorySuggestion = cleanTokens[1];
+        // Search cleanTokens for known accounts
+        let accIdx = -1;
+        let foundAccount = existingAccounts.find((a) => {
+          const idx = cleanTokens.findIndex((t) => t.toLowerCase() === a.name.toLowerCase());
+          if (idx >= 0) {
+            accIdx = idx;
+            return true;
+          }
+          return false;
+        });
+
+        if (foundAccount && accIdx >= 0) {
+          rowAccountName = foundAccount.name;
+          if (accIdx > 0) {
+            categorySuggestion = cleanTokens.slice(0, accIdx).join(' ');
+          }
+          const afterTokens = cleanTokens.slice(accIdx + 1);
+          if (afterTokens.length > 0) {
+            rawNarration = afterTokens.join(' ');
+          } else {
+            rawNarration = categorySuggestion || foundAccount.name;
+          }
+        } else {
+          // If no account match, check if any token matches an existing category
+          let catIdx = -1;
+          const foundCat = existingCategories.find((c) => {
+            const idx = cleanTokens.findIndex((t) => t.toLowerCase() === c.name.toLowerCase());
+            if (idx >= 0) {
+              catIdx = idx;
+              return true;
+            }
+            return false;
+          });
+
+          if (foundCat && catIdx >= 0) {
+            categorySuggestion = foundCat.name;
+            const otherTokens = cleanTokens.filter((_, idx) => idx !== catIdx);
+            if (otherTokens.length > 0) {
+              rawNarration = otherTokens.join(' ');
+            }
+          } else if (cleanTokens.length > 0) {
+            rawNarration = cleanTokens[0];
+            if (cleanTokens.length > 1) {
+              categorySuggestion = cleanTokens[1];
+            }
+          }
         }
 
         const displayNarration = cleanUpiNarration(rawNarration) || rawNarration;
@@ -743,6 +796,7 @@ export function normalizeStatementData(
           balance: parsedBalance,
           isDuplicate,
           compositeHash,
+          isCredit: isIncome,
           rawLine: lineStr,
         });
       }
@@ -758,112 +812,242 @@ export function normalizeStatementData(
       .map((l) => l.trim())
       .filter((l) => l.length > 0);
 
-    const isAppHeader = lines[0]?.toLowerCase().includes('id') && lines[0]?.toLowerCase().includes('category');
-    const startIdx =
-      isAppHeader || lines[0]?.toLowerCase().includes('amount') || lines[0]?.toLowerCase().includes('date')
-        ? 1
-        : 0;
-
-    for (let i = startIdx; i < lines.length; i++) {
-      const line = lines[i];
-      if (!line || line.length < 5) continue;
-
-      const parts = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || line.split(',');
-      const cleanParts = parts.map((p) => p.replace(/^"|"$/g, '').trim());
-
-      let amount = 0;
-      let dateStr = new Date().toISOString().split('T')[0];
-      let narration = `Imported: ${input.fileName || 'CSV'}`;
-      let isIncome = false;
-      let categoryId = existingCategories[0]?.id || 'cat_shop';
-      let confidence: 'high' | 'medium' | 'low' = 'low';
-
-      if (isAppHeader && cleanParts.length >= 5) {
-        dateStr = cleanParts[1] || dateStr;
-        amount = Math.abs(parseInternationalAmount(cleanParts[2])) || 0;
-        isIncome = cleanParts[3]?.toLowerCase() === 'income';
-        const catMatch = existingCategories.find(
-          (c) => c.id === cleanParts[4] || c.name.toLowerCase() === cleanParts[4]?.toLowerCase()
-        );
-        if (catMatch) {
-          categoryId = catMatch.id;
-          confidence = 'high';
-        }
-        if (cleanParts[6]) narration = cleanParts[6];
-      } else {
-        // Multi-Bank Heuristics
-        const dateMatch = line.match(
-          /(\d{4}[-/]\d{2}[-/]\d{2}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\d{1,2}\s+[A-Za-z]{3}\s+\d{2,4})/
-        );
-        if (dateMatch) {
-          dateStr = normalizeDateToISO(dateMatch[1]);
-        }
-
-        const lineWithoutDate = line.replace(
-          /(\d{4}[-/]\d{2}[-/]\d{2}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\d{1,2}\s+[A-Za-z]{3}\s+\d{2,4})/g,
-          ' '
-        );
-        const numbers =
-          lineWithoutDate.match(
-            /(?:₹|\$|€|£|INR)?\s*(?:-|\()?\s*([0-9]{1,3}(?:[.,][0-9]{3})+(?:[.,][0-9]{1,2})?|[0-9]+(?:[.,][0-9]{1,2})?)\)?/g
-          ) || [];
-        const cleanNums = numbers
-          .map((n) => parseInternationalAmount(n))
-          .filter((n) => !isNaN(n) && n > 0 && n < 10000000);
-
-        const isSalaryOrIncome = /salary|payroll|dividend|refund|cashback|bonus|stipend|interest credit/i.test(line);
-        if (cleanNums.length > 0) {
-          amount = cleanNums[0];
-          if (isSalaryOrIncome || (cleanNums.length >= 2 && line.toLowerCase().includes('cr') && !line.toLowerCase().includes('dr'))) {
-            isIncome = true;
-          }
-        }
-
-        const cleanedText = line
-          .replace(/(\d{4}[-/]\d{2}[-/]\d{2}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4})/g, '')
-          .replace(/[0-9,.]+/g, '')
-          .replace(/[|;,\t]/g, ' ')
-          .trim();
-        if (cleanedText.length > 2) {
-          narration = cleanedText.slice(0, 50).trim();
-        }
-
-        const classRes = classifyNarration(narration || line, existingCategories, learnedRules);
-        categoryId = classRes.categoryId;
-        confidence = classRes.confidence;
+    const parseCsvLine = (line: string): string[] => {
+      const cleanParts: string[] = [];
+      for (let k = 0, cur = '', q = false; k <= line.length; k++) {
+        const ch = line[k];
+        if (k === line.length || (ch === ',' && !q)) {
+          cleanParts.push(cur.trim());
+          cur = '';
+        } else if (ch === '"') {
+          if (q && line[k + 1] === '"') { cur += '"'; k++; } else q = !q;
+        } else cur += ch;
       }
+      return cleanParts;
+    };
 
-      if (amount > 0) {
-        const txnType: TransactionType = isIncome ? 'income' : 'expense';
-        const compositeHash = generateCompositeHash(dateStr, amount, txnType, narration);
-        const isDuplicate = existingTransactions.some((tx) => {
-          const txHashNote = generateCompositeHash(tx.date, tx.amount, tx.type, tx.note || '');
-          const txHashMerchant = generateCompositeHash(tx.date, tx.amount, tx.type, tx.merchant || '');
-          if (txHashNote === compositeHash || txHashMerchant === compositeHash) return true;
-          if (tx.date === dateStr && Math.abs(tx.amount - amount) < 0.01 && tx.type === txnType) {
-            const nLower = narration.toLowerCase();
-            if (tx.merchant && nLower.includes(tx.merchant.toLowerCase())) return true;
-            if (tx.note && nLower.includes(tx.note.toLowerCase())) return true;
+    if (lines.length > 0) {
+      const headerParts = parseCsvLine(lines[0]).map((h) => h.toLowerCase().trim().replace(/^["']|["']$/g, ''));
+
+      const dateCol = headerParts.findIndex((h) => /date|txn_date|transaction date|value date|posting date/.test(h));
+      const amountCol = headerParts.findIndex((h) => /^(amount|total|spent|value)$/.test(h) || (h.includes('amount') && !h.includes('debit') && !h.includes('credit')));
+      const debitCol = headerParts.findIndex((h) => /^(debit|dr|withdrawal|withdrawals)$/.test(h) || h.includes('debit amount'));
+      const creditCol = headerParts.findIndex((h) => /^(credit|cr|deposit|deposits)$/.test(h) || h.includes('credit amount'));
+      const typeCol = headerParts.findIndex((h) => /^(type|txn type|transaction type|dr\/cr|cr\/dr)$/.test(h));
+      const categoryCol = headerParts.findIndex((h) => /^(category|category name|cat)$/.test(h));
+      const accountCol = headerParts.findIndex((h) => /^(account|bank|account name|wallet|payment mode)$/.test(h));
+      const merchantCol = headerParts.findIndex((h) => /^(merchant|payee|vendor|party|store)$/.test(h));
+      const noteCol = headerParts.findIndex((h) => /^(note|notes|narration|description|memo|remarks|details)$/.test(h));
+
+      const hasStructuredHeader = dateCol >= 0 && (amountCol >= 0 || (debitCol >= 0 && creditCol >= 0));
+      const startIdx = hasStructuredHeader || lines[0]?.toLowerCase().includes('amount') || lines[0]?.toLowerCase().includes('date') ? 1 : 0;
+
+      const csvUsed = new Set<number>();
+      for (let i = startIdx; i < lines.length; i++) {
+        const line = lines[i];
+        if (!line || line.length < 3) continue;
+
+        const cleanParts = parseCsvLine(line);
+
+        let amount = 0;
+        let dateStr = new Date().toISOString().split('T')[0];
+        let narration = `Imported: ${input.fileName || 'CSV'}`;
+        let isIncome = false;
+        let txnType: TransactionType = 'expense';
+        let rowAccountName = currentAccountName;
+        let categoryId = existingCategories[0]?.id || 'cat_shop';
+        let confidence: 'high' | 'medium' | 'low' = 'low';
+
+        if (hasStructuredHeader) {
+          // Parse date
+          if (dateCol >= 0 && cleanParts[dateCol]) {
+            const parsedD = normalizeDateToISO(cleanParts[dateCol]);
+            if (parsedD) dateStr = parsedD;
           }
-          return false;
-        });
 
-        stagedTxs.push({
-          id: `staged_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`,
-          selected: !isDuplicate,
-          date: dateStr,
-          rawDate: dateStr,
-          narration: narration.toUpperCase(),
-          amount,
-          type: txnType,
-          categoryId,
-          categoryConfidence: confidence,
-          accountName: currentAccountName,
-          accountId: existingAccounts[0]?.id || 'acc_default',
-          isDuplicate,
-          compositeHash,
-          rawLine: line,
-        });
+          // Parse amount & type
+          if (amountCol >= 0 && cleanParts[amountCol]) {
+            const rawAmt = cleanParts[amountCol];
+            const parsedVal = parseInternationalAmount(rawAmt);
+            amount = Math.abs(parsedVal);
+            if (parsedVal < 0 || /\(.*\)/.test(rawAmt)) {
+              isIncome = false;
+            }
+          } else if (debitCol >= 0 && creditCol >= 0) {
+            const drVal = parseInternationalAmount(cleanParts[debitCol]);
+            const crVal = parseInternationalAmount(cleanParts[creditCol]);
+            if (crVal > 0) {
+              amount = crVal;
+              isIncome = true;
+            } else if (drVal > 0) {
+              amount = drVal;
+              isIncome = false;
+            }
+          }
+
+          // Parse explicit type
+          if (typeCol >= 0 && cleanParts[typeCol]) {
+            const tText = cleanParts[typeCol].toLowerCase().trim();
+            if (tText === 'income' || tText === 'credit' || tText === 'cr') {
+              isIncome = true;
+              txnType = 'income';
+            } else if (tText === 'transfer') {
+              txnType = 'transfer';
+            } else if (tText === 'debt_lend' || tText === 'lent' || tText === 'lend') {
+              txnType = 'debt_lend';
+            } else if (tText === 'debt_borrow' || tText === 'borrowed' || tText === 'borrow') {
+              txnType = 'debt_borrow';
+              isIncome = true;
+            } else {
+              isIncome = false;
+              txnType = 'expense';
+            }
+          } else {
+            txnType = isIncome ? 'income' : 'expense';
+          }
+
+          // Parse category
+          if (categoryCol >= 0 && cleanParts[categoryCol]) {
+            const rawCatName = cleanParts[categoryCol].trim();
+            const catMatch = existingCategories.find(
+              (c) => c.id === rawCatName || c.name.toLowerCase() === rawCatName.toLowerCase()
+            );
+            if (catMatch) {
+              categoryId = catMatch.id;
+              confidence = 'high';
+            } else {
+              const res = classifyNarration(rawCatName, existingCategories, learnedRules);
+              categoryId = res.categoryId;
+              confidence = res.confidence;
+            }
+          }
+
+          // Parse account
+          if (accountCol >= 0 && cleanParts[accountCol]) {
+            const rawAcc = cleanParts[accountCol].trim();
+            const accMatch = existingAccounts.find(
+              (a) => a.id === rawAcc || a.name.toLowerCase() === rawAcc.toLowerCase()
+            );
+            if (accMatch) {
+              rowAccountName = accMatch.name;
+            } else if (rawAcc) {
+              rowAccountName = rawAcc;
+            }
+          }
+
+          // Parse merchant & note
+          const rawM = merchantCol >= 0 ? cleanParts[merchantCol]?.trim() : '';
+          const rawN = noteCol >= 0 ? cleanParts[noteCol]?.trim() : '';
+          if (rawM && rawN) {
+            narration = `${rawM} • ${rawN}`;
+          } else if (rawM) {
+            narration = rawM;
+          } else if (rawN) {
+            narration = rawN;
+          } else if (categoryCol >= 0 && cleanParts[categoryCol]) {
+            narration = cleanParts[categoryCol].trim();
+          }
+
+          narration = cleanUpiNarration(narration) || narration;
+
+          // If no explicit type column provided, infer income from line / narration
+          if (typeCol < 0 || !cleanParts[typeCol]) {
+            const isSalaryOrIncome = /salary|payroll|dividend|refund|cashback|bonus|stipend|interest credit/i.test(line);
+            const isNegative = amountCol >= 0 && (parseInternationalAmount(cleanParts[amountCol]) < 0 || /[-(]/.test(cleanParts[amountCol]));
+            if (!isNegative && isSalaryOrIncome) {
+              isIncome = true;
+              txnType = 'income';
+            } else {
+              isIncome = false;
+              txnType = 'expense';
+            }
+          }
+        } else {
+          // Multi-Bank Heuristics for unstructured lines
+          const dateMatch = line.match(
+            /(\d{4}[-/]\d{2}[-/]\d{2}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\d{1,2}\s+[A-Za-z]{3}\s+\d{2,4})/
+          );
+          if (dateMatch) {
+            const parsedD = normalizeDateToISO(dateMatch[1]);
+            if (parsedD) dateStr = parsedD;
+          }
+
+          const lineWithoutDate = line.replace(
+            /(\d{4}[-/]\d{2}[-/]\d{2}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\d{1,2}\s+[A-Za-z]{3}\s+\d{2,4})/g,
+            ' '
+          );
+          const numbers =
+            lineWithoutDate.match(
+              /(?:₹|\$|€|£|INR)?\s*(?:-|\()?\s*([0-9]{1,3}(?:[.,][0-9]{3})+(?:[.,][0-9]{1,2})?|[0-9]+(?:[.,][0-9]{1,2})?)\)?/g
+            ) || [];
+          const signedNums = numbers
+            .map((n) => ({ v: Math.abs(parseInternationalAmount(n.replace(/[-()]/g, ''))), neg: /[-(]/.test(n) }))
+            .filter((n) => !isNaN(n.v) && n.v > 0 && n.v < 10000000);
+          const cleanNums = signedNums.map((n) => n.v);
+
+          const isSalaryOrIncome = /salary|payroll|dividend|refund|cashback|bonus|stipend|interest credit/i.test(line);
+          if (cleanNums.length > 0) {
+            amount = cleanNums[0];
+            if (!signedNums[0].neg && (isSalaryOrIncome || (cleanNums.length >= 2 && /\bcr\b/i.test(line) && !/\bdr\b/i.test(line)))) {
+              isIncome = true;
+            }
+          }
+          txnType = isIncome ? 'income' : 'expense';
+
+          const cleanedText = line
+            .replace(/(\d{4}[-/]\d{2}[-/]\d{2}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4})/g, '')
+            .replace(/[0-9,.]+/g, '')
+            .replace(/[|;,\t()-]/g, ' ')
+            .trim();
+          if (cleanedText.length > 2) {
+            narration = cleanedText.slice(0, 50).trim();
+          }
+
+          const classRes = classifyNarration(narration || line, existingCategories, learnedRules);
+          categoryId = classRes.categoryId;
+          confidence = classRes.confidence;
+        }
+
+        if (amount > 0) {
+          const compositeHash = generateCompositeHash(dateStr, amount, txnType, narration);
+          const targetAccId = resolveAccountId(rowAccountName);
+          accountsDetectedSet.add(rowAccountName);
+
+          // Multiset match: each existing transaction can mark at most one CSV row as duplicate
+          const dupIdx = existingTransactions.findIndex((tx, idx) => {
+            if (csvUsed.has(idx)) return false;
+            if (tx.accountId && tx.accountId !== targetAccId) return false;
+            const txHashNote = generateCompositeHash(tx.date, tx.amount, tx.type, tx.note || '');
+            const txHashMerchant = generateCompositeHash(tx.date, tx.amount, tx.type, tx.merchant || '');
+            if (txHashNote === compositeHash || txHashMerchant === compositeHash) return true;
+            if (tx.date === dateStr && Math.abs(tx.amount - amount) < 0.01 && tx.type === txnType) {
+              const nLower = narration.toLowerCase();
+              if (tx.merchant && nLower.includes(tx.merchant.toLowerCase())) return true;
+              if (tx.note && nLower.includes(tx.note.toLowerCase())) return true;
+            }
+            return false;
+          });
+          const isDuplicate = dupIdx >= 0;
+          if (isDuplicate) csvUsed.add(dupIdx);
+
+          stagedTxs.push({
+            id: `staged_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`,
+            selected: !isDuplicate,
+            date: dateStr,
+            rawDate: dateStr,
+            narration: narration.toUpperCase(),
+            amount,
+            type: txnType,
+            categoryId,
+            categoryConfidence: confidence,
+            accountName: rowAccountName,
+            accountId: targetAccId,
+            isDuplicate,
+            compositeHash,
+            isCredit: isIncome,
+            rawLine: line,
+          });
+        }
       }
     }
   }
@@ -872,11 +1056,11 @@ export function normalizeStatementData(
   // RECONCILIATION CALCULATIONS
   // ══════════════════════════════════════════════════════════
   const totalDebits = stagedTxs
-    .filter((t) => t.type === 'expense' || t.type === 'transfer' || t.type === 'debt_lend')
+    .filter((t) => t.type === 'expense' || (t.type === 'transfer' && !t.isCredit) || t.type === 'debt_lend')
     .reduce((sum, t) => sum + t.amount, 0);
 
   const totalCredits = stagedTxs
-    .filter((t) => t.type === 'income' || t.type === 'debt_borrow')
+    .filter((t) => t.type === 'income' || t.type === 'debt_borrow' || (t.type === 'transfer' && t.isCredit))
     .reduce((sum, t) => sum + t.amount, 0);
 
   const netFlow = totalCredits - totalDebits;

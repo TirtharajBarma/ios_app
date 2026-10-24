@@ -21,6 +21,7 @@ import {
   Cpu,
   Layers,
   Printer,
+  FileSpreadsheet,
   ScrollText,
   Download,
   Upload,
@@ -32,10 +33,11 @@ import * as Print from 'expo-print';
 import * as Updates from 'expo-updates';
 
 import { exportBackup, importBackup } from '@/utils/backupFile';
+import { resetDismissedCoachInsights } from '@/utils/coachInsight';
 
 import { AppText } from '@/components/ui';
 import { expenseColors } from '@/constants/expenseColors';
-import { useExpenseStore } from '@/store/useExpenseStore';
+import { useExpenseStore, isInMonth, monthKeyToYearMonth } from '@/store/useExpenseStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useSubscriptionStore } from '@/store/useSubscriptionStore';
 import { useSettingsStore } from '@/store/useSettingsStore';
@@ -58,6 +60,7 @@ export default function YourDataScreen() {
     categoryBudgets,
     currencySymbol,
     currencyCode,
+    selectedMonth,
     resetAllData,
   } = useExpenseStore(
     useShallow((s) => ({
@@ -70,6 +73,7 @@ export default function YourDataScreen() {
       categoryBudgets: s.categoryBudgets,
       currencySymbol: s.currencySymbol,
       currencyCode: s.currencyCode,
+      selectedMonth: s.selectedMonth,
       resetAllData: s.resetAllData,
     }))
   );
@@ -88,13 +92,18 @@ export default function YourDataScreen() {
   );
   const aiEngineInfo = useMemo(() => getDeviceAiEngineInfo(), []);
 
-  const handleExportPdf = async () => {
-    Haptics.selectionAsync();
+  const runExportPdf = async (scope: string) => {
     try {
-      if (transactions.length === 0 && accounts.length === 0 && subscriptions.length === 0) {
-        Alert.alert('No Data', 'There is no financial data to generate a PDF report.');
-        return;
-      }
+      const isScopedMonth = scope !== 'all' && !!scope;
+      const targetMonthKey = isScopedMonth ? scope : (selectedMonth || 'All History');
+      const { year: sYear, month: sMonth } = isScopedMonth
+        ? monthKeyToYearMonth(targetMonthKey)
+        : { year: 0, month: 0 };
+
+      // Transactions filtered by month if single-month statement, or all transactions
+      const activeTxs = isScopedMonth
+        ? transactions.filter((t) => isInMonth(t.date, sYear, sMonth))
+        : transactions;
 
       const sym = currencySymbol || '₹';
       const code = currencyCode || 'INR';
@@ -128,10 +137,10 @@ export default function YourDataScreen() {
       };
 
       // ── Core Metrics ──
-      const totalIncome = transactions
+      const totalIncome = activeTxs
         .filter((t) => t.type === 'income')
         .reduce((sum, t) => sum + t.amount, 0);
-      const totalSpent = transactions
+      const totalSpent = activeTxs
         .filter((t) => t.type === 'expense' && t.categoryId !== 'cat_debt_repayment')
         .reduce((sum, t) => sum + (t.split ? t.split.yourShare : t.amount), 0);
       const netSavings = totalIncome - totalSpent;
@@ -148,16 +157,21 @@ export default function YourDataScreen() {
       const totalVaultsSaved = savingsVaults.reduce((sum, v) => sum + (v.currentAmount || 0), 0);
 
       // ── Debt (Lend / Borrow & Splits) Metrics ──
-      const debtLendTxs = transactions.filter((t) => t.type === 'debt_lend');
-      const debtBorrowTxs = transactions.filter((t) => t.type === 'debt_borrow');
-      const splitTxs = transactions.filter((t) => t.split && (t.split.friendsShare || 0) > 0);
+      const debtLendTxs = activeTxs.filter((t) => t.type === 'debt_lend');
+      const debtBorrowTxs = activeTxs.filter((t) => t.type === 'debt_borrow');
+      const splitTxs = activeTxs.filter((t) => t.split && (t.split.friendsShare || 0) > 0);
 
       const unsettledLend = debtLendTxs.filter((t) => !t.isSettled).reduce((sum, t) => sum + t.amount, 0);
-      const unsettledSplitShare = splitTxs.filter((t) => !t.split?.settled).reduce((sum, t) => sum + (t.split?.friendsShare || 0), 0);
+      const unsettledSplitShare = splitTxs.reduce((sum, t) => {
+        if (t.split?.friends && t.split.friends.length > 0) {
+          return sum + t.split.friends.filter((f) => !f.settled).reduce((s, f) => s + (f.amount || 0), 0);
+        }
+        return sum + (t.split?.settled ? 0 : (t.split?.friendsShare || 0));
+      }, 0);
       const totalReceivables = unsettledLend + unsettledSplitShare;
       const totalPayables = debtBorrowTxs.filter((t) => !t.isSettled).reduce((sum, t) => sum + t.amount, 0);
 
-      // ── 1. Bank Accounts & Opening Balances Rows ──
+      // ── 1. Bank Accounts & Balances Rows ──
       const accountRows = accounts.map((acc) => {
         const isCredit = acc.type === 'credit';
         const typeLabel =
@@ -166,33 +180,55 @@ export default function YourDataScreen() {
           acc.type === 'wallet' ? 'Digital Wallet' : 'Cash / Petty';
         const opening = acc.openingBalance !== undefined ? acc.openingBalance : 0;
         const current = acc.balance || 0;
+        const creditDue = acc.dueAmount || 0;
         const creditInfo = isCredit
-          ? `<span style="color: #E84040; font-weight: 700;">${sym}${fmt(acc.dueAmount || 0)} due</span>${(acc.unbilledDue || 0) > 0 ? `<br/><span style="font-size: 10px; color: #777;">incl. ${sym}${fmt(acc.unbilledDue || 0)} not yet billed</span>` : ''}${acc.dueDay ? `<br/><span style="font-size: 10px; color: #777;">Due: ${acc.dueDay}th • Bill: ${acc.billingDay || '—'}th</span>` : ''}`
+          ? `<span style="color: #E84040; font-weight: 700;">${sym}${fmt(creditDue)} due</span>${(acc.unbilledDue || 0) > 0 ? `<br/><span style="font-size: 10px; color: #777;">incl. ${sym}${fmt(acc.unbilledDue || 0)} unbilled</span>` : ''}${acc.dueDay ? `<br/><span style="font-size: 10px; color: #777;">Due: ${acc.dueDay}th • Bill: ${acc.billingDay || '—'}th</span>` : ''}`
           : '—';
-        const changeSign = acc.monthlyChange > 0 ? '+' : '';
-        const changeColor = acc.monthlyChange > 0 ? '#059669' : acc.monthlyChange < 0 ? '#DC2626' : '#6B7280';
+
+        const accScopedChange = isScopedMonth
+          ? activeTxs.reduce((sum, t) => {
+              if (t.accountId === acc.id) {
+                if (t.type === 'income' || t.type === 'debt_borrow' || t.type === 'vault_withdraw') return sum + t.amount;
+                return sum - t.amount;
+              }
+              if (t.toAccountId === acc.id && t.type === 'transfer') {
+                return sum + t.amount;
+              }
+              return sum;
+            }, 0)
+          : acc.monthlyChange;
+
+        const changeSign = accScopedChange > 0 ? '+' : '';
+        const changeColor = accScopedChange > 0 ? '#059669' : accScopedChange < 0 ? '#DC2626' : '#6B7280';
 
         return `
           <tr>
             <td><strong>${escape(acc.name)}</strong>${acc.isArchived ? ' <span style="font-size: 9px; color: #999;">(Archived)</span>' : ''}</td>
             <td><span class="type-pill">${typeLabel}</span></td>
             <td style="text-align: right; color: #4B5563;">${sym}${fmt(opening)}</td>
-            <td style="text-align: right; font-weight: 700; color: ${isCredit ? '#DC2626' : '#111827'};">${sym}${fmt(current)}</td>
+            <td style="text-align: right; font-weight: 700; color: ${isCredit ? '#DC2626' : '#111827'};">
+              ${isCredit ? `${sym}${fmt(creditDue)} (Due)` : `${sym}${fmt(current)}`}
+            </td>
             <td style="text-align: right;">${creditInfo}</td>
-            <td style="text-align: right; color: ${changeColor}; font-weight: 600;">${changeSign}${sym}${fmt(acc.monthlyChange)}</td>
+            <td style="text-align: right; color: ${changeColor}; font-weight: 600;">${changeSign}${sym}${fmt(accScopedChange)}</td>
           </tr>
         `;
       }).join('');
 
-      // ── 2. Event & Trip Folders Rows ──
+      // ── 2. Event & Trip Folders Rows (Dynamically Computed) ──
       const folderRows = eventFolders.map((f) => {
-        const linkedCount = transactions.filter((t) => t.folderId === f.id || (t.tag && t.tag.toLowerCase() === f.name.toLowerCase())).length;
+        const linkedTxs = activeTxs.filter(
+          (t) => t.folderId === f.id || (t.tag && t.tag.toLowerCase() === f.name.toLowerCase())
+        );
+        const folderSpent = linkedTxs
+          .filter((t) => t.type === 'expense')
+          .reduce((sum, t) => sum + (t.split ? t.split.yourShare : t.amount), 0);
         return `
           <tr>
             <td><strong>${f.emoji ? `${escape(f.emoji)} ` : ''}${escape(f.name)}</strong></td>
             <td>${fmtDate(f.createdAt)}</td>
-            <td style="text-align: center;"><span class="type-pill">${linkedCount} txs</span></td>
-            <td style="text-align: right; font-weight: 700; color: #DC2626;">${sym}${fmt(f.totalSpent || 0)}</td>
+            <td style="text-align: center;"><span class="type-pill">${linkedTxs.length} txs</span></td>
+            <td style="text-align: right; font-weight: 700; color: #DC2626;">${sym}${fmt(folderSpent)}</td>
           </tr>
         `;
       }).join('');
@@ -233,13 +269,24 @@ export default function YourDataScreen() {
       });
 
       splitTxs.forEach((t) => {
+        let outstandingShare = 0;
+        let isFullySettled = false;
+        if (t.split?.friends && t.split.friends.length > 0) {
+          const pending = t.split.friends.filter((f) => !f.settled);
+          outstandingShare = pending.reduce((sum, f) => sum + (f.amount || 0), 0);
+          isFullySettled = pending.length === 0;
+        } else {
+          isFullySettled = !!t.split?.settled;
+          outstandingShare = isFullySettled ? 0 : (t.split?.friendsShare || 0);
+        }
+
         allDebtsAndSplits.push({
           date: t.date,
           nature: 'Split Bill Share',
           badgeClass: 'badge-split',
           person: t.split?.friendNames || 'Friends',
-          amount: t.split?.friendsShare || 0,
-          status: t.split?.settled ? '✓ Settled' : '⏳ Outstanding',
+          amount: outstandingShare > 0 ? outstandingShare : (t.split?.friendsShare || 0),
+          status: isFullySettled ? '✓ Settled' : (outstandingShare < (t.split?.friendsShare || 0) ? '⏳ Partially Settled' : '⏳ Outstanding'),
           note: t.merchant ? `${t.merchant} (Bill split)` : (t.note || 'Split bill'),
         });
       });
@@ -311,14 +358,21 @@ export default function YourDataScreen() {
       const categoryRows = categories
         .filter((c) => c.id !== 'cat_income')
         .map((cat) => {
-          const catSpent = transactions
+          const catSpent = activeTxs
             .filter((t) => t.type === 'expense' && t.categoryId === cat.id)
             .reduce((sum, t) => sum + (t.split ? t.split.yourShare : t.amount), 0);
           const pct = totalSpent > 0 ? ((catSpent / totalSpent) * 100).toFixed(1) : '0';
           const budgetLimit = categoryBudgets[cat.id];
-          const budgetStatus = budgetLimit
-            ? (catSpent <= budgetLimit ? '<span class="status-settled">Within Budget</span>' : `<span class="status-pending">Over by ${sym}${fmt(catSpent - budgetLimit)}</span>`)
-            : '—';
+          let budgetStatus = '—';
+          if (budgetLimit && budgetLimit > 0) {
+            if (isScopedMonth) {
+              budgetStatus = catSpent <= budgetLimit
+                ? `<span class="status-settled">Within Budget (${sym}${fmt(budgetLimit - catSpent)} left)</span>`
+                : `<span class="status-pending">Over by ${sym}${fmt(catSpent - budgetLimit)}</span>`;
+            } else {
+              budgetStatus = `<span style="font-size: 11px; color: #4B5563;">Monthly Limit: ${sym}${fmt(budgetLimit)}</span>`;
+            }
+          }
 
           return `
             <tr>
@@ -332,9 +386,8 @@ export default function YourDataScreen() {
         })
         .join('');
 
-      // ── 8. Full Transaction Ledger (ALL TRANSACTIONS) ──
-      const sortedTxs = [...transactions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      const txRows = sortedTxs.map((t) => {
+      // ── 8. Full Transaction Ledger Rows ──
+      const renderTxRow = (t: (typeof transactions)[number]) => {
         const cat = categories.find((c) => c.id === t.categoryId);
         const fromAcc = accounts.find((a) => a.id === t.accountId);
         const toAcc = accounts.find((a) => a.id === t.toAccountId);
@@ -393,14 +446,51 @@ export default function YourDataScreen() {
             <td style="text-align: right; font-weight: 700; color: ${amtColor}; white-space: nowrap;">${sign}${sym}${fmt(displayAmt)}</td>
           </tr>
         `;
-      }).join('');
+      };
+
+      const sortedTxs = [...activeTxs].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+      let txRows = '';
+      if (isScopedMonth) {
+        txRows = sortedTxs.map(renderTxRow).join('');
+      } else {
+        // Group by month
+        const monthGroups = new Map<string, typeof sortedTxs>();
+        sortedTxs.forEach((t) => {
+          const mKey = t.date ? t.date.slice(0, 7) : 'Other';
+          if (!monthGroups.has(mKey)) monthGroups.set(mKey, []);
+          monthGroups.get(mKey)!.push(t);
+        });
+
+        txRows = Array.from(monthGroups.entries()).map(([mKey, mTxs]) => {
+          const mInc = mTxs.filter((t) => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+          const mExp = mTxs.filter((t) => t.type === 'expense').reduce((s, t) => s + (t.split ? t.split.yourShare : t.amount), 0);
+          const parts = mKey.split('-');
+          let mLabel = mKey;
+          if (parts.length === 2) {
+            const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, 1);
+            mLabel = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toUpperCase();
+          }
+          const headerRow = `
+            <tr style="background: #F3F4F6;">
+              <td colspan="6" style="padding: 9px 12px; font-weight: 800; font-size: 11px; color: #1F2937; letter-spacing: 0.5px;">
+                📅 ${mLabel} &nbsp;•&nbsp; 
+                <span style="font-weight: 600; color: #4B5563;">${mTxs.length} records</span> &nbsp;•&nbsp; 
+                <span style="color: #059669; font-weight: 700;">+${sym}${fmt(mInc)}</span> &nbsp;•&nbsp; 
+                <span style="color: #DC2626; font-weight: 700;">-${sym}${fmt(mExp)}</span>
+              </td>
+            </tr>
+          `;
+          return headerRow + mTxs.map(renderTxRow).join('');
+        }).join('');
+      }
 
       const html = `
         <!DOCTYPE html>
         <html>
         <head>
           <meta charset="utf-8">
-          <title>Monevo Financial Statement</title>
+          <title>Cashveil Financial Statement${isScopedMonth ? ` (${scope})` : ''}</title>
           <style>
             @page { margin: 20mm 15mm; size: A4 portrait; }
             * { box-sizing: border-box; }
@@ -543,8 +633,8 @@ export default function YourDataScreen() {
         <body>
           <div class="header-bar">
             <div>
-              <h1 class="brand-title">Monevo Financial Statement</h1>
-              <div class="brand-sub">Comprehensive Portfolio & Transaction Audit Dossier</div>
+              <h1 class="brand-title">Cashveil Financial Statement</h1>
+              <div class="brand-sub">${isScopedMonth ? `${scope} Monthly Financial Audit & Ledger` : 'Comprehensive Portfolio & Transaction Audit Dossier'}</div>
             </div>
             <div class="meta-box">
               <div><strong>Owner:</strong> ${escape(userName || 'Account Holder')}${userEmail ? ` • ${escape(userEmail)}` : ''}</div>
@@ -744,27 +834,126 @@ export default function YourDataScreen() {
           </table>
 
           <div class="footer">
-            Personal & Confidential • 100% On-Device Financial Record • Generated by Monevo • Zero Cloud Telemetry
+            Personal & Confidential • 100% On-Device Financial Record • Generated by Cashveil • Zero Cloud Telemetry
           </div>
         </body>
         </html>
       `;
 
-      const { uri } = await Print.printToFileAsync({ html });
+      const { uri: generatedUri } = await Print.printToFileAsync({ html });
+      const scopeSuffix = isScopedMonth ? scope.replace('-', '_') : 'All_Time';
+      const filename = `Cashveil_Statement_${scopeSuffix}_${new Date().toISOString().split('T')[0]}.pdf`;
+      const uri = `${FileSystem.cacheDirectory}${filename}`;
+      await FileSystem.copyAsync({ from: generatedUri, to: uri }).catch(() => {});
+      const shareUri = (await FileSystem.getInfoAsync(uri)).exists ? uri : generatedUri;
       if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(uri, {
+        await Sharing.shareAsync(shareUri, {
           mimeType: 'application/pdf',
-          dialogTitle: 'Export Complete Financial Report (PDF)',
-          UTI: '.pdf',
+          dialogTitle: `Export Cashveil Financial Statement (${isScopedMonth ? scope : 'All-Time'})`,
+          UTI: 'com.adobe.pdf',
         });
       } else {
-        Alert.alert('PDF Export Complete', `Saved financial report to ${uri}`);
+        Alert.alert('PDF Export Complete', `Saved financial report to ${shareUri}`);
       }
-      logAction('export', 'Generated financial statement PDF report', { format: 'pdf', count: transactions.length });
+      logAction('export', 'Generated financial statement PDF report', { format: 'pdf', count: activeTxs.length, scope });
     } catch (err) {
       console.warn('PDF export error:', err);
       logException('export', 'PDF export failed', err);
       Alert.alert('Export Failed', 'Could not generate PDF report.');
+    }
+  };
+
+  const handleExportPdf = () => {
+    Haptics.selectionAsync();
+    const currentMonthLabel = selectedMonth || new Date().toISOString().slice(0, 7);
+    const parts = currentMonthLabel.split('-');
+    let readableMonth = currentMonthLabel;
+    if (parts.length === 2) {
+      const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, 1);
+      readableMonth = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    }
+
+    Alert.alert(
+      'Export PDF Financial Report',
+      'Choose the scope for your exported financial dossier:',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: `${readableMonth} Statement`,
+          onPress: () => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            runExportPdf(currentMonthLabel);
+          },
+        },
+        {
+          text: 'All-Time Complete Dossier',
+          onPress: () => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            runExportPdf('all');
+          },
+        },
+      ]
+    );
+  };
+
+  const handleExportCsv = async () => {
+    Haptics.selectionAsync();
+    try {
+      if (transactions.length === 0) {
+        Alert.alert('No Transactions', 'There are no transactions recorded to export.');
+        return;
+      }
+      const escapeCsv = (val: unknown) => {
+        if (val === undefined || val === null) return '';
+        const s = String(val).replace(/"/g, '""');
+        return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s}"` : s;
+      };
+
+      const accountMap = new Map(accounts.map((a) => [a.id, a.name]));
+      const categoryMap = new Map(categories.map((c) => [c.id, c.name]));
+      const folderMap = new Map(eventFolders.map((f) => [f.id, f.name]));
+
+      const headers = ['Date', 'Type', 'Category', 'Account', 'Merchant', 'Note', 'Folder', 'Amount', 'Currency', 'Split Your Share', 'Split Friends Share'];
+      const rows = transactions.map((t) => {
+        const catName = categoryMap.get(t.categoryId) || 'General';
+        const accName = accountMap.get(t.accountId) || 'Account';
+        const folderName = t.folderId ? folderMap.get(t.folderId) || '' : '';
+        const yourShare = t.split ? t.split.yourShare : '';
+        const friendsShare = t.split ? t.split.friendsShare : '';
+        return [
+          escapeCsv(t.date),
+          escapeCsv(t.type),
+          escapeCsv(catName),
+          escapeCsv(accName),
+          escapeCsv(t.merchant || ''),
+          escapeCsv(t.note || ''),
+          escapeCsv(folderName),
+          escapeCsv(t.amount),
+          escapeCsv(currencyCode || 'INR'),
+          escapeCsv(yourShare),
+          escapeCsv(friendsShare),
+        ].join(',');
+      });
+
+      const csvContent = [headers.join(','), ...rows].join('\n');
+      const filename = `Cashveil_Transactions_${new Date().toISOString().split('T')[0]}.csv`;
+      const uri = `${FileSystem.cacheDirectory}${filename}`;
+      await FileSystem.writeAsStringAsync(uri, csvContent, { encoding: FileSystem.EncodingType.UTF8 });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, {
+          mimeType: 'text/csv',
+          dialogTitle: 'Export Cashveil Transactions (CSV)',
+          UTI: 'public.comma-separated-values-text',
+        });
+      } else {
+        Alert.alert('CSV Export Complete', `Exported ${transactions.length} transactions to ${uri}`);
+      }
+      logAction('export', 'Exported transactions as CSV', { count: transactions.length });
+    } catch (err) {
+      console.warn('CSV export error:', err);
+      logException('export', 'CSV export failed', err);
+      Alert.alert('Export Failed', 'Could not export CSV file.');
     }
   };
 
@@ -838,6 +1027,31 @@ export default function YourDataScreen() {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             logAction('app', 'Local cache cleared', { targets: [EXCHANGE_RATE_CACHE_KEY] });
             Alert.alert('Cache Cleared', 'Temporary cache has been cleared.');
+          },
+        },
+      ]
+    );
+  };
+
+  const handleRestoreCoachTips = () => {
+    Haptics.selectionAsync().catch(() => {});
+    Alert.alert(
+      'Restore Financial Tips',
+      'Do you want to unhide any financial coach tips you previously dismissed for today or this month?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Restore',
+          onPress: async () => {
+            try {
+              await resetDismissedCoachInsights();
+              logAction('app', 'Coach tips restored', {});
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+              Alert.alert('Tips Restored', 'All active financial coach tips have been restored and will now appear on your Home screen.');
+            } catch (err: any) {
+              logException('app', 'Restore coach tips failed', err);
+              Alert.alert('Error', 'Failed to restore tips.');
+            }
           },
         },
       ]
@@ -964,7 +1178,7 @@ export default function YourDataScreen() {
         <View style={styles.infoBanner}>
           <ShieldCheck size={20} color={expenseColors.accentGreen} />
           <AppText style={styles.infoBannerText}>
-            This application is built local-first. Your financial data, accounts, budgets, and transactions belong exclusively to you and stay private on your device.
+            Cashveil is built local-first. Your financial data, accounts, budgets, and transactions belong exclusively to you and stay private on your device.
           </AppText>
         </View>
 
@@ -1079,7 +1293,7 @@ export default function YourDataScreen() {
               <View style={styles.featureTextCol}>
                 <AppText style={styles.featureTitle}>No Account Required</AppText>
                 <AppText style={styles.featureSub}>
-                  Use the app completely anonymously without email verification or mandatory cloud profiles.
+                  Use Cashveil completely anonymously without email verification or mandatory cloud profiles.
                 </AppText>
               </View>
             </View>
@@ -1111,7 +1325,7 @@ export default function YourDataScreen() {
             <View style={styles.tcItem}>
               <AppText style={styles.tcNumber}>1. Acceptance of Terms</AppText>
               <AppText style={styles.tcBody}>
-                By accessing or using this expense and subscription tracking application, you agree to be bound by these Terms and Conditions. If you disagree with any part of these terms, please discontinue use.
+                By accessing or using Cashveil, you agree to be bound by these Terms and Conditions. If you disagree with any part of these terms, please discontinue use.
               </AppText>
             </View>
 
@@ -1138,7 +1352,7 @@ export default function YourDataScreen() {
             <View style={styles.tcItem}>
               <AppText style={styles.tcNumber}>4. Local Storage & Backup Responsibility</AppText>
               <AppText style={styles.tcBody}>
-                Because this application uses local-first on-device storage, deleting the application or clearing device storage without generating an export backup may result in irreversible data loss. Users are encouraged to utilize the built-in PDF export function regularly.
+                Because Cashveil uses local-first on-device storage, deleting the application or clearing device storage without generating an export backup may result in irreversible data loss. Users are encouraged to utilize the built-in PDF export function regularly.
               </AppText>
             </View>
 
@@ -1225,6 +1439,24 @@ export default function YourDataScreen() {
 
             <View style={styles.divider} />
 
+            {/* CSV Export */}
+            <TouchableOpacity
+              style={styles.actionRow}
+              activeOpacity={0.7}
+              onPress={handleExportCsv}
+            >
+              <View style={styles.actionLeft}>
+                <FileSpreadsheet size={18} color="#9DC6EB" />
+                <View>
+                  <AppText style={styles.actionTitle}>Export Transactions (CSV)</AppText>
+                  <AppText style={styles.actionSub}>Spreadsheet with accounts, categories & splits</AppText>
+                </View>
+              </View>
+              <AppText style={[styles.actionBtnText, { color: '#9DC6EB' }]}>Export</AppText>
+            </TouchableOpacity>
+
+            <View style={styles.divider} />
+
             {/* PDF Export */}
             <TouchableOpacity
               style={styles.actionRow}
@@ -1239,6 +1471,24 @@ export default function YourDataScreen() {
                 </View>
               </View>
               <AppText style={[styles.actionBtnText, { color: expenseColors.accentGreen }]}>Export</AppText>
+            </TouchableOpacity>
+
+            <View style={styles.divider} />
+
+            {/* Restore Dismissed Coach Tips */}
+            <TouchableOpacity
+              style={styles.actionRow}
+              activeOpacity={0.7}
+              onPress={handleRestoreCoachTips}
+            >
+              <View style={styles.actionLeft}>
+                <Sparkles size={18} color="#F48B8B" />
+                <View>
+                  <AppText style={styles.actionTitle}>Restore Dismissed Tips</AppText>
+                  <AppText style={styles.actionSub}>Unhide coach insights for today & this month</AppText>
+                </View>
+              </View>
+              <AppText style={[styles.actionBtnText, { color: '#F48B8B' }]}>Restore</AppText>
             </TouchableOpacity>
 
             <View style={styles.divider} />

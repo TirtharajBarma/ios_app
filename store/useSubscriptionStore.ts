@@ -306,7 +306,12 @@ function autoPostRecurringExpense(sub: Subscription, renewalDateISO: string): vo
 
     const noteBase = prevTx?.note ? prevTx.note.replace(/\s*\(Renewal\)$/i, '') : sub.name;
 
-    const appCurrency = expenseStore.currency || 'INR';
+    let appCurrency = 'INR';
+    try {
+      appCurrency = require('@/store/useSettingsStore').useSettingsStore.getState().currencyCode || 'INR';
+    } catch {
+      // settings store unavailable: assume INR
+    }
     let finalAmount = getChargedPrice(sub) || prevTx?.amount || 0;
     if (sub.currency && appCurrency && sub.currency.toUpperCase() !== appCurrency.toUpperCase()) {
       finalAmount = Math.round(convertCurrency(finalAmount, sub.currency, appCurrency) * 100) / 100;
@@ -408,7 +413,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
               const renewalDateISO = currentBillingDateStr;
 
               await db.createTransaction({
-                id: generateId(),
+                id: `${sub.id}-tx-${toLocalDateString(renewalDateISO)}`,
                 subscriptionId: sub.id,
                 amount: activePrice,
                 currency: sub.currency,
@@ -515,6 +520,10 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
       updated[idx] = {
         ...updated[idx],
         ...input,
+        // Keep the raw cycle in step with an edited cycle (it is what savings/totals read first)
+        ...(input.billingCycle !== undefined && input.rawBillingCycle === undefined
+          ? { rawBillingCycle: input.billingCycle }
+          : {}),
         updatedAt: new Date().toISOString(),
       };
       updatedSub = updated[idx];
@@ -543,7 +552,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
         
         // Log resumption transaction today
         await db.createTransaction({
-          id: generateId(),
+          id: `${id}-tx-${toLocalDateString(today.toISOString())}`,
           subscriptionId: id,
           amount: activePrice,
           currency: updatedSub.currency,
@@ -579,10 +588,10 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
         });
         currentSubscriptions = get().subscriptions;
 
-        // Reschedule reminders for the new renewal date
-        const subForReminder = { ...updatedSub, nextBillingDate: nextDate };
-        if (subForReminder.reminderEnabled) {
-          await scheduleReminder(subForReminder).catch(() => {});
+        // Everything after this point (reminder, shared push) must see the new renewal date
+        updatedSub = { ...updatedSub, nextBillingDate: nextDate };
+        if (updatedSub.reminderEnabled) {
+          await scheduleReminder(updatedSub).catch(() => {});
         }
       }
     }
@@ -629,6 +638,19 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     });
     triggerAutoBackup(currentSubscriptions).catch(() => {});
     refreshVault(currentSubscriptions).then((vault) => set({ vault }));
+    // Ledger entries must not keep pointing at a deleted subscription
+    try {
+      const { useExpenseStore } = require('@/store/useExpenseStore');
+      if (useExpenseStore.getState().transactions.some((t: any) => t.subscriptionId === id)) {
+        useExpenseStore.setState((state: any) => ({
+          transactions: state.transactions.map((t: any) =>
+            t.subscriptionId === id ? { ...t, subscriptionId: undefined } : t
+          ),
+        }));
+      }
+    } catch (e) {
+      console.warn('Failed to unlink ledger transactions from removed subscription:', e);
+    }
     if (removed?.isShared) pushSharedSubscription({ ...removed, isShared: false }).catch(() => {});
     logAction('subscription', `Removed subscription: ${removed?.name || id}`, { id, price: removed?.price });
   },
@@ -642,21 +664,19 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     const subs = get().subscriptions;
     const rateTo = EXCHANGE_RATES[newCurrency?.toUpperCase()] ?? 1.0;
     
-    const updatedSubs: Subscription[] = [];
+    const converted = new Map<string, Partial<Subscription>>();
     const SQLiteDb = db.getDatabase();
 
     await SQLiteDb.execAsync("BEGIN TRANSACTION;");
     try {
       for (const sub of subs) {
         if (sub.currency?.toUpperCase() === newCurrency?.toUpperCase()) {
-          updatedSubs.push(sub);
           continue;
         }
 
         const subCurrencyRate = EXCHANGE_RATES[sub.currency?.toUpperCase()];
         if (subCurrencyRate === undefined || subCurrencyRate === 0) {
           // Skip subscriptions with unknown currency — don't corrupt their price
-          updatedSubs.push(sub);
           continue;
         }
         const priceInUSD = sub.price / subCurrencyRate;
@@ -685,8 +705,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
         
         await db.updateSubscription(sub.id, dbUpdates);
         
-        updatedSubs.push({
-          ...sub,
+        converted.set(sub.id, {
           price: newPrice,
           currency: newCurrency,
           promoPrice: newPromoPrice,
@@ -701,7 +720,12 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
       throw e;
     }
     
-    set({ subscriptions: updatedSubs, stats: computeStats(updatedSubs) });
+    // Re-read state so edits made while the batch ran are not clobbered
+    set((state) => {
+      const next = state.subscriptions.map((s) => (converted.has(s.id) ? { ...s, ...converted.get(s.id) } : s));
+      return { subscriptions: next, stats: computeStats(next) };
+    });
+    const updatedSubs = get().subscriptions;
     triggerAutoBackup(updatedSubs).catch(() => {});
     refreshVault(updatedSubs).then((vault) => set({ vault }));
 
@@ -741,8 +765,6 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
   importSubscriptions: async (importedSubs) => {
     await db.initializeDatabase();
     
-    // Wipe existing database in one step
-    await db.deleteAllSubscriptions();
     await cancelAllReminders().catch(() => {});
     
     const SQLiteDb = db.getDatabase();
@@ -750,6 +772,8 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     
     await SQLiteDb.execAsync("BEGIN TRANSACTION;");
     try {
+      // Wipe inside the transaction so a failed import rolls back to the old data
+      await db.deleteAllSubscriptions();
       for (const input of importedSubs) {
         const id = generateId();
         const sub = await db.insertSubscription(id, input);

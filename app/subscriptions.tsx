@@ -34,6 +34,7 @@ import { useSettingsStore } from "@/store/useSettingsStore";
 import { AppText, SubscriptionLogo, Loading, NativeLiquidMenu, type MenuAction } from "@/components/ui";
 import { colors, spacing, radius, getCurrencySymbol } from "@/constants";
 import { toMonthly, getSubscriptionActivePrice } from "@/utils/date";
+import { convertCurrency } from "@/utils/currency";
 
 function SpringSubscriptionRow({
   sub,
@@ -365,8 +366,8 @@ export default function SubscriptionsListScreen() {
         if (sortBy === "price") {
           const priceA = a.isTrial ? 0 : getSubscriptionActivePrice(a);
           const priceB = b.isTrial ? 0 : getSubscriptionActivePrice(b);
-          const monthlyA = toMonthly(priceA, a.billingCycle, a.customIntervalMonths);
-          const monthlyB = toMonthly(priceB, b.billingCycle, b.customIntervalMonths);
+          const monthlyA = convertCurrency(toMonthly(priceA, a.rawBillingCycle || a.billingCycle, a.customIntervalMonths), a.currency, currencyCode);
+          const monthlyB = convertCurrency(toMonthly(priceB, b.rawBillingCycle || b.billingCycle, b.customIntervalMonths), b.currency, currencyCode);
           return monthlyB - monthlyA; // High to Low
         }
         // Default: Renewal Date
@@ -378,7 +379,7 @@ export default function SubscriptionsListScreen() {
           return 0;
         }
       });
-  }, [subscriptions, searchQuery, sortBy, hideExpired, hideCancelled, hideEnding]);
+  }, [subscriptions, searchQuery, sortBy, hideExpired, hideCancelled, hideEnding, currencyCode]);
 
   // Grouping Logic
   const groupedData = useMemo(() => {
@@ -475,7 +476,7 @@ export default function SubscriptionsListScreen() {
             const categoryTotal = group.items.reduce((sum, item) => {
               if (item.isTrial) return sum;
               const activePrice = getSubscriptionActivePrice(item);
-              return sum + toMonthly(activePrice, item.billingCycle, item.customIntervalMonths);
+              return sum + convertCurrency(toMonthly(activePrice, item.rawBillingCycle || item.billingCycle, item.customIntervalMonths), item.currency, currencyCode);
             }, 0);
 
             return (

@@ -13,6 +13,8 @@ import * as Haptics from 'expo-haptics';
 import { AppText } from '@/components/ui';
 import { useRouter } from 'expo-router';
 import { useExpenseStore, monthKeyToYearMonth } from '@/store/useExpenseStore';
+import { useSubscriptionStore } from '@/store/useSubscriptionStore';
+import { getUpcomingFixedSubscriptions, isFixedCommitmentCategory } from '@/utils/coachInsight';
 import { useShallow } from 'zustand/react/shallow';
 import { expenseColors } from '@/constants/expenseColors';
 import { formatCompactCurrency } from './MoneyFlowCard';
@@ -23,28 +25,32 @@ export const formatBudgetLegendAmount = (amount: number, symbol: string = '₹')
 
 export const BudgetCard: React.FC = () => {
   const {
-  monthlyBudget,
-  currencySymbol,
-  selectedMonth,
-  getTotalSpent,
-  getRemainingBudget,
-  getCategoryBreakdown,
-  categoryBudgets,
-  transactions,
-  categories,
-} = useExpenseStore(
-  useShallow((s) => ({
-    monthlyBudget: s.monthlyBudget,
-    currencySymbol: s.currencySymbol,
-    selectedMonth: s.selectedMonth,
-    getTotalSpent: s.getTotalSpent,
-    getRemainingBudget: s.getRemainingBudget,
-    getCategoryBreakdown: s.getCategoryBreakdown,
-    categoryBudgets: s.categoryBudgets,
-    transactions: s.transactions,
-    categories: s.categories,
-  }))
-);
+    monthlyBudget,
+    currencySymbol,
+    currencyCode,
+    selectedMonth,
+    getTotalSpent,
+    getRemainingBudget,
+    getCategoryBreakdown,
+    categoryBudgets,
+    transactions,
+    categories,
+  } = useExpenseStore(
+    useShallow((s) => ({
+      monthlyBudget: s.monthlyBudget,
+      currencySymbol: s.currencySymbol,
+      currencyCode: s.currencyCode,
+      selectedMonth: s.selectedMonth,
+      getTotalSpent: s.getTotalSpent,
+      getRemainingBudget: s.getRemainingBudget,
+      getCategoryBreakdown: s.getCategoryBreakdown,
+      categoryBudgets: s.categoryBudgets,
+      transactions: s.transactions,
+      categories: s.categories,
+    }))
+  );
+
+  const subscriptions = useSubscriptionStore((s) => s.subscriptions);
 
   const router = useRouter();
   const sym = currencySymbol || '₹';
@@ -230,6 +236,11 @@ export const BudgetCard: React.FC = () => {
   const currentDay = isCurrentMonth ? now.getDate() : isPastMonth ? daysInMonth : 0;
   const daysRemaining = isCurrentMonth ? Math.max(1, daysInMonth - currentDay + 1) : isPastMonth ? 0 : daysInMonth;
 
+  // Upcoming fixed commitments (subscriptions with user split share respected)
+  const upcomingFixed = isCurrentMonth
+    ? getUpcomingFixedSubscriptions(subscriptions, now, currencyCode || 'INR')
+    : 0;
+
   // ─────────────────────────────────────────────────────────
   // 2. CENTER CONTENT DISPLAY
   // ─────────────────────────────────────────────────────────
@@ -283,35 +294,15 @@ export const BudgetCard: React.FC = () => {
     }
   }
 
-  // Helper to identify fixed non-discretionary commitments (Rent, Utilities, Subscriptions, EMIs)
-  const isFixedCommitment = (cat: { id: string; name: string }) => {
-    const n = (cat.name || '').toLowerCase();
-    const id = (cat.id || '').toLowerCase();
-    return (
-      id.includes('rent') ||
-      id.includes('util') ||
-      id.includes('bill') ||
-      id.includes('subs') ||
-      n.includes('rent') ||
-      n.includes('electric') ||
-      n.includes('power') ||
-      n.includes('utility') ||
-      n.includes('wifi') ||
-      n.includes('subscription') ||
-      n.includes('emi') ||
-      n.includes('loan') ||
-      n.includes('insurance')
-    );
-  };
-
   const fixedSpent = breakdown.reduce((sum, item) => {
-    return sum + (isFixedCommitment(item.category) ? item.amount : 0);
+    return sum + (isFixedCommitmentCategory(item.category) ? item.amount : 0);
   }, 0);
 
   const variableSpent = Math.max(0, totalSpent - fixedSpent);
   const variableDailyBurn = currentDay > 0 ? Math.round(variableSpent / currentDay) : 0;
   const budgetRunway = Math.max(0, effectiveBudget - totalSpent);
-  const safeDailyPace = effectiveBudget > 0 && daysRemaining > 0 ? Math.max(0, Math.round(budgetRunway / daysRemaining)) : 0;
+  const netBudgetRunway = Math.max(0, budgetRunway - upcomingFixed);
+  const safeDailyPace = effectiveBudget > 0 && daysRemaining > 0 ? Math.max(0, Math.round(netBudgetRunway / daysRemaining)) : 0;
 
   // Over-pacing: at today's average variable burn, the rest of the month would use more than the budget that is left
   // (15% tolerance). Needs at least 3 days elapsed to avoid Day 1 false alarms.
@@ -601,7 +592,7 @@ export const BudgetCard: React.FC = () => {
                   }
                 />
                 <AppText style={styles.pacingValueText}>
-                  {sym}{safeDailyPace.toLocaleString('en-IN')}/day
+                  {sym} {safeDailyPace.toLocaleString('en-IN')}/day
                 </AppText>
                 <AppText style={styles.pacingLabelText}>daily limit</AppText>
               </View>

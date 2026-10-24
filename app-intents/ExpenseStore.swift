@@ -55,9 +55,8 @@ enum ExpenseStore {
     let candidateIds = [
       "com.tirtharajbarma.subscription",
       Bundle.main.bundleIdentifier,
-      "monevo",
+      "cashveil",
       "subscription",
-      "orvyn",
     ].compactMap { $0 }.filter { !$0.starts(with: "com.apple.") }
 
     for id in candidateIds {
@@ -139,15 +138,12 @@ enum ExpenseStore {
   /// Loads the current envelope, falling back to the legacy key the same way
   /// `utils/storage.ts` does.
   static func load() -> Snapshot? {
-    var envelope = readEnvelope(key: storageKey) ?? readEnvelope(key: legacyStorageKey)
-    if envelope == nil {
-      // Nothing persisted yet: write an empty envelope so a later native write
-      // has a manifest entry to work with.
-      let fresh: [String: Any] = ["state": [String: Any](), "version": 0]
-      store(envelope: fresh)
-      envelope = fresh
-    }
-    guard let envelope else { return nil }
+    // Read-only: an absent or unparseable file yields an empty snapshot and is
+    // never rewritten here (addExpense needs an existing account, so an empty
+    // snapshot can never reach store()).
+    let envelope =
+      readEnvelope(key: storageKey) ?? readEnvelope(key: legacyStorageKey)
+      ?? ["state": [String: Any](), "version": 0]
     let state = (envelope["state"] as? [String: Any]) ?? [String: Any]()
     return Snapshot(envelope: envelope, state: state)
   }
@@ -388,11 +384,18 @@ enum ExpenseStore {
         let account = accounts.first(where: { string($0["id"]) == accountId })
       else { return nil }
 
+      // A category deleted after the Shortcut saved it must not orphan the
+      // transaction. Only checked when categories could be read.
+      let knownCategories = snapshot.categories
+      let resolvedCategoryId =
+        knownCategories.isEmpty || knownCategories.contains(where: { string($0["id"]) == categoryId })
+        ? categoryId : "cat_other"
+
       var transaction: [String: Any] = [
         "id": transactionId,
         "amount": amount,
         "type": "expense",
-        "categoryId": categoryId,
+        "categoryId": resolvedCategoryId,
         "accountId": accountId,
         "accountName": string(account["name"]) ?? "",
         "date": date,

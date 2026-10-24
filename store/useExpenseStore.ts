@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { AppState } from 'react-native';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@/utils/storage';
-import { logAction, logException } from '@/utils/auditLog';
+import { logAction, logException, logWarn, logInfo } from '@/utils/auditLog';
 import { ExpenseAccount, ExpenseCategory, ExpenseTransaction, QuickExpensePreset, SavingsVault, EventFolder } from '@/types/expense';
 import { expenseColors } from '@/constants/expenseColors';
 import { executeSmartQuery, SmartQueryResult } from '@/services/onDeviceAi';
@@ -198,6 +198,7 @@ interface ExpenseState {
 
   // Derived Calculations
   refreshCardCycles: () => void;
+  getHistoricalAccountBreakdown: (monthKey?: string) => { bankCash: number; cardDues: number };
   getTotalBalance: (monthKey?: string) => number;
   getTotalIncome: (monthKey?: string) => number;
   getTotalSpent: (monthKey?: string) => number;
@@ -261,6 +262,16 @@ export const INITIAL_CATEGORIES: ExpenseCategory[] = [
   { id: 'cat_debt_repayment', name: 'Debt Repayment', color: '#88C0D0', iconName: 'Coins' },
   { id: 'cat_income', name: 'Income', color: expenseColors.accentGreen, iconName: 'Coins' },
   { id: 'cat_goal', name: 'Goals', color: expenseColors.accentGreen, iconName: 'Target' },
+];
+
+export const DEFAULT_INCOME_CATEGORIES: ExpenseCategory[] = [
+  { id: 'cat_salary', name: 'Salary', emoji: '💼', color: '#8CD9C8', iconName: 'Briefcase' },
+  { id: 'cat_freelance', name: 'Freelance', emoji: '💻', color: '#9DC6EB', iconName: 'Laptop' },
+  { id: 'cat_invest', name: 'Investments', emoji: '📈', color: '#F4CD89', iconName: 'TrendingUp' },
+  { id: 'cat_bonus', name: 'Bonus', emoji: '🎁', color: '#F2AEC4', iconName: 'Gift' },
+  { id: 'cat_rental', name: 'Rental', emoji: '🏠', color: '#C4A7E7', iconName: 'Home' },
+  { id: 'cat_refund', name: 'Refund', emoji: '🔄', color: '#82D0D8', iconName: 'RefreshCw' },
+  { id: 'cat_other_inc', name: 'Other Income', emoji: '💰', color: '#A8B8E8', iconName: 'Coins' },
 ];
 
 const INITIAL_ACCOUNTS: ExpenseAccount[] = [
@@ -354,14 +365,23 @@ export const recomputeAllAccountsHelper = (
       }
     }
 
+    // Legacy accounts without openingBalance already have their transactions baked into
+    // balance/dueAmount, so back the ledger out instead of treating the current figure as opening.
     const startingOpening = acc.openingBalance !== undefined
       ? acc.openingBalance
       : isCredit
-        ? (acc.dueAmount || 0)
-        : (acc.balance ?? 0);
+        ? roundMoney((acc.dueAmount || 0) - (acc.balance || 0) - (expenseSum - incomeSum))
+        : roundMoney((acc.balance ?? 0) - (incomeSum - expenseSum));
 
     if (isCredit) {
       const rawDue = roundMoney(startingOpening + expenseSum - incomeSum);
+      if (isNaN(rawDue)) {
+        logWarn('calculation', `NaN due amount computed for credit account ${acc.id} (${acc.name})`, {
+          startingOpening,
+          expenseSum,
+          incomeSum,
+        });
+      }
       const finalDue = rawDue > 0 ? rawDue : 0;
       const positiveBalance = rawDue < 0 ? roundMoney(Math.abs(rawDue)) : 0;
       return {
@@ -377,6 +397,13 @@ export const recomputeAllAccountsHelper = (
       };
     } else {
       const finalBalance = roundMoney(startingOpening + incomeSum - expenseSum);
+      if (isNaN(finalBalance)) {
+        logWarn('calculation', `NaN balance computed for account ${acc.id} (${acc.name})`, {
+          startingOpening,
+          incomeSum,
+          expenseSum,
+        });
+      }
       return {
         ...acc,
         openingBalance: startingOpening,
@@ -606,7 +633,16 @@ export const useExpenseStore = create<ExpenseState>()(
         savingsVaults: updatedVaults,
       };
     });
-    logAction('transaction', 'Added transaction', { id: newTx.id, amount: newTx.amount, type: newTx.type });
+    logAction('transaction', `Added ${newTx.type}: ${newTx.amount}`, {
+      id: newTx.id,
+      amount: newTx.amount,
+      type: newTx.type,
+      accountId: newTx.accountId,
+      accountName: newTx.accountName,
+      toAccountId: newTx.toAccountId,
+      date: newTx.date,
+      note: newTx.note,
+    });
   },
 
   addBatchTransactions: (txsData, newAccountsList, reconciledAccountBalances) => {
@@ -710,7 +746,17 @@ export const useExpenseStore = create<ExpenseState>()(
         savingsVaults: updatedVaults,
       };
     });
-    logAction('transaction', 'Added batch transactions', { count: txsData.length });
+    logAction('transaction', `Added batch of ${txsData.length} transaction(s)`, {
+      count: txsData.length,
+      newAccountsCount: newAccountsList?.length || 0,
+      newAccountNames: newAccountsList?.map((a) => a.name),
+    });
+    if (newAccountsList && newAccountsList.length > 0) {
+      logAction('import', `Statement import auto-created ${newAccountsList.length} account(s)`, {
+        accounts: newAccountsList.map((a) => ({ id: a.id, name: a.name, type: a.type })),
+        reconciledBalances: reconciledAccountBalances,
+      });
+    }
   },
 
   updateTransaction: (id, updates) => {
@@ -763,10 +809,25 @@ export const useExpenseStore = create<ExpenseState>()(
         savingsVaults: updatedVaults,
       };
     });
-    logAction('transaction', 'Updated transaction', { id, updates: Object.keys(updates) });
+    logAction('transaction', `Updated transaction: ${id}`, {
+      id,
+      updates: Object.keys(updates),
+      amount: updates.amount,
+      type: updates.type,
+      accountId: updates.accountId,
+    });
   },
 
   removeTransactions: (ids) => {
+    // Best-effort: drop the matching subscription payment rows so history/stats don't keep ghost payments.
+    const subTxs = get().transactions.filter((t) => ids.includes(t.id) && t.subscriptionId);
+    if (subTxs.length > 0) {
+      import('@/database/queries')
+        .then(async ({ deletePaymentRowsOnDay }) => {
+          for (const t of subTxs) await deletePaymentRowsOnDay(t.subscriptionId as string, (t.date || '').slice(0, 10));
+        })
+        .catch(() => {});
+    }
     set((state) => {
       const removeSet = new Set<string>(ids);
       const friendsToUnsettle = new Map<string, Set<string>>(); // parentTxId -> Set of friendIds
@@ -787,7 +848,6 @@ export const useExpenseStore = create<ExpenseState>()(
 
       for (const t of state.transactions) {
         if (removeSet.has(t.id)) {
-          if (t.settlementTxId) removeSet.add(t.settlementTxId);
           const link = parseSettledLink(t.settledTxId);
           if (link) {
             if (link.friendId) {
@@ -874,7 +934,7 @@ export const useExpenseStore = create<ExpenseState>()(
         selectedTransactionIds: state.selectedTransactionIds.filter((id) => !removeSet.has(id)),
       };
     });
-    logAction('transaction', 'Removed transactions', { count: ids.length });
+    logAction('transaction', `Removed ${ids.length} transaction(s)`, { ids, count: ids.length });
   },
 
   updateTransactionsCategory: (ids, categoryId) => {
@@ -883,6 +943,11 @@ export const useExpenseStore = create<ExpenseState>()(
         ids.includes(t.id) && t.type === 'expense' ? { ...t, categoryId } : t
       ),
     }));
+    logAction('transaction', `Updated category to ${categoryId} for ${ids.length} transaction(s)`, {
+      count: ids.length,
+      categoryId,
+      ids,
+    });
   },
 
   addEventFolder: (folderData) => {
@@ -979,6 +1044,14 @@ export const useExpenseStore = create<ExpenseState>()(
 
         const updatedAccounts = recomputeAllAccountsHelper(state.accounts, updatedTxs, state.selectedMonth);
 
+        logAction('settlement', `Settled debt lent: ${amount} received in account ${targetAccId}`, {
+          txId,
+          amount,
+          targetAccountId: targetAccId,
+          borrower: tx.borrowerOrLender,
+          settlementTxId: settlementTx.id,
+        });
+
         return {
           ...state,
           accounts: updatedAccounts,
@@ -1048,6 +1121,14 @@ export const useExpenseStore = create<ExpenseState>()(
 
         const updatedAccounts = recomputeAllAccountsHelper(state.accounts, updatedTxs, state.selectedMonth);
 
+        logAction('settlement', `Settled split bill share: ${amount} received in account ${targetAccId}`, {
+          txId,
+          amount,
+          targetAccountId: targetAccId,
+          friendNames: tx.split?.friendNames,
+          settlementTxId: settlementTx.id,
+        });
+
         return {
           ...state,
           accounts: updatedAccounts,
@@ -1079,6 +1160,14 @@ export const useExpenseStore = create<ExpenseState>()(
         ].sort(compareTransactions);
 
         const updatedAccounts = recomputeAllAccountsHelper(state.accounts, updatedTxs, state.selectedMonth);
+
+        logAction('settlement', `Repaid borrowed debt: ${amount} from account ${sourceAccId}`, {
+          txId,
+          amount,
+          sourceAccountId: sourceAccId,
+          lender: tx.borrowerOrLender,
+          settlementTxId: settlementTx.id,
+        });
 
         return {
           ...state,
@@ -1153,6 +1242,15 @@ export const useExpenseStore = create<ExpenseState>()(
 
       const updatedAccounts = recomputeAllAccountsHelper(state.accounts, updatedTxs, state.selectedMonth);
 
+      logAction('settlement', `Settled split friend share for ${friend.name}: ${amount} in account ${targetAccId}`, {
+        txId,
+        friendId: friend.id,
+        friendName: friend.name,
+        amount,
+        targetAccountId: targetAccId,
+        settlementTxId: settlementTx.id,
+      });
+
       return {
         ...state,
         accounts: updatedAccounts,
@@ -1187,12 +1285,23 @@ export const useExpenseStore = create<ExpenseState>()(
     set((state) => ({
       savingsVaults: [...state.savingsVaults, newVault],
     }));
+    logAction('vault', `Created savings vault: ${newVault.name}`, {
+      id: newVault.id,
+      name: newVault.name,
+      targetAmount: newVault.targetAmount,
+    });
   },
 
   updateSavingsVault: (id, updates) => {
     set((state) => ({
       savingsVaults: state.savingsVaults.map((v) => (v.id === id ? { ...v, ...updates } : v)),
     }));
+    logAction('vault', `Updated savings vault: ${id}`, {
+      id,
+      updates: Object.keys(updates),
+      targetAmount: updates.targetAmount,
+      name: updates.name,
+    });
   },
 
   deleteSavingsVault: (id, refundAccountId) => {
@@ -1337,6 +1446,7 @@ export const useExpenseStore = create<ExpenseState>()(
   },
 
   updateAccount: (id, updates) => {
+    const accName = updates.name ? updates.name.trim() : (get().accounts.find((a) => a.id === id)?.name || id);
     set((state) => {
       const targetAccount = state.accounts.find((a) => a.id === id);
       const oldNameLower = (targetAccount?.name || '').trim().toLowerCase();
@@ -1380,14 +1490,23 @@ export const useExpenseStore = create<ExpenseState>()(
         activeAccountFilter: newFilter,
       };
     });
-    logAction('account', 'Updated account', { id, updates: Object.keys(updates) });
+    logAction('account', `Updated account: ${accName}`, {
+      id,
+      updates: Object.keys(updates),
+      balance: updates.balance,
+      openingBalance: updates.openingBalance,
+      type: updates.type,
+      billingDay: updates.billingDay,
+    });
     syncShortcutsParameters().catch(() => {});
   },
 
   deleteAccount: (id) => {
+    let deletedAccName = 'Deleted Account';
     set((state) => {
       const targetAccount = state.accounts.find((a) => a.id === id);
       const accName = targetAccount?.name || 'Deleted Account';
+      deletedAccName = accName;
       const resetFilter = state.activeAccountFilter === id || state.activeAccountFilter === accName;
       return {
         accounts: state.accounts.filter((a) => a.id !== id),
@@ -1404,7 +1523,7 @@ export const useExpenseStore = create<ExpenseState>()(
         }),
       };
     });
-    logAction('account', 'Deleted account', { id });
+    logAction('account', `Deleted account: ${deletedAccName}`, { id, name: deletedAccName });
     syncShortcutsParameters().catch(() => {});
   },
 
@@ -1525,85 +1644,95 @@ export const useExpenseStore = create<ExpenseState>()(
       return changed ? { accounts: next } : state;
     }),
 
-  getTotalBalance: (monthKey) => {
+  getHistoricalAccountBreakdown: (monthKey) => {
     const { accounts, transactions, selectedMonth } = get();
     const targetKey = monthKey || selectedMonth;
     const now = new Date();
 
-    // If current or future month, return real-time live total balance
     const target = targetKey ? monthKeyToYearMonth(targetKey) : null;
-    // Compare as numbers: month-name strings sort alphabetically ("September" > "October").
-    if (!target || target.year * 12 + target.month >= now.getFullYear() * 12 + now.getMonth()) {
-      return roundMoney(
-        accounts.reduce((sum, acc) => {
-          if (acc.type === 'credit') {
-            // Unbilled spend isn't payable yet, so it doesn't reduce today's balance.
-            return sum + (acc.balance || 0) - ((acc.dueAmount || 0) - (acc.unbilledDue || 0));
-          }
-          return sum + (acc.balance || 0);
-        }, 0)
-      );
+    const isLive = !target || target.year * 12 + target.month >= now.getFullYear() * 12 + now.getMonth();
+
+    if (isLive) {
+      const bankCash = accounts
+        .filter((a) => a.type !== 'credit' && !a.isArchived)
+        .reduce((sum, a) => sum + (a.balance || 0), 0);
+      const cardDues = accounts
+        .filter((a) => a.type === 'credit' && !a.isArchived)
+        .reduce((sum, a) => sum + Math.max(0, (a.dueAmount || 0) - (a.unbilledDue || 0)), 0);
+      return { bankCash: roundMoney(bankCash), cardDues: roundMoney(cardDues) };
     }
 
-    // For a past month, calculate historical balance as of the last day of targetKey
-    const { year, month } = monthKeyToYearMonth(targetKey);
+    // Historical past month
+    const { year, month } = target;
     const endOfTargetMonth = new Date(year, month + 1, 0, 23, 59, 59, 999).getTime();
 
-    return roundMoney(
-      accounts.reduce((total, acc) => {
-        const isCredit = acc.type === 'credit';
-        const startingOpening =
-          acc.openingBalance !== undefined
-            ? acc.openingBalance
-            : isCredit
-            ? acc.dueAmount || 0
-            : acc.balance ?? 0;
+    let bankCash = 0;
+    let cardDues = 0;
 
-        const accNameLower = (acc.name || '').trim().toLowerCase();
-        const isFrom = (t: ExpenseTransaction) =>
-          t.accountId === acc.id ||
-          (!t.accountId && t.accountName && accNameLower && t.accountName.trim().toLowerCase() === accNameLower);
-        const isTo = (t: ExpenseTransaction) =>
-          t.toAccountId === acc.id ||
-          (!t.toAccountId && t.toAccountName && accNameLower && t.toAccountName.trim().toLowerCase() === accNameLower);
+    for (const acc of accounts) {
+      if (acc.isArchived) continue;
+      const isCredit = acc.type === 'credit';
+      const startingOpening =
+        acc.openingBalance !== undefined
+          ? acc.openingBalance
+          : isCredit
+          ? acc.dueAmount || 0
+          : acc.balance ?? 0;
 
-        const pastTxs = transactions.filter((t) => {
-          const tTime = parseTxDate(t.date).getTime();
-          return tTime <= endOfTargetMonth && (isFrom(t) || isTo(t));
-        });
+      const accNameLower = (acc.name || '').trim().toLowerCase();
+      const isFrom = (t: ExpenseTransaction) =>
+        t.accountId === acc.id ||
+        (!t.accountId && t.accountName && accNameLower && t.accountName.trim().toLowerCase() === accNameLower);
+      const isTo = (t: ExpenseTransaction) =>
+        t.toAccountId === acc.id ||
+        (!t.toAccountId && t.toAccountName && accNameLower && t.toAccountName.trim().toLowerCase() === accNameLower);
 
-        let expSum = 0;
-        let incSum = 0;
-        let pastUnbilled = 0;
-        const pastClosing = isCredit && acc.billingDay ? getLastClosingDateStr(acc.billingDay, new Date(endOfTargetMonth)) : null;
-        for (const t of pastTxs) {
-          const fromThis = isFrom(t);
-          const toThis = isTo(t);
-          if (pastClosing && fromThis && t.type !== 'income' && t.type !== 'debt_borrow' && t.type !== 'vault_withdraw' && t.date.slice(0, 10) > pastClosing) {
-            pastUnbilled += t.amount;
-          }
-          if (t.type === 'expense' && fromThis) expSum += t.amount;
-          else if (t.type === 'income' && fromThis) incSum += t.amount;
-          else if (t.type === 'transfer') {
-            if (fromThis) expSum += t.amount;
-            if (toThis) incSum += t.amount;
-          } else if (t.type === 'debt_lend' && fromThis) expSum += t.amount;
-          else if (t.type === 'debt_borrow' && fromThis) incSum += t.amount;
-          else if (t.type === 'vault_deposit' && fromThis) expSum += t.amount;
-          else if (t.type === 'vault_withdraw' && fromThis) incSum += t.amount;
+      const pastTxs = transactions.filter((t) => {
+        const tTime = parseTxDate(t.date).getTime();
+        return tTime <= endOfTargetMonth && (isFrom(t) || isTo(t));
+      });
+
+      let expSum = 0;
+      let incSum = 0;
+      let pastUnbilled = 0;
+      const pastClosing = isCredit && acc.billingDay ? getLastClosingDateStr(acc.billingDay, new Date(endOfTargetMonth)) : null;
+
+      for (const t of pastTxs) {
+        const fromThis = isFrom(t);
+        const toThis = isTo(t);
+        if (pastClosing && fromThis && t.type !== 'income' && t.type !== 'debt_borrow' && t.type !== 'vault_withdraw' && t.date.slice(0, 10) > pastClosing) {
+          pastUnbilled += t.amount;
         }
+        if (t.type === 'expense' && fromThis) expSum += t.amount;
+        else if (t.type === 'income' && fromThis) incSum += t.amount;
+        else if (t.type === 'transfer') {
+          if (fromThis) expSum += t.amount;
+          if (toThis) incSum += t.amount;
+        } else if (t.type === 'debt_lend' && fromThis) expSum += t.amount;
+        else if (t.type === 'debt_borrow' && fromThis) incSum += t.amount;
+        else if (t.type === 'vault_deposit' && fromThis) expSum += t.amount;
+        else if (t.type === 'vault_withdraw' && fromThis) incSum += t.amount;
+      }
 
-        if (isCredit) {
-          const rawDue = startingOpening + expSum - incSum;
-          const posBal = rawDue < 0 ? Math.abs(rawDue) : 0;
-          const dueAmt = rawDue > 0 ? rawDue : 0;
-          // Same rule as the live balance: only the billed part reduces cash.
-          return total + posBal - (dueAmt - Math.min(pastUnbilled, dueAmt));
-        } else {
-          return total + (startingOpening + incSum - expSum);
-        }
-      }, 0)
-    );
+      if (isCredit) {
+        const rawDue = startingOpening + expSum - incSum;
+        const posBal = rawDue < 0 ? Math.abs(rawDue) : 0;
+        const dueAmt = rawDue > 0 ? rawDue : 0;
+        const billedDue = dueAmt - Math.min(pastUnbilled, dueAmt);
+        bankCash += posBal;
+        cardDues += billedDue;
+      } else {
+        const finalBal = startingOpening + incSum - expSum;
+        bankCash += finalBal;
+      }
+    }
+
+    return { bankCash: roundMoney(bankCash), cardDues: roundMoney(cardDues) };
+  },
+
+  getTotalBalance: (monthKey) => {
+    const { bankCash, cardDues } = get().getHistoricalAccountBreakdown(monthKey);
+    return roundMoney(bankCash - cardDues);
   },
 
   getTotalSavedInVaults: () => {
@@ -1836,6 +1965,8 @@ export const useExpenseStore = create<ExpenseState>()(
     if (catId === 'cat_debt_repayment') {
       return { id: 'cat_debt_repayment', name: 'Debt Repayment', color: '#88C0D0', iconName: 'Coins' };
     }
+    const incFound = DEFAULT_INCOME_CATEGORIES.find((c) => c.id === catId);
+    if (incFound) return incFound;
     if (catId === 'cat_salary' || catId === 'cat_income') {
       return { id: 'cat_income', name: 'Income', color: expenseColors.accentGreen, iconName: 'Coins' };
     }
@@ -1877,8 +2008,19 @@ export const useExpenseStore = create<ExpenseState>()(
 }),
 {
   name: '@expense_data_v1',
-  onRehydrateStorage: () => (state) => {
-    state?.setHasHydrated(true);
+  onRehydrateStorage: () => (state, error) => {
+    if (error || !state) {
+      // Corrupt blob: keep a copy so the next persist can't silently destroy it.
+      (async () => {
+        try {
+          const raw = (await AsyncStorage.getItem('@expense_data_v1')) ?? (await AsyncStorage.getItem('@legacy_expense_v1'));
+          if (raw) await AsyncStorage.setItem(`@expense_data_corrupt_backup_${Date.now()}`, raw);
+        } catch {}
+      })();
+      useExpenseStore.setState({ _hasHydrated: true });
+      return;
+    }
+    state.setHasHydrated(true);
     syncShortcutsParameters().catch(() => {});
   },
   storage: createJSONStorage(() => ({
@@ -1902,10 +2044,28 @@ export const useExpenseStore = create<ExpenseState>()(
   merge: (persistedState: unknown, currentState: ExpenseState): ExpenseState => {
     const ps = (persistedState || {}) as Partial<ExpenseState>;
     const currentCalendarMonth = monthKeyOf(new Date());
+
+    // Determine target month:
+    // 1. If persisted state has selectedMonth, preserve it
+    // 2. Otherwise if transactions exist, check latest transaction date
+    // 3. Fallback to current calendar month
+    let targetMonth = ps.selectedMonth;
+    if (!targetMonth && Array.isArray(ps.transactions) && ps.transactions.length > 0) {
+      const sortedDates = ps.transactions
+        .map((t: ExpenseTransaction) => t.date)
+        .filter(Boolean)
+        .sort()
+        .reverse();
+      if (sortedDates[0]) {
+        targetMonth = monthKeyOf(new Date(sortedDates[0]));
+      }
+    }
+    const finalSelectedMonth = targetMonth || currentCalendarMonth;
+
     const merged: ExpenseState = {
       ...currentState,
       ...ps,
-      selectedMonth: currentCalendarMonth,
+      selectedMonth: finalSelectedMonth,
       activeAccountFilter: 'All',
       smartSearchQuery: '',
       selectedTransactionIds: [],
@@ -1923,14 +2083,15 @@ export const useExpenseStore = create<ExpenseState>()(
         }
         return c;
       });
+      // Only ensure critical system categories are present; do NOT resurrect non-system categories the user deleted!
       INITIAL_CATEGORIES.forEach((ic) => {
-        if (!merged.categories.some((c: ExpenseCategory) => c.id === ic.id)) {
+        if (isSystemCategory(ic.id) && !merged.categories.some((c: ExpenseCategory) => c.id === ic.id)) {
           merged.categories.push(ic);
         }
       });
     }
     if (Array.isArray(merged.accounts) && Array.isArray(merged.transactions)) {
-      merged.accounts = recomputeAllAccountsHelper(merged.accounts, merged.transactions);
+      merged.accounts = recomputeAllAccountsHelper(merged.accounts, merged.transactions, finalSelectedMonth);
     }
     return merged;
   },
@@ -1950,6 +2111,7 @@ export const useExpenseStore = create<ExpenseState>()(
     hasSeenWalkthrough: state.hasSeenWalkthrough,
     learnedMerchantRules: state.learnedMerchantRules,
     statementSetup: state.statementSetup,
+    selectedMonth: state.selectedMonth,
   }),
 }
 )

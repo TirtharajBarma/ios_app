@@ -37,8 +37,12 @@ import { useShallow } from 'zustand/react/shallow';
 import * as Haptics from 'expo-haptics';
 import { useSubscriptionStore } from '@/store/useSubscriptionStore';
 import { expenseColors } from '@/constants/expenseColors';
+import { parseTxDate, renewalDaysInMonth } from '@/utils/localDate';
+import { toDate } from '@/utils/date';
+import { convertCurrency } from '@/utils/currency';
 import { ExpenseTransaction } from '@/types/expense';
 import { getSubscriptionActivePrice } from '@/utils/date';
+import { isFixedCommitmentCategory } from '@/utils/coachInsight';
 
 import { useRouter, useFocusEffect, useScrollToTop } from 'expo-router';
 import { handleTabFocus } from '@/services/navigation/tabTracker';
@@ -201,16 +205,6 @@ interface VsCat {
   color: string;
 }
 
-// ── Robust ISO Date Parser ──
-function parseTxDate(dateStr: string): Date {
-  if (!dateStr) return new Date();
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr);
-  if (m) {
-    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12, 0, 0);
-  }
-  return new Date(dateStr);
-}
-
 // ── Dynamic Month/Year Parser ─────────────────
 function getMonthYearInfo(monthStr: string) {
   const monthNames = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
@@ -321,26 +315,6 @@ interface MonthHeatmapGridProps {
   INNER_W: number;
 }
 
-/**
- * Days of a month on which a subscription renews: weekly and bi-weekly repeat through the month,
- * and a day that does not exist in a short month (the 31st in April) clamps to the last day.
- */
-function renewalDaysInMonth(cycle: string, ref: Date, year: number, month: number, daysInMonth: number): number[] {
-  const dayIdx = (y: number, m: number, d: number) => Math.round(Date.UTC(y, m, d) / 86400000);
-  if (cycle === 'weekly' || cycle === 'bi-weekly') {
-    const step = cycle === 'weekly' ? 7 : 14;
-    const refIdx = dayIdx(ref.getFullYear(), ref.getMonth(), ref.getDate());
-    const startIdx = dayIdx(year, month, 1);
-    const first = startIdx + ((((refIdx - startIdx) % step) + step) % step);
-    const days: number[] = [];
-    for (let i = first; i < startIdx + daysInMonth; i += step) days.push(i - startIdx + 1);
-    return days;
-  }
-  if (cycle === 'yearly' && ref.getMonth() !== month) return [];
-  if (cycle !== 'monthly' && cycle !== 'daily' && cycle !== 'yearly' && !(ref.getFullYear() === year && ref.getMonth() === month)) return [];
-  return [Math.min(ref.getDate(), daysInMonth)];
-}
-
 const MonthHeatmapGrid = React.memo(function MonthHeatmapGrid({
   monthKey,
   transactions,
@@ -407,7 +381,7 @@ const MonthHeatmapGrid = React.memo(function MonthHeatmapGrid({
   }, [dailySpend, heatmapThresholds]);
 
   const upcomingSubscriptionsByDay = useMemo(() => {
-    const map: Record<number, { id: string; name: string; amount: number; color: string; cycle: string }[]> = {};
+    const map: Record<number, { id: string; name: string; amount: number; color: string; cycle: string; currency?: string; isTrial?: boolean }[]> = {};
     if (!subscriptions || subscriptions.length === 0) return map;
 
     subscriptions.forEach((sub) => {
@@ -418,9 +392,8 @@ const MonthHeatmapGrid = React.memo(function MonthHeatmapGrid({
       const cycle = sub.billingCycle || 'monthly';
       const refDateStr = sub.nextBillingDate || sub.startDate;
       if (!refDateStr) return;
-      const d = parseTxDate(refDateStr);
-
-      renewalDaysInMonth(cycle, d, year, month, daysInMonth).forEach((renewalDay) => {
+      // toDate: stored renewals are local-midnight timestamps (a UTC prefix would be a day early in IST)
+      renewalDaysInMonth(sub.rawBillingCycle || cycle, toDate(refDateStr), year, month, sub.customIntervalMonths, sub.startDate ? toDate(sub.startDate) : undefined).forEach((renewalDay) => {
         if (!map[renewalDay]) map[renewalDay] = [];
         map[renewalDay].push({
           id: sub.id,
@@ -428,6 +401,8 @@ const MonthHeatmapGrid = React.memo(function MonthHeatmapGrid({
           amount: activePrice,
           color: subColor,
           cycle,
+          currency: sub.currency,
+          isTrial: !!sub.isTrial,
         });
       });
     });
@@ -524,6 +499,7 @@ export const ExpenseVisualizer: React.FC = () => {
     transactions,
     storeCategories,
     currencySymbol,
+    currencyCode,
   } = useExpenseStore(
     useShallow((s) => ({
       selectedMonth: s.selectedMonth,
@@ -531,9 +507,15 @@ export const ExpenseVisualizer: React.FC = () => {
       transactions: s.transactions,
       storeCategories: s.categories,
       currencySymbol: s.currencySymbol,
+      currencyCode: s.currencyCode,
     }))
   );
   const sym = currencySymbol || '₹';
+  // Same rule as the store's getCategoryBreakdown: a missing / unknown category counts as Other
+  const toCatKey = useMemo(() => {
+    const ids = new Set(getUserCategories(storeCategories).map((c) => c.id));
+    return (id?: string) => (id && ids.has(id) ? id : 'cat_other');
+  }, [storeCategories]);
   const { subscriptions, isLoaded: isSubsLoaded, loadSubscriptions } = useSubscriptionStore();
   const [timeHorizon, setTimeHorizon] = useState<TimeHorizon>('1M');
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
@@ -797,7 +779,7 @@ export const ExpenseVisualizer: React.FC = () => {
 
   // Subscriptions Forecasting for Calendar Grid
   const upcomingSubscriptionsByDay = useMemo(() => {
-    const map: Record<number, { id: string; name: string; amount: number; color: string; cycle: string }[]> = {};
+    const map: Record<number, { id: string; name: string; amount: number; color: string; cycle: string; currency?: string; isTrial?: boolean }[]> = {};
     if (!subscriptions || subscriptions.length === 0) return map;
 
     subscriptions.forEach((sub) => {
@@ -808,9 +790,8 @@ export const ExpenseVisualizer: React.FC = () => {
       const cycle = sub.billingCycle || 'monthly';
       const refDateStr = sub.nextBillingDate || sub.startDate;
       if (!refDateStr) return;
-      const d = parseTxDate(refDateStr);
-
-      renewalDaysInMonth(cycle, d, curYear, curMonth, daysInMonth).forEach((renewalDay) => {
+      // toDate: stored renewals are local-midnight timestamps (a UTC prefix would be a day early in IST)
+      renewalDaysInMonth(sub.rawBillingCycle || cycle, toDate(refDateStr), curYear, curMonth, sub.customIntervalMonths, sub.startDate ? toDate(sub.startDate) : undefined).forEach((renewalDay) => {
         if (!map[renewalDay]) map[renewalDay] = [];
         map[renewalDay].push({
           id: sub.id,
@@ -818,6 +799,8 @@ export const ExpenseVisualizer: React.FC = () => {
           amount: activePrice,
           color: subColor,
           cycle,
+          currency: sub.currency,
+          isTrial: !!sub.isTrial,
         });
       });
     });
@@ -828,6 +811,7 @@ export const ExpenseVisualizer: React.FC = () => {
   const remainingCommittedSubs = useMemo(() => {
     const now = new Date();
     const startDay = isCurrentMonthView ? now.getDate() : 1;
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
     let total = 0;
     let count = 0;
@@ -835,13 +819,18 @@ export const ExpenseVisualizer: React.FC = () => {
       const day = Number(dayStr);
       if (!isCurrentMonthView || day >= startDay) {
         subs.forEach((s) => {
-          total += s.amount;
+          if (s.isTrial) return; // a trial is not a charge
+          // today's renewal already posted to the ledger is spent, not remaining
+          if (isCurrentMonthView && day === startDay && transactions.some((t) => t.subscriptionId === s.id && t.date === todayStr)) return;
+          total += s.currency && s.currency.toUpperCase() !== currencyCode.toUpperCase()
+            ? convertCurrency(s.amount, s.currency, currencyCode)
+            : s.amount;
           count += 1;
         });
       }
     });
     return { total, count };
-  }, [upcomingSubscriptionsByDay, isCurrentMonthView]);
+  }, [upcomingSubscriptionsByDay, isCurrentMonthView, transactions, currencyCode]);
 
   // Weekend vs Weekday Contrast Algorithm
   const weekendVsWeekday = useMemo(() => {
@@ -860,7 +849,7 @@ export const ExpenseVisualizer: React.FC = () => {
       const tDate = parseTxDate(tx.date);
       const day = tDate.getDay();
       const share = tx.split ? tx.split.yourShare : tx.amount;
-      const catId = tx.categoryId || 'other';
+      const catId = toCatKey(tx.categoryId);
       if (day === 0 || day === 6) {
         weekendSum += share;
         weekendTxCount += 1;
@@ -945,23 +934,7 @@ export const ExpenseVisualizer: React.FC = () => {
     }
 
     const topLeakCategory = topLeakCatId ? storeCategories.find(c => c.id === topLeakCatId) : null;
-    const isFixedDriver = Boolean(
-      topLeakCategory && (
-        topLeakCategory.id.toLowerCase().includes('rent') ||
-        topLeakCategory.id.toLowerCase().includes('util') ||
-        topLeakCategory.id.toLowerCase().includes('bill') ||
-        topLeakCategory.id.toLowerCase().includes('subs') ||
-        topLeakCategory.id.toLowerCase().includes('emi') ||
-        topLeakCategory.id.toLowerCase().includes('loan') ||
-        topLeakCategory.id.toLowerCase().includes('insurance') ||
-        topLeakCategory.name.toLowerCase().includes('rent') ||
-        topLeakCategory.name.toLowerCase().includes('utility') ||
-        topLeakCategory.name.toLowerCase().includes('bill') ||
-        topLeakCategory.name.toLowerCase().includes('subscription') ||
-        topLeakCategory.name.toLowerCase().includes('loan') ||
-        topLeakCategory.name.toLowerCase().includes('insurance')
-      )
-    );
+    const isFixedDriver = Boolean(topLeakCategory && isFixedCommitmentCategory(topLeakCategory));
 
     return {
       weekdaySum,
@@ -976,7 +949,7 @@ export const ExpenseVisualizer: React.FC = () => {
       isSurge,
       isFixedDriver,
     };
-  }, [transactions, horizonExpenses, timeHorizon, curYear, curMonth, daysInMonth, storeCategories]);
+  }, [transactions, horizonExpenses, timeHorizon, curYear, curMonth, daysInMonth, storeCategories, toCatKey]);
 
   // Multi-Month Trend calculation for 6M, 1Y, ALL
   const multiMonthTrend = useMemo(() => {
@@ -1022,7 +995,8 @@ export const ExpenseVisualizer: React.FC = () => {
     const catMap: Record<string, number> = {};
     horizonExpenses.forEach(tx => {
       const share = tx.split ? tx.split.yourShare : tx.amount;
-      catMap[tx.categoryId] = (catMap[tx.categoryId] || 0) + share;
+      const k = toCatKey(tx.categoryId);
+      catMap[k] = (catMap[k] || 0) + share;
     });
 
     const userCats = getUserCategories(storeCategories);
@@ -1048,7 +1022,7 @@ export const ExpenseVisualizer: React.FC = () => {
     });
 
     return list.sort((a, b) => b.amount - a.amount);
-  }, [horizonExpenses, storeCategories]);
+  }, [horizonExpenses, storeCategories, toCatKey]);
 
   const cats: FlowCat[] = useMemo(() => {
     if (activeBreakdown.length <= 6) {
@@ -1177,17 +1151,19 @@ export const ExpenseVisualizer: React.FC = () => {
       // Same day-range as the banner above, so the rows add up to it.
       if (parseTxDate(tx.date).getDate() > momBenchmark.targetDay) return;
       const share = tx.split ? tx.split.yourShare : tx.amount;
-      thisMonthMap[tx.categoryId] = (thisMonthMap[tx.categoryId] || 0) + share;
+      const k = toCatKey(tx.categoryId);
+      thisMonthMap[k] = (thisMonthMap[k] || 0) + share;
     });
 
     lastMonthExpenses.forEach(tx => {
       if (tx.categoryId === 'cat_debt_repayment') return;
       const fullShare = tx.split ? tx.split.yourShare : tx.amount;
-      lastMonthFullMap[tx.categoryId] = (lastMonthFullMap[tx.categoryId] || 0) + fullShare;
+      const k = toCatKey(tx.categoryId);
+      lastMonthFullMap[k] = (lastMonthFullMap[k] || 0) + fullShare;
       // Same day-range as this month so far; otherwise early-month badges always show a big drop.
       if (parseTxDate(tx.date).getDate() > momBenchmark.lastTargetDay) return;
       const share = tx.split ? tx.split.yourShare : tx.amount;
-      lastMonthMap[tx.categoryId] = (lastMonthMap[tx.categoryId] || 0) + share;
+      lastMonthMap[k] = (lastMonthMap[k] || 0) + share;
     });
 
     const activeList: VsCat[] = [];
@@ -1264,7 +1240,7 @@ export const ExpenseVisualizer: React.FC = () => {
     });
 
     return activeList.sort((a, b) => b.thisAmount - a.thisAmount);
-  }, [monthExpenses, lastMonthExpenses, storeCategories, sym, momBenchmark.lastTargetDay, momBenchmark.targetDay]);
+  }, [monthExpenses, lastMonthExpenses, storeCategories, sym, momBenchmark.lastTargetDay, momBenchmark.targetDay, toCatKey]);
 
   // Calendar Grid Rows
   const calendarRows: (number | null)[][] = [];
@@ -1576,19 +1552,20 @@ export const ExpenseVisualizer: React.FC = () => {
 
     const grouped: Record<string, { category: string; color: string; amount: number }> = {};
     dayTxs.forEach(tx => {
-      const cat = storeCategories.find(c => c.id === tx.categoryId) || {
-        name: tx.categoryId.replace(/^cat_/, '').toUpperCase(),
+      const key = toCatKey(tx.categoryId);
+      const cat = storeCategories.find(c => c.id === key) || {
+        name: key.replace(/^cat_/, '').toUpperCase(),
         color: '#FF9D66',
       };
-      if (!grouped[tx.categoryId]) {
-        grouped[tx.categoryId] = {
+      if (!grouped[key]) {
+        grouped[key] = {
           category: cat.name,
           color: cat.color || '#FF9D66',
           amount: 0,
         };
       }
       const share = tx.split ? tx.split.yourShare : tx.amount;
-      grouped[tx.categoryId].amount += share;
+      grouped[key].amount += share;
     });
 
     return Object.values(grouped);

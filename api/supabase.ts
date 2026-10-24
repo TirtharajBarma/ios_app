@@ -116,6 +116,9 @@ export async function joinShareGroup(
     p_user_name: userName,
   });
   if (error) rpcError(error.message);
+  // join_group reports failures as {error} (not a raise) so the attempt is persisted for rate limiting.
+  const failure = (data as { error?: unknown } | null)?.error;
+  if (failure) rpcError(String(failure));
   return mapGroupResult(data);
 }
 
@@ -236,6 +239,7 @@ export interface SharedRow {
   notes: string | null;
   website: string | null;
   publisher_name: string;
+  publisher_user_id?: string | null;
   updated_at: string;
 }
 

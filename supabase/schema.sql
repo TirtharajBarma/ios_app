@@ -40,7 +40,7 @@ create table if not exists public.shared_subscriptions (
   publisher_user_id uuid,
   publisher_name text not null default 'Someone',
   name text not null,
-  price real not null default 0,
+  price numeric(14,2) not null default 0,
   currency text not null default 'USD',
   billing_cycle text,
   next_billing_date text not null,
@@ -51,7 +51,7 @@ create table if not exists public.shared_subscriptions (
   trial_end_date text,
   split_enabled boolean not null default false,
   split_type text,
-  split_value real,
+  split_value numeric(14,2),
   is_paused boolean not null default false,
   notes text,
   website text,
@@ -87,38 +87,39 @@ alter table public.shared_subscriptions enable row level security;
 alter table public.share_group_removed_members enable row level security;
 alter table public.group_join_attempts enable row level security;
 
+-- Membership helper (SECURITY DEFINER) so policies never self-reference RLS tables
+create or replace function public.is_group_member(gid uuid) returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select exists (
+    select 1 from public.share_group_members m
+    where m.group_id = gid and m.user_id = auth.uid()
+  );
+$$;
+
+revoke all on function public.is_group_member(uuid) from public;
+grant execute on function public.is_group_member(uuid) to anon, authenticated;
+
 -- Members can select only their own groups
+drop policy if exists "Members can view their own groups" on public.share_groups;
 create policy "Members can view their own groups"
   on public.share_groups for select
-  using (
-    exists (
-      select 1 from public.share_group_members m
-      where m.group_id = share_groups.id
-        and m.user_id = auth.uid()
-    )
-  );
+  using (public.is_group_member(id));
 
 -- Members can select fellow members of their groups
+drop policy if exists "Members can view members of their groups" on public.share_group_members;
 create policy "Members can view members of their groups"
   on public.share_group_members for select
-  using (
-    exists (
-      select 1 from public.share_group_members m
-      where m.group_id = share_group_members.group_id
-        and m.user_id = auth.uid()
-    )
-  );
+  using (public.is_group_member(group_id));
 
 -- Members can read group subscriptions (required for Supabase Realtime)
+drop policy if exists "Group members can view shared subscriptions" on public.shared_subscriptions;
 create policy "Group members can view shared subscriptions"
   on public.shared_subscriptions for select
-  using (
-    exists (
-      select 1 from public.share_group_members m
-      where m.group_id = shared_subscriptions.group_id
-        and m.user_id = auth.uid()
-    )
-  );
+  using (public.is_group_member(group_id));
 
 -- Block direct mutations from anon/authenticated
 revoke insert, update, delete on public.share_groups from anon, authenticated;
@@ -216,40 +217,39 @@ declare
 begin
   if uid is null then raise exception 'Not authenticated'; end if;
 
-  -- Rate limit: max 5 join attempts per 10 minutes per user
   select count(*) into recent_attempts
   from public.group_join_attempts
   where user_id = uid
     and attempted_at > (now() - interval '10 minutes');
 
   if recent_attempts >= 5 then
-    raise exception 'Too many join attempts. Please wait a few minutes before trying again.';
+    return jsonb_build_object('error', 'Too many join attempts. Please wait a few minutes before trying again.');
   end if;
 
+  -- Recorded before any validation; returning (not raising) keeps this row.
   insert into public.group_join_attempts (user_id) values (uid);
 
   clean_code := upper(trim(p_code));
   if clean_code is null or length(clean_code) != 6 or not (clean_code ~ '^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$') then
-    raise exception 'Invalid group code format';
+    return jsonb_build_object('error', 'Invalid group code format');
   end if;
 
   clean_user := coalesce(nullif(substr(trim(p_user_name), 1, 50), ''), 'Member');
 
   select * into g from public.share_groups where code = clean_code;
-  if g.id is null then raise exception 'Invalid group code'; end if;
+  if g.id is null then return jsonb_build_object('error', 'Invalid group code'); end if;
 
   if exists (select 1 from public.share_group_members where user_id = uid and group_id = g.id) then
-    raise exception 'You are already in this group';
+    return jsonb_build_object('error', 'You are already in this group');
   end if;
 
   if exists (select 1 from public.share_group_removed_members where group_id = g.id and user_id = uid) then
-    raise exception 'You have been removed from this group and cannot rejoin';
+    return jsonb_build_object('error', 'You have been removed from this group and cannot rejoin');
   end if;
 
-  -- Enforce the max 10 members limit
   select user_id into full_count
   from public.share_group_members where group_id = g.id limit 1 offset 9;
-  if full_count is not null then raise exception 'This group is full (max 10 people)'; end if;
+  if full_count is not null then return jsonb_build_object('error', 'This group is full (max 10 people)'); end if;
 
   insert into public.share_group_members (user_id, group_id, user_name)
   values (uid, g.id, clean_user);
@@ -274,12 +274,24 @@ set search_path = public, pg_temp
 as $$
 declare
   uid uuid := auth.uid();
+  next_owner uuid;
 begin
   if uid is null then raise exception 'Not authenticated'; end if;
 
   delete from public.share_group_members where user_id = uid and group_id = p_group_id;
 
-  -- Clean up group if empty
+  -- If the owner left, hand the group to the longest-standing remaining member.
+  if exists (select 1 from public.share_groups where id = p_group_id and owner_id = uid) then
+    select user_id into next_owner
+    from public.share_group_members
+    where group_id = p_group_id
+    order by joined_at asc
+    limit 1;
+    if next_owner is not null then
+      update public.share_groups set owner_id = next_owner where id = p_group_id;
+    end if;
+  end if;
+
   delete from public.share_groups g
   where g.id = p_group_id
     and not exists (select 1 from public.share_group_members m where m.group_id = g.id);
@@ -489,7 +501,7 @@ begin
     coalesce(existing_publisher, uid),
     coalesce(existing_name, substr(trim(coalesce(p_sub->>'publisherName', 'Member')), 1, 50)),
     clean_name,
-    greatest(0, coalesce((p_sub->>'price')::real, 0)),
+    round(greatest(0, coalesce((p_sub->>'price')::numeric, 0)), 2),
     substr(coalesce(p_sub->>'currency', 'USD'), 1, 10),
     substr(coalesce(p_sub->>'billingCycle', 'monthly'), 1, 20),
     coalesce(p_sub->>'nextBillingDate', now()::text),
@@ -500,7 +512,7 @@ begin
     nullif(p_sub->>'trialEndDate', ''),
     (p_sub->>'splitEnabled')::boolean,
     substr(nullif(p_sub->>'splitType', ''), 1, 20),
-    (p_sub->>'splitValue')::real,
+    round((p_sub->>'splitValue')::numeric, 2),
     (p_sub->>'isPaused')::boolean,
     substr(nullif(p_sub->>'notes', ''), 1, 500),
     substr(nullif(p_sub->>'website', ''), 1, 255),
@@ -613,23 +625,16 @@ as $$
 declare
   clean_id text;
 begin
+  if auth.uid() is null then raise exception 'Not authenticated'; end if;
+
   clean_id := trim(p_device_id);
   if clean_id is null or length(clean_id) < 6 or length(clean_id) > 64 then
     raise exception 'Invalid device_id';
   end if;
 
   insert into public.app_devices (
-    device_id,
-    brand,
-    model_name,
-    os_name,
-    os_version,
-    app_version,
-    update_hash,
-    channel,
-    timezone,
-    total_launches,
-    last_active_at
+    device_id, brand, model_name, os_name, os_version, app_version,
+    update_hash, channel, timezone, total_launches, last_active_at
   ) values (
     clean_id,
     substr(trim(p_brand), 1, 50),
@@ -671,6 +676,8 @@ grant execute on function
   public.get_shared_subscriptions(),
   public.upsert_shared_subscription(jsonb),
   public.delete_shared_subscription(text, uuid),
-  public.generate_group_code(),
   public.record_device_telemetry(text, text, text, text, text, text, text, text, text, int)
 to anon, authenticated;
+
+-- generate_group_code is internal only (called by SECURITY DEFINER RPCs).
+revoke execute on function public.generate_group_code() from public, anon, authenticated;

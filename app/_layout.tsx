@@ -165,7 +165,7 @@ export default function RootLayout() {
 
       authState.isAuthenticating = true;
       const result = await LocalAuthentication.authenticateAsync({
-        promptMessage: "Unlock Monevo",
+        promptMessage: "Unlock Cashveil",
         fallbackLabel: "Use Passcode",
         disableDeviceFallback: false,
       });
@@ -215,7 +215,9 @@ export default function RootLayout() {
 
         triggerSharedSync();
         drainQuickAdds();
-        useExpenseStore.getState().setSelectedMonth(monthKeyOf());
+        if (!useExpenseStore.getState().selectedMonth) {
+          useExpenseStore.getState().setSelectedMonth(monthKeyOf());
+        }
         useExpenseStore.getState().refreshCardCycles();
         rescheduleAllAppNotifications().catch(() => {});
       }

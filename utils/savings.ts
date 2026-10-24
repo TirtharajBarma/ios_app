@@ -3,6 +3,8 @@ import type { Subscription } from "@/types/subscription";
 import type { BrandLogoVariantKey } from "@/assets/data/services";
 import { getSubscriptionActivePrice } from "@/utils/date";
 import { getCurrencySymbol } from "@/constants";
+import { convertCurrency } from "@/utils/currency";
+import { splitMonthlySaving } from "@/utils/subscriptionUtils";
 import * as db from "@/database/database";
 
 export interface SavingsItem {
@@ -113,6 +115,15 @@ function computeExpectedCycles(
   return Math.floor(periodsPerCycle);
 }
 
+/** Display currency; savings from different subscription currencies are summed in this one. */
+function getAppCurrency(): string {
+  try {
+    return require("@/store/useSettingsStore").useSettingsStore.getState().currencyCode || "INR";
+  } catch {
+    return "INR";
+  }
+}
+
 export async function computeSavings(
   subscriptions: Subscription[],
 ): Promise<SavingsResult> {
@@ -122,27 +133,29 @@ export async function computeSavings(
   const splitSavings: BillSplitSaving[] = [];
 
   const today = startOfDay(new Date());
+  const appCurrency = getAppCurrency();
+  const toApp = (amount: number, from?: string) =>
+    from && from.toUpperCase() !== appCurrency.toUpperCase() ? convertCurrency(amount, from, appCurrency) : amount;
 
   for (const sub of subscriptions) {
     const activePrice = getSubscriptionActivePrice(sub);
 
     if (sub.isPaused) {
-      const expectedCycles = computeExpectedCycles(
-        sub.startDate,
+      // Cycles skipped = cycles elapsed since the last payment (rows are newest first), not since the
+      // subscription began: everything before the pause was actually paid.
+      let lastPaid: string | undefined;
+      try {
+        const txs = await db.getTransactionsBySubscriptionId(sub.id);
+        lastPaid = txs[0]?.date;
+      } catch {
+        lastPaid = undefined;
+      }
+      const skippedCycles = computeExpectedCycles(
+        lastPaid || sub.startDate,
         sub.createdAt,
         sub.rawBillingCycle || sub.billingCycle,
         sub.customIntervalMonths,
       );
-
-      let actualTransactions = 0;
-      try {
-        const txs = await db.getTransactionsBySubscriptionId(sub.id);
-        actualTransactions = txs.length;
-      } catch {
-        actualTransactions = 0;
-      }
-
-      const skippedCycles = Math.max(0, expectedCycles - actualTransactions);
       const saved = skippedCycles * activePrice;
 
       if (skippedCycles > 0 && saved > 0) {
@@ -162,7 +175,7 @@ export async function computeSavings(
           website: sub.website,
           currency: sub.currency,
         });
-        totalSavings += saved;
+        totalSavings += toApp(saved, sub.currency);
       }
     }
 
@@ -202,21 +215,7 @@ export async function computeSavings(
     ) {
       const fullPrice = sub.price;
       const userShare = activePrice;
-      const cycle = (sub.rawBillingCycle || sub.billingCycle || 'monthly').toLowerCase();
-      let monthlySaving = fullPrice - userShare;
-      if (cycle === 'yearly' || cycle === 'annual') {
-        monthlySaving = (fullPrice - userShare) / 12;
-      } else if (cycle === 'quarterly') {
-        monthlySaving = (fullPrice - userShare) / 3;
-      } else if (cycle === 'weekly') {
-        monthlySaving = (fullPrice - userShare) * 4.33;
-      } else if (cycle === 'bi-weekly') {
-        monthlySaving = (fullPrice - userShare) * 2.17;
-      } else if (cycle === 'semi-yearly' || cycle === 'half-yearly') {
-        monthlySaving = (fullPrice - userShare) / 6;
-      } else if (cycle.startsWith('custom') && sub.customIntervalMonths && sub.customIntervalMonths > 0) {
-        monthlySaving = (fullPrice - userShare) / sub.customIntervalMonths;
-      }
+      const monthlySaving = splitMonthlySaving(sub);
 
       if (monthlySaving > 0) {
         splitSavings.push({
@@ -263,18 +262,16 @@ export async function computeSavings(
       const end = parseISO(t.trialEndDate);
       if (end.getTime() !== earliestTime) return sum;
       const sub = subscriptions.find((s) => s.id === t.subscriptionId);
-      return sum + (sub ? sub.price : 0);
+      return sum + (sub ? toApp(sub.price, sub.currency) : 0);
     }, 0);
-    const primaryCurrency = subscriptions[0]?.currency || "INR";
-    const symbol = getCurrencySymbol(primaryCurrency);
+    const symbol = getCurrencySymbol(appCurrency);
     advisorMessage = `Cancel before ${formattedEnd} to avoid paying ${symbol}${totalTrialCost.toFixed(0)}.`;
   } else if (splitSavings.length > 0) {
     vaultMode = "advisor";
     advisorType = "splits";
-    const totalSplitSaving = splitSavings.reduce((s, sp) => s + sp.monthlySaving, 0);
+    const totalSplitSaving = splitSavings.reduce((s, sp) => s + toApp(sp.monthlySaving, subscriptions.find((x) => x.id === sp.subscriptionId)?.currency), 0);
     const roundSplit = Math.round(totalSplitSaving * 100) / 100;
-    const primaryCurrency = subscriptions[0]?.currency || "INR";
-    const symbol = getCurrencySymbol(primaryCurrency);
+    const symbol = getCurrencySymbol(appCurrency);
     advisorMessage = `Your shared subscriptions save you ${symbol}${roundSplit.toFixed(0)} every month.`;
   } else {
     vaultMode = "advisor";

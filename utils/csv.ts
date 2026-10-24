@@ -1,5 +1,10 @@
 import type { Subscription, NewSubscriptionInput } from "@/types/subscription";
 
+// Quote a text cell; prefix ' on leading = + - @ (or tab/CR) so spreadsheets don't run it as a formula
+const quote = (v: string) => `"${(/^[=+\-@\t\r]/.test(v) ? `'${v}` : v).replace(/"/g, '""')}"`;
+const unquoteFormula = (v: string) => v.replace(/^'(?=[=+\-@\t\r])/, "");
+const toNum = (v: string) => Number(v.replace(/,/g, ""));
+
 /**
  * Converts subscriptions to a standard CSV string with full field preservation.
  */
@@ -14,7 +19,7 @@ export function subscriptionsToCSV(subscriptions: Subscription[]): string {
   ];
 
   const rows = subscriptions.map((s) => [
-    `"${(s.name || "").replace(/"/g, '""')}"`,
+    quote(s.name || ""),
     s.price ?? 0,
     s.currency || "USD",
     s.rawBillingCycle || s.billingCycle || "monthly",
@@ -33,56 +38,67 @@ export function subscriptionsToCSV(subscriptions: Subscription[]): string {
     s.promoEnabled ? "TRUE" : "FALSE",
     s.promoPrice ?? "",
     s.promoEndDate || "",
-    `"${(s.website || "").replace(/"/g, '""')}"`,
-    `"${(s.note || "").replace(/"/g, '""')}"`
+    quote(s.website || ""),
+    quote(s.note || "")
   ]);
 
   return [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
 }
 
-function parseCSVLine(line: string): string[] {
-  const cells: string[] = [];
+/** Quote-aware CSV parser: quoted fields may contain commas, newlines and "" escapes. */
+function parseCSVRows(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
   let current = "";
   let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
+  const endRow = () => {
+    row.push(current.trim());
+    current = "";
+    if (row.some((c) => c !== "")) rows.push(row);
+    row = [];
+  };
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
     if (char === '"') {
-      if (inQuotes && line[i + 1] === '"') {
+      if (inQuotes && text[i + 1] === '"') {
         current += '"';
         i++;
       } else {
         inQuotes = !inQuotes;
       }
-    } else if (char === ',' && !inQuotes) {
-      cells.push(current.trim());
+    } else if (char === "," && !inQuotes) {
+      row.push(current.trim());
       current = "";
+    } else if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && text[i + 1] === "\n") i++;
+      endRow();
     } else {
       current += char;
     }
   }
-  cells.push(current.trim());
-  return cells;
+  endRow();
+  return rows;
 }
 
 /**
  * Parses CSV string back into Subscription Inputs safely.
  */
 export function parseCSVToSubscriptions(csvText: string): Partial<NewSubscriptionInput>[] {
-  const lines = csvText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-  if (lines.length <= 1) return [];
+  const rows = parseCSVRows(csvText);
+  if (rows.length <= 1) return [];
 
-  const headers = parseCSVLine(lines[0]).map(h => h.trim().toLowerCase());
+  const headers = rows[0].map(h => h.trim().toLowerCase());
 
-  return lines.slice(1).map((line) => {
-    const cells = parseCSVLine(line);
+  return rows.slice(1).map((cells) => {
     const record: any = {};
 
     headers.forEach((h, idx) => {
-      const val = cells[idx];
+      const raw = cells[idx];
+      const val = raw === undefined ? raw : unquoteFormula(raw);
       if (val === undefined || val === "") return;
 
       if (h === "name" || h.includes("name")) record.name = val;
-      else if (h === "price") record.price = isNaN(Number(val)) ? 0 : Number(val);
+      else if (h === "price") record.price = isNaN(toNum(val)) ? 0 : toNum(val);
       else if (h === "currency") record.currency = val.toUpperCase();
       else if (h === "billing cycle" || h.includes("cycle")) {
         record.rawBillingCycle = val;
@@ -96,12 +112,12 @@ export function parseCSVToSubscriptions(csvText: string): Partial<NewSubscriptio
       else if (h === "color") record.color = val;
       else if (h === "logo icon" || h === "logo") record.logoIcon = val;
       else if (h === "reminder enabled") record.reminderEnabled = val.toUpperCase() === "TRUE" || val === "1";
-      else if (h === "reminder days") record.reminderDays = isNaN(Number(val)) ? 1 : Number(val);
+      else if (h === "reminder days") record.reminderDays = isNaN(toNum(val)) ? 1 : toNum(val);
       else if (h === "split enabled") record.splitEnabled = val.toUpperCase() === "TRUE" || val === "1";
       else if (h === "split type") record.splitType = val;
-      else if (h === "split value") record.splitValue = isNaN(Number(val)) ? undefined : Number(val);
+      else if (h === "split value") record.splitValue = isNaN(toNum(val)) ? undefined : toNum(val);
       else if (h === "promo enabled") record.promoEnabled = val.toUpperCase() === "TRUE" || val === "1";
-      else if (h === "promo price") record.promoPrice = isNaN(Number(val)) ? undefined : Number(val);
+      else if (h === "promo price") record.promoPrice = isNaN(toNum(val)) ? undefined : toNum(val);
       else if (h === "promo end date") record.promoEndDate = val;
       else if (h === "website") record.website = val;
       else if (h === "notes" || h === "note") record.note = val;

@@ -3,6 +3,7 @@ import { View, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import { SlidersHorizontal, Plus } from 'lucide-react-native';
 import { AppText, ProfileAvatar } from '@/components/ui';
 import { useSettingsStore } from '@/store/useSettingsStore';
+import { useExpenseStore, monthKeyToYearMonth } from '@/store/useExpenseStore';
 import { expenseColors } from '@/constants/expenseColors';
 
 interface ExpenseHeaderProps {
@@ -15,12 +16,35 @@ export const ExpenseHeader: React.FC<ExpenseHeaderProps> = ({
   onFilterPress,
 }) => {
   const { userName, userAvatarId } = useSettingsStore();
+  const selectedMonth = useExpenseStore((s) => s.selectedMonth);
 
   const hasCustomName = Boolean(userName && userName.trim().length > 0);
-  const nameToUse = hasCustomName ? userName.trim() : 'Monevo';
+  const nameToUse = hasCustomName ? userName.trim() : 'Cashveil';
   const parts = nameToUse.split(/\s+/);
-  const firstName = parts[0]?.toUpperCase() || 'MONEVO';
+  const firstName = parts[0]?.toUpperCase() || 'CASHVEIL';
   const lastName = parts.slice(1).join(' ').toUpperCase() || '';
+
+  const timeContextSubtitle = React.useMemo(() => {
+    const now = new Date();
+    const { year: selY, month: selM } = monthKeyToYearMonth(selectedMonth);
+    const isCurrentMonth = selY === now.getFullYear() && selM === now.getMonth();
+
+    if (isCurrentMonth) {
+      const dayOfWeek = now.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
+      const monthShort = now.toLocaleDateString('en-US', { month: 'short' }).toUpperCase();
+      const dayNum = now.getDate();
+      const daysInMonth = new Date(selY, selM + 1, 0).getDate();
+      const daysRemaining = Math.max(1, daysInMonth - dayNum + 1);
+      return `${dayOfWeek}, ${dayNum} ${monthShort} • ${daysRemaining} DAYS LEFT`;
+    }
+
+    const isPast = selY < now.getFullYear() || (selY === now.getFullYear() && selM < now.getMonth());
+    const dateObj = new Date(selY, selM, 1);
+    const monthShort = dateObj.toLocaleDateString('en-US', { month: 'short' }).toUpperCase();
+    return isPast
+      ? `${monthShort} ${selY} • ARCHIVE`
+      : `${monthShort} ${selY} • UPCOMING`;
+  }, [selectedMonth]);
 
   return (
     <View style={styles.container}>
@@ -36,7 +60,7 @@ export const ExpenseHeader: React.FC<ExpenseHeaderProps> = ({
         ) : (
           <View style={styles.logoBadgeContainer}>
             <Image
-              source={require('@/assets/images/monevo-logo.png')}
+              source={require('@/assets/images/cashveil-logo.png')}
               style={styles.logoImage}
               resizeMode="contain"
             />
@@ -62,8 +86,13 @@ export const ExpenseHeader: React.FC<ExpenseHeaderProps> = ({
               {lastName}
             </AppText>
           ) : null}
-          <AppText style={styles.dashboardSubtitle} numberOfLines={1}>
-            YOUR DASHBOARD
+          <AppText
+            style={styles.dashboardSubtitle}
+            numberOfLines={1}
+            adjustsFontSizeToFit={true}
+            minimumFontScale={0.8}
+          >
+            {timeContextSubtitle}
           </AppText>
         </View>
       </View>
@@ -142,11 +171,11 @@ const styles = StyleSheet.create({
   },
   dashboardSubtitle: {
     color: expenseColors.textMuted,
-    fontSize: 11,
+    fontSize: 10.5,
     lineHeight: 14,
     fontWeight: '700',
-    letterSpacing: 1.2,
-    marginTop: 6,
+    letterSpacing: 1.1,
+    marginTop: 5,
   },
   rightSection: {
     flexDirection: 'row',

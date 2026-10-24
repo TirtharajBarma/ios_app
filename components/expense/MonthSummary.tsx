@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, TouchableOpacity, Animated, LayoutAnimation, Platform, UIManager, PanResponder, Easing } from 'react-native';
-import { Zap, ArrowLeftRight } from 'lucide-react-native';
+import { Zap, ArrowLeftRight, ChevronLeft, ChevronRight } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { AppText } from '@/components/ui';
-import { useExpenseStore, monthKeyToYearMonth } from '@/store/useExpenseStore';
+import { useExpenseStore, monthKeyToYearMonth, monthKeyOf } from '@/store/useExpenseStore';
 import { useShallow } from 'zustand/react/shallow';
 import { expenseColors } from '@/constants/expenseColors';
 import { ExpenseCategory } from '@/types/expense';
@@ -40,7 +40,7 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
     currencySymbol,
     monthlyBudget,
     categoryBudgets,
-    savingsVaults,
+    getHistoricalAccountBreakdown,
     getTotalBalance,
     getTotalSpent,
     getRemainingBudget,
@@ -48,13 +48,14 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
     accounts,
     transactions,
     formatAmount,
+    setSelectedMonth,
   } = useExpenseStore(
     useShallow((s) => ({
       selectedMonth: s.selectedMonth,
       currencySymbol: s.currencySymbol,
       monthlyBudget: s.monthlyBudget,
       categoryBudgets: s.categoryBudgets,
-      savingsVaults: s.savingsVaults,
+      getHistoricalAccountBreakdown: s.getHistoricalAccountBreakdown,
       getTotalBalance: s.getTotalBalance,
       getTotalSpent: s.getTotalSpent,
       getRemainingBudget: s.getRemainingBudget,
@@ -62,6 +63,7 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
       accounts: s.accounts,
       transactions: s.transactions,
       formatAmount: s.formatAmount,
+      setSelectedMonth: s.setSelectedMonth,
     }))
   );
 
@@ -92,20 +94,51 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
   const { year: selYear, month: selMonth } = monthKeyToYearMonth(selectedMonth);
   const isCurrentMonth = selYear === now.getFullYear() && selMonth === now.getMonth();
   const isPastMonth = selYear < now.getFullYear() || (selYear === now.getFullYear() && selMonth < now.getMonth());
+  const canGoNext = selYear < now.getFullYear() || (selYear === now.getFullYear() && selMonth < now.getMonth());
 
+  // Earliest tracked month boundary: prevents scrolling back into ghost pre-app months
+  const earliestMonthKey = React.useMemo(() => {
+    let minYear = now.getFullYear();
+    let minMonth = now.getMonth();
+
+    for (const t of transactions) {
+      if (!t.date) continue;
+      const parts = t.date.match(/^(\d{4})-(\d{2})/);
+      if (parts) {
+        const y = parseInt(parts[1], 10);
+        const m = parseInt(parts[2], 10) - 1;
+        if (y * 12 + m < minYear * 12 + minMonth) {
+          minYear = y;
+          minMonth = m;
+        }
+      }
+    }
+    return monthKeyOf(new Date(minYear, minMonth, 1));
+  }, [transactions]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const { year: earlyYear, month: earlyMonth } = monthKeyToYearMonth(earliestMonthKey);
+  const canGoPrev = selYear * 12 + selMonth > earlyYear * 12 + earlyMonth;
+
+  const handlePrevMonth = () => {
+    if (!canGoPrev) return;
+    Haptics.selectionAsync().catch(() => {});
+    const d = new Date(selYear, selMonth - 1, 1);
+    setSelectedMonth(monthKeyOf(d));
+  };
+
+  const handleNextMonth = () => {
+    if (!canGoNext) return;
+    Haptics.selectionAsync().catch(() => {});
+    const d = new Date(selYear, selMonth + 1, 1);
+    setSelectedMonth(monthKeyOf(d));
+  };
+
+  // Synchronized historical balances: both big total and chips use the exact same calculation
+  const { bankCash, cardDues } = getHistoricalAccountBreakdown(selectedMonth);
   const totalBalance = getTotalBalance(selectedMonth);
-  const totalSpent = getTotalSpent();
-  const remainingBudget = getRemainingBudget();
-  const breakdown = getCategoryBreakdown();
-
-  // Active accounts breakdown for transparent net balance explanation
-  const bankCash = accounts
-    .filter((a) => a.type !== 'credit' && !a.isArchived)
-    .reduce((sum, a) => sum + (a.balance || 0), 0);
-  const cardDues = accounts
-    .filter((a) => a.type === 'credit' && !a.isArchived)
-    .reduce((sum, a) => sum + (a.dueAmount || 0) - (a.unbilledDue || 0), 0);
-  const totalInVaults = (savingsVaults || []).reduce((sum, v) => sum + (v.currentAmount || 0), 0);
+  const totalSpent = getTotalSpent(selectedMonth);
+  const remainingBudget = getRemainingBudget(selectedMonth);
+  const breakdown = getCategoryBreakdown(selectedMonth);
 
   // ── HERO SWITCH SPEED CONTROLS ───────────────────────────────────────────
   // Adjust `tension` (higher = faster) and `friction` (lower = bouncier) below.
@@ -212,6 +245,9 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
     }
   }
 
+  // arcItems is rebuilt every render; key the effect on the ids that decide who enters
+  const arcIdsKey = arcItems.map((item) => item.category.id).join('|');
+
   useEffect(() => {
     const isFirstRun = !hasRunArcEntrance.current;
     hasRunArcEntrance.current = true;
@@ -238,7 +274,7 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
         })
       )
     ).start();
-  }, [arcItems]);
+  }, [arcIdsKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     // Left balance entrance on app load
@@ -308,10 +344,36 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
           },
         ]}
       >
-        {/* Clean, Uniform Month Label */}
-        <AppText style={styles.monthLabel}>
-          {(selectedMonth || '').toUpperCase()}
-        </AppText>
+        {/* Clean, Uniform Month Label with interactive navigation */}
+        <View style={styles.monthHeaderRow}>
+          {canGoPrev ? (
+            <TouchableOpacity
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              onPress={handlePrevMonth}
+              style={styles.monthNavBtn}
+              accessibilityLabel="Previous month"
+            >
+              <ChevronLeft size={13} color={expenseColors.textSubtle} />
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.monthNavPlaceholder} />
+          )}
+          <AppText style={styles.monthLabel}>
+            {(selectedMonth || '').toUpperCase()}
+          </AppText>
+          {canGoNext ? (
+            <TouchableOpacity
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              onPress={handleNextMonth}
+              style={styles.monthNavBtn}
+              accessibilityLabel="Next month"
+            >
+              <ChevronRight size={13} color={expenseColors.textSubtle} />
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.monthNavPlaceholder} />
+          )}
+        </View>
 
         {/* Primary Focus: Tap / Swipe Hero (Safe to Spend ⇄ Total Balance) */}
         <View {...panResponder.panHandlers}>
@@ -376,12 +438,10 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
                         {effectiveBudget > 0 ? formatAmount(effectiveBudget) : 'No limit'}
                       </AppText>
                     </View>
-                    {totalInVaults > 0 && (
-                      <View style={[styles.accountChip, styles.accountChipVault]}>
-                        <AppText style={styles.accountChipVaultLabel}>Vaults </AppText>
-                        <AppText style={styles.accountChipVaultVal}>{formatAmount(totalInVaults)}</AppText>
-                      </View>
-                    )}
+                    <View style={styles.accountChip}>
+                      <AppText style={styles.accountChipLabel}>Spent </AppText>
+                      <AppText style={styles.accountChipVal}>{formatAmount(totalSpent)}</AppText>
+                    </View>
                   </View>
                 ) : (
                   <View style={styles.accountChipsRow}>
@@ -393,12 +453,6 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
                       <View style={[styles.accountChip, styles.accountChipDue]}>
                         <AppText style={styles.accountChipDueLabel}>Bills </AppText>
                         <AppText style={styles.accountChipDueVal}>{formatAmount(cardDues)}</AppText>
-                      </View>
-                    )}
-                    {totalInVaults > 0 && (
-                      <View style={[styles.accountChip, styles.accountChipVault]}>
-                        <AppText style={styles.accountChipVaultLabel}>Vaults </AppText>
-                        <AppText style={styles.accountChipVaultVal}>{formatAmount(totalInVaults)}</AppText>
                       </View>
                     )}
                   </View>
@@ -457,48 +511,50 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
           </View>
         </View>
 
-        {/* Selected Category Highlight Chip */}
-        {currentCategoryInfo && currentCategoryInfo.amount > 0 ? (
-          <Animated.View
-            style={[
-              styles.categoryChip,
-              {
-                borderColor: `${currentCategoryInfo.category.color}44`,
-                opacity: chipFadeAnim,
-                transform: [
-                  {
-                    scale: chipFadeAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [0.94, 1],
-                    }),
-                  },
-                ],
-              },
-            ]}
-          >
-            <View
+        {/* Selected Category Highlight Chip Slot (Reserved height, zero layout shift) */}
+        <View style={styles.categoryChipSlot}>
+          {currentCategoryInfo && currentCategoryInfo.amount > 0 ? (
+            <Animated.View
               style={[
-                styles.categoryDot,
-                { backgroundColor: currentCategoryInfo.category.color },
+                styles.categoryChip,
+                {
+                  borderColor: `${currentCategoryInfo.category.color}44`,
+                  opacity: chipFadeAnim,
+                  transform: [
+                    {
+                      scale: chipFadeAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0.94, 1],
+                      }),
+                    },
+                  ],
+                },
               ]}
-            />
-            <AppText style={styles.categoryChipName} numberOfLines={1}>
-              {currentCategoryInfo.category.name}
-            </AppText>
-            <AppText style={styles.categoryChipAmount}>
-              {formatAmount(currentCategoryInfo.amount)}
-            </AppText>
-            <AppText style={styles.categoryChipPct}>
-              ({currentCategoryInfo.percentage}%)
-            </AppText>
-          </Animated.View>
-        ) : null}
+            >
+              <View
+                style={[
+                  styles.categoryDot,
+                  { backgroundColor: currentCategoryInfo.category.color },
+                ]}
+              />
+              <AppText style={styles.categoryChipName} numberOfLines={1}>
+                {currentCategoryInfo.category.name}
+              </AppText>
+              <AppText style={styles.categoryChipAmount}>
+                {formatAmount(currentCategoryInfo.amount)}
+              </AppText>
+              <AppText style={styles.categoryChipPct}>
+                ({currentCategoryInfo.percentage}%)
+              </AppText>
+            </Animated.View>
+          ) : null}
+        </View>
       </Animated.View>
 
-      {/* Right Column: Dynamic Floating Overlapping Category Arc (Preserved!) */}
-      {arcItems.length > 0 && (
-        <View style={styles.floatingMenuContainer}>
-          {arcItems.map((item, index) => {
+      {/* Right Column: Dynamic Floating Overlapping Category Arc (Permanently reserved width/height) */}
+      <View style={styles.floatingMenuContainer}>
+        {arcItems.length > 0 &&
+          arcItems.map((item, index) => {
             const isSelected = currentSelectedId === item.category.id;
             const marginRight = getArcMarginRight(index, totalArcCount, isSelected);
             const isFilled =
@@ -565,8 +621,7 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
               </Animated.View>
             );
           })}
-        </View>
-      )}
+      </View>
     </View>
   );
 };
@@ -575,14 +630,32 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
     paddingHorizontal: 20,
     marginTop: 45,
     marginBottom: 45,
+    height: 242,
   },
   leftColumn: {
     flex: 1,
     paddingRight: 12,
     justifyContent: 'center',
+  },
+  monthHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8,
+  },
+  monthNavBtn: {
+    padding: 3,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  monthNavPlaceholder: {
+    width: 19,
   },
   monthLabel: {
     color: '#8E95A5',
@@ -591,7 +664,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 1.2,
     textTransform: 'uppercase',
-    marginBottom: 8,
   },
   balanceSection: {
     marginBottom: 0,
@@ -680,18 +752,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
-  accountChipVault: {
-    backgroundColor: 'rgba(169, 223, 191, 0.1)',
-  },
-  accountChipVaultLabel: {
-    color: '#A9DFBF',
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  accountChipVaultVal: {
-    color: '#A9DFBF',
-    fontSize: 12,
-    fontWeight: '700',
+  categoryChipSlot: {
+    minHeight: 38,
+    justifyContent: 'center',
+    marginTop: 6,
   },
   categoryChip: {
     flexDirection: 'row',
@@ -703,7 +767,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     alignSelf: 'flex-start',
-    marginTop: 10,
+    marginTop: 0,
   },
   categoryDot: {
     width: 6,
@@ -732,6 +796,7 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 8,
     width: 96,
+    height: 242,
   },
   selectedMenuCircle: {
     width: 56,

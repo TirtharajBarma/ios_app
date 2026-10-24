@@ -881,6 +881,7 @@ export default function ReceivablesScreen() {
                                     isSettled && styles.participantNameSettled,
                                   ]}
                                   numberOfLines={1}
+                                  ellipsizeMode="tail"
                                 >
                                   {friend.name}
                                 </AppText>
@@ -1868,6 +1869,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     flex: 1,
+    minWidth: 0,
     marginRight: 8,
   },
   participantAvatar: {
@@ -1877,6 +1879,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#252838',
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   participantAvatarSettled: {
     backgroundColor: 'rgba(169, 223, 191, 0.12)',
@@ -1890,6 +1893,8 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '700',
+    flex: 1,
+    flexShrink: 1,
   },
   participantNameSettled: {
     color: '#8E919D',
@@ -1899,6 +1904,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flexShrink: 0,
   },
   participantAmount: {
     color: '#A9DFBF',

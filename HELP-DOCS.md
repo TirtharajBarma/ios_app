@@ -1,6 +1,6 @@
-# Monevo Complete Release, Build & OTA Update Guide (HELP-DOCS)
+# Cashveil Complete Release, Build & OTA Update Guide (HELP-DOCS)
 
-This is the definitive, beginner-friendly manual for distributing, compiling, and updating Monevo. Keep this document as your permanent cheat sheet.
+This is the definitive, beginner-friendly manual for distributing, compiling, and updating Cashveil. Keep this document as your permanent cheat sheet.
 
 ---
 
@@ -11,8 +11,8 @@ This is the definitive, beginner-friendly manual for distributing, compiling, an
 | **Push JS / UI / Bug Fix (OTA Update)** | `npm run update "v1.1.9: description"` | ❌ No | ❌ No | ❌ No |
 | **Install on iPhone via USB (Standalone / Final)** | `npm run ios:release` | ✅ Yes | ❌ No | ✅ Yes |
 | **Install on iPhone via USB (Live Metro Dev)** | `npm run ios:device` | ✅ Yes | ❌ No | ✅ Yes |
-| **Build `.ipa` locally (for AltStore / TrollStore)** | `npm run build:ipa` | ✅ Yes | ❌ No | ❌ No |
-| **Build `.ipa` in Cloud (NO Xcode on Mac)** | `npx eas build -p ios --profile preview` | ❌ No | ❌ No | ❌ No |
+| **Build `.ipa` locally (with Xcode)** | `npm run build:ipa:local` (or `npm run build:ipa`) | ✅ Yes | ❌ No | ❌ No |
+| **Build `.ipa` in Cloud (NO Xcode on Mac)** | `npm run build:ipa:cloud` | ❌ No | ❌ No | ❌ No |
 | **Build Android `.apk` (Zero setup / EAS Cloud)** | `npx eas build -p android --profile preview` | ❌ No | ❌ No | ❌ No |
 | **Build Android `.apk` locally (With Android Studio)** | `npx expo run:android --variant release` | ❌ No | ✅ Yes (Auto-configured) | ❌ No |
 | **Build Android `.apk` locally (Headless Terminal)** | `cd android && ./gradlew assembleRelease` | ❌ No | ✅ Yes (JDK 17 + SDK) | ❌ No |
@@ -24,13 +24,14 @@ This is the definitive, beginner-friendly manual for distributing, compiling, an
 ### A. Why `npm run ...` vs `npx expo run ...` vs `.sh` scripts?
 `npm run <name>` is just a **custom shortcut (alias)** that points to a longer command in your [`package.json`](file:///Users/tirtharaj/Desktop/Desktop/github/subscription/package.json):
 
-* `npm run build:ipa` ➡️ Just runs: `bash scripts/build-ipa.sh`
+* `npm run build:ipa:local` ➡️ Just runs: `bash scripts/build-ipa-local.sh` (or `npm run build:ipa`)
+* `npm run build:ipa:cloud` ➡️ Just runs: `bash scripts/build-ipa-cloud.sh`
 * `npm run ios:release` ➡️ Just runs: `EXPO_LOCAL_NO_PUSH=1 expo run:ios --configuration Release --device`
 * `npm run ios:device` ➡️ Just runs: `EXPO_LOCAL_NO_PUSH=1 expo prebuild --platform ios && expo run:ios --device`
 * `npm run update` ➡️ Just runs: `node scripts/publish-update.js`
 * `npm run set-version` ➡️ Just runs: `node scripts/set-version.js`
 
-> 💡 **Takeaway:** Running `npm run build:ipa` and running `bash scripts/build-ipa.sh` are **100% identical**. The npm shortcut simply saves you from typing the full path.
+> 💡 **Takeaway:** Running `npm run build:ipa:local` and running `bash scripts/build-ipa-local.sh` are **100% identical**. The npm shortcut simply saves you from typing the full path.
 
 ---
 
@@ -155,23 +156,27 @@ npm run ios:device
 
 ## 5. Workflow 3: Building iOS `.ipa` Files
 
-### Option A: Local Build with Xcode (Creates sideloadable `.ipa`)
+### Option A: Local Build with Xcode
 ```bash
-npm run build:ipa
+npm run build:ipa:local
+# or simply: npm run build:ipa
 ```
-* **Script executed:** [`scripts/build-ipa.sh`](file:///Users/tirtharaj/Desktop/Desktop/github/subscription/scripts/build-ipa.sh)
-* **What it needs:** Xcode installed on your Mac.
-* **Output:** Creates `./monevo.ipa` in the root folder.
-* **How to install on iPhone:** Sideload via AltStore, TrollStore, Sideloadly, or Apple Configurator.
+* **Script executed:** [`scripts/build-ipa-local.sh`](file:///Users/tirtharaj/Desktop/Desktop/github/subscription/scripts/build-ipa-local.sh)
+* **What it needs:** Xcode (`xcodebuild`) installed on your Mac.
+* **Output:** Creates `./cashveil.ipa` directly in your project root folder.
+* **Use case:** When you have Xcode on your Mac and want a fast, free local build for sideloading.
 
 ---
 
 ### Option B: Cloud Build via EAS (NO Xcode required on Mac)
 ```bash
-npx eas build --platform ios --profile preview
+npm run build:ipa:cloud
+# or directly: npx eas build --platform ios --profile preview
 ```
-* Compiles on Expo’s cloud servers.
-* Terminal gives you a direct link / QR code to install the ad-hoc build on your registered iPhone.
+* **Script executed:** [`scripts/build-ipa-cloud.sh`](file:///Users/tirtharaj/Desktop/Desktop/github/subscription/scripts/build-ipa-cloud.sh)
+* **What it needs:** Expo account (free EAS tier). **NO Xcode or Mac setup required.**
+* **Output:** EAS compiles in the cloud and provides a direct download link for the `.ipa` and a QR code to install directly onto registered iPhones via Safari.
+* **Use case:** When you delete Xcode from your Mac to save space, or when you are away from your development Mac.
 
 ---
 
@@ -257,5 +262,5 @@ This updates [`package.json`](file:///Users/tirtharaj/Desktop/Desktop/github/sub
 
 * **Just fixing a bug or editing UI?** ➡️ `npm run update "v1.X.X: Message"`
 * **Testing on your iPhone today?** ➡️ Plug USB cable ➡️ `npm run ios:release`
-* **Need an Android `.apk` quickly without setup?** ➡️ `npx eas build -p android --profile preview`
-* **Need an iOS `.ipa` for AltStore/TrollStore?** ➡️ `npm run build:ipa`
+* **Need an iOS `.ipa` locally (with Xcode)?** ➡️ `npm run build:ipa:local` (or `npm run build:ipa`)
+* **Need an iOS `.ipa` in the Cloud (zero Xcode)?** ➡️ `npm run build:ipa:cloud`

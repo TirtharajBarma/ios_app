@@ -39,11 +39,11 @@ export const kit = {
 const tintBg = (hex: string) => `${hex}26`;
 
 export function SettingsScreen({
-  title,
+  title = "Cashveil",
   subtitle,
   children,
 }: {
-  title: string;
+  title?: string;
   subtitle?: string;
   children: React.ReactNode;
 }) {

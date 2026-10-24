@@ -10,8 +10,8 @@ const median = (xs: number[]): number => {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 };
 
-/** Mean of the values after dropping the highest and lowest 10%, so one big day does not dominate. */
-export function trimmedMean(xs: number[], trim = 0.1): number {
+/** Mean of the values after dropping the highest and lowest (default 20%), so spikes and trips do not dominate. */
+export function trimmedMean(xs: number[], trim = 0.2): number {
   if (xs.length === 0) return 0;
   const s = [...xs].sort((a, b) => a - b);
   const cut = Math.floor(s.length * trim);
@@ -49,7 +49,7 @@ export function forecastMonthEnd(input: {
   const { spentToDate, dailyVariable, daysLeft, upcomingFixed } = input;
   const recent = dailyVariable.slice(-14);
   if (recent.length < 7 || daysLeft < 0) return null;
-  const burn = trimmedMean(recent);
+  const burn = trimmedMean(recent, 0.2);
   const mad = median(recent.map((v) => Math.abs(v - median(recent))));
   const base = spentToDate + upcomingFixed;
   return {
