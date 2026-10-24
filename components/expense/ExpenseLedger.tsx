@@ -38,6 +38,7 @@ import {
   Folder,
   Target,
   Smartphone,
+  Shield,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { BlurView } from 'expo-blur';
@@ -229,7 +230,9 @@ export const ExpenseLedger: React.FC = () => {
   const categoryAverages = useMemo(() => {
     const map: Record<string, { avg: number; stdDev: number }> = {};
     categories.forEach((cat) => {
-      const catTxs = transactions.filter((t) => t.categoryId === cat.id && t.type === 'expense');
+      const catTxs = transactions.filter(
+        (t) => t.categoryId === cat.id && t.type === 'expense' && !t.excludeFromBudget && !t.vaultId
+      );
       if (catTxs.length >= 2) {
         const sum = catTxs.reduce((acc, t) => acc + (t.split ? (t.split.yourShare ?? t.amount) : t.amount), 0);
         const avg = sum / catTxs.length;
@@ -493,6 +496,8 @@ export const ExpenseLedger: React.FC = () => {
     const effectivePersonalAmt = tx.split ? (tx.split.yourShare ?? tx.amount) : tx.amount;
     const isOutlier =
       tx.type === 'expense' &&
+      !tx.excludeFromBudget &&
+      !tx.vaultId &&
       catStats &&
       catStats.stdDev > 25 &&
       effectivePersonalAmt > catStats.avg + 1.8 * catStats.stdDev;
@@ -578,7 +583,10 @@ export const ExpenseLedger: React.FC = () => {
       }
 
       // 2. Savings Goal / Vault Transactions (Strip redundant "Saved to" / "Withdrawn from" prefixes)
-      if (isGoal || tx.vaultId) {
+      if (
+        (isGoal || tx.vaultId) &&
+        (tx.type === 'vault_deposit' || tx.type === 'vault_withdraw' || tx.categoryId === 'cat_goal')
+      ) {
         const cleanNote = tx.note?.trim() || '';
         const matchGoal = /^(?:Saved to|Withdrawn from|Refund from deleted goal:?)\s*(.+)$/i.exec(cleanNote);
         const vault = tx.vaultId ? (savingsVaults || []).find((v) => v.id === tx.vaultId) : null;
@@ -866,6 +874,16 @@ export const ExpenseLedger: React.FC = () => {
               <View style={styles.outlierBadge}>
                 <AppText style={styles.outlierBadgeText} numberOfLines={1}>
                   ⚠️ HIGH
+                </AppText>
+              </View>
+            )}
+
+            {/* Goal Pre-Funded Badge */}
+            {tx.type === 'expense' && (tx.vaultId || tx.excludeFromBudget) && (
+              <View style={styles.goalFundedBadge}>
+                <Shield size={9} color="#8CD9C8" />
+                <AppText style={styles.goalFundedBadgeText} numberOfLines={1}>
+                  GOAL FUNDED
                 </AppText>
               </View>
             )}
@@ -2640,6 +2658,25 @@ const styles = StyleSheet.create({
     color: '#FF9D66',
     fontSize: 8.5,
     fontWeight: '800',
+  },
+  goalFundedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    maxWidth: '100%',
+    flexShrink: 0,
+    backgroundColor: 'rgba(140, 217, 200, 0.12)',
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(140, 217, 200, 0.25)',
+  },
+  goalFundedBadgeText: {
+    color: '#8CD9C8',
+    fontSize: 8.5,
+    fontWeight: '800',
+    letterSpacing: 0.3,
   },
   emptyStateContainer: {
     paddingVertical: 48,

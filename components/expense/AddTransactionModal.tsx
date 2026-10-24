@@ -237,6 +237,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   addTransaction,
   updateTransaction,
   depositToVault,
+  withdrawFromVault,
   addSavingsVault,
   currencySymbol,
   quickPresets,
@@ -255,6 +256,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
     addTransaction: s.addTransaction,
     updateTransaction: s.updateTransaction,
     depositToVault: s.depositToVault,
+    withdrawFromVault: s.withdrawFromVault,
     addSavingsVault: s.addSavingsVault,
     currencySymbol: s.currencySymbol,
     quickPresets: s.quickPresets,
@@ -278,6 +280,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   const [merchant, setMerchant] = useState<string>('');
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
   const [selectedGoalId, setSelectedGoalId] = useState<string>('');
+  const [selectedFundVaultId, setSelectedFundVaultId] = useState<string>('');
+  const [deductFromVault, setDeductFromVault] = useState<boolean>(true);
   const [goalAllocationAmount, setGoalAllocationAmount] = useState<string>('');
   const [selectedFolderId, setSelectedFolderId] = useState<string>('');
   const [toAccountId, setToAccountId] = useState<string>('');
@@ -406,6 +410,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             : ''
         );
         setSelectedFolderId(tx.folderId || '');
+        setSelectedFundVaultId(tx.vaultId || '');
+        setDeductFromVault(false);
         setSelectedTag(tx.tag || '');
         setCustomTagInput('');
         setDebtPerson(tx.borrowerOrLender || '');
@@ -459,6 +465,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
         setMerchant(initialNote || '');
         setSelectedAccountId(initialFromAccountId || '');
         setSelectedGoalId('');
+        setSelectedFundVaultId('');
+        setDeductFromVault(true);
         setGoalAllocationAmount('');
         setGoalAllocations({});
         setSelectedFolderId('');
@@ -984,6 +992,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             accountId: selectedAccountId,
             folderId: selectedFolderId || undefined,
             folderName: selectedFolderObj?.name || undefined,
+            vaultId: selectedFundVaultId || undefined,
+            excludeFromBudget: Boolean(selectedFundVaultId),
             date: format(txDate, 'yyyy-MM-dd'),
             merchant: finalMerchant || `Split with ${friendNamesStr}`,
             note: finalNote || undefined,
@@ -992,6 +1002,9 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             subscriptionId: linkedSubscriptionId,
           });
         } else {
+          if (selectedFundVaultId && deductFromVault && numAmount > 0) {
+            withdrawFromVault(selectedFundVaultId, numAmount, selectedAccountId);
+          }
           addTransaction({
             amount: numAmount,
             type: 'expense',
@@ -999,6 +1012,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             accountId: selectedAccountId,
             folderId: selectedFolderId || undefined,
             folderName: selectedFolderObj?.name || undefined,
+            vaultId: selectedFundVaultId || undefined,
+            excludeFromBudget: Boolean(selectedFundVaultId),
             date: format(txDate, 'yyyy-MM-dd'),
             merchant: finalMerchant || `Split with ${friendNamesStr}`,
             note: finalNote || undefined,
@@ -1013,7 +1028,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
           updateTransaction(initialTransaction.id, {
             amount: numAmount,
             type: isVaultTx ? initialTransaction.type : 'expense',
-            vaultId: isVaultTx ? initialTransaction.vaultId : undefined,
+            vaultId: selectedFundVaultId ? selectedFundVaultId : (isVaultTx ? initialTransaction.vaultId : undefined),
+            excludeFromBudget: Boolean(selectedFundVaultId),
             categoryId: selectedCategoryId,
             accountId: selectedAccountId,
             folderId: selectedFolderId || undefined,
@@ -1026,6 +1042,9 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             subscriptionId: linkedSubscriptionId,
           });
         } else {
+          if (selectedFundVaultId && deductFromVault && numAmount > 0) {
+            withdrawFromVault(selectedFundVaultId, numAmount, selectedAccountId);
+          }
           const quickAddResult = createExpense({
             amount: numAmount,
             categoryId: selectedCategoryId,
@@ -1037,6 +1056,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             note: finalNote || (finalMerchant ? undefined : (selectedCatObj?.name || 'Expense')),
             tag: finalTag || undefined,
             subscriptionId: linkedSubscriptionId,
+            vaultId: selectedFundVaultId || undefined,
+            excludeFromBudget: Boolean(selectedFundVaultId),
           });
           if (!quickAddResult.ok) {
             await rollbackRef.current?.();
@@ -1292,6 +1313,17 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
     })),
     { id: '__CREATE_GOAL__', title: '+ Create New Goal...', image: 'plus.circle.fill' as any },
   ];
+
+  const fundingGoalActions: MenuAction[] = [
+    { id: '', title: 'None (Count in Monthly Budget)', image: 'xmark.circle' as any },
+    ...savingsVaults.map((vault) => ({
+      id: vault.id,
+      title: `${vault.emoji} ${vault.name} • Available: ${sym}${vault.currentAmount.toLocaleString('en-IN')}`,
+      image: 'shield.fill' as any,
+      state: (selectedFundVaultId === vault.id ? 'on' : 'off') as 'on' | 'off',
+    })),
+  ];
+  const selectedFundVault = savingsVaults.find((v) => v.id === selectedFundVaultId);
 
   const modeThemeColor = expenseColors.accentPeach;
 
@@ -1952,6 +1984,66 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                   <ChevronDown size={15} color="#7E8394" />
                 </View>
               </NativeLiquidMenu>
+            </View>
+          )}
+
+          {/* ── SAVINGS GOAL FUNDING (Only in Expense Mode, when vaults exist) ── */}
+          {tabMode === 'expense' && savingsVaults.length > 0 && (
+            <View style={styles.section}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <AppText style={styles.label}>PAID FROM SAVINGS GOAL (OPTIONAL)</AppText>
+                {selectedFundVault && (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <Shield size={11} color="#8CD9C8" />
+                    <AppText style={{ fontSize: 11, color: '#8CD9C8', fontFamily: 'PlusJakartaSans-SemiBold' }}>
+                      Budget Protected
+                    </AppText>
+                  </View>
+                )}
+              </View>
+              <NativeLiquidMenu
+                title="Paid from Savings Goal"
+                actions={fundingGoalActions}
+                onSelect={(vaultId) => {
+                  Haptics.selectionAsync().catch(() => {});
+                  setSelectedFundVaultId(vaultId);
+                  if (vaultId) {
+                    const v = savingsVaults.find((s) => s.id === vaultId);
+                    setDeductFromVault((v?.currentAmount || 0) >= numAmount);
+                  }
+                }}
+                style={{ alignSelf: 'stretch' }}
+              >
+                <View style={styles.dropdownTrigger}>
+                  <View style={styles.dropdownTriggerLeft}>
+                    <AppText style={styles.dropdownTriggerValue} numberOfLines={1}>
+                      {selectedFundVault
+                        ? `${selectedFundVault.emoji} ${selectedFundVault.name} • Saved: ${sym}${selectedFundVault.currentAmount.toLocaleString('en-IN')}`
+                        : 'None (Count in Monthly Budget)'}
+                    </AppText>
+                  </View>
+                  <ChevronDown size={15} color="#7E8394" />
+                </View>
+              </NativeLiquidMenu>
+
+              {selectedFundVault && !initialTransaction && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, paddingVertical: 8, paddingHorizontal: 12, backgroundColor: '#181A22', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.06)' }}>
+                  <View style={{ flex: 1, marginRight: 10 }}>
+                    <AppText style={{ fontSize: 12, color: '#FFFFFF', fontFamily: 'PlusJakartaSans-SemiBold' }}>
+                      Deduct from goal balance
+                    </AppText>
+                    <AppText style={{ fontSize: 11, color: '#8E919D', marginTop: 1 }}>
+                      Auto-withdraws {sym}{numAmount.toLocaleString('en-IN')} from {selectedFundVault.name}
+                    </AppText>
+                  </View>
+                  <Switch
+                    value={deductFromVault}
+                    onValueChange={(val) => setDeductFromVault(val)}
+                    trackColor={{ false: '#2B2E3D', true: '#8CD9C8' }}
+                    thumbColor="#FFFFFF"
+                  />
+                </View>
+              )}
             </View>
           )}
 

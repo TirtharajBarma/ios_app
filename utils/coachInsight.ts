@@ -2,7 +2,7 @@ import { forecastMonthEnd, safeToSpendToday } from './coach';
 import { getSubscriptionActivePrice, toLocalDateString } from './date';
 import { convertCurrency } from './currency';
 
-export type CoachInsightType = 'bill' | 'over' | 'category' | 'forecast' | 'recap' | 'safe';
+export type CoachInsightType = 'bill' | 'over' | 'buffer' | 'category' | 'forecast' | 'recap' | 'safe';
 
 export interface CoachInsightAction {
   type: 'pay_bill' | 'open_goals' | 'filter_category';
@@ -22,6 +22,7 @@ export interface CoachInsight {
 export interface CoachInput {
   now: Date;
   budget: number; // effective monthly budget (0 = none)
+  bufferLimit?: number; // dynamic monthly cushion from income surplus or liquid balance
   spentToDate: number; // this month, same definition as the Spent figure
   spentToday: number;
   /** Spend per day for the 14 days before today, oldest first (zeros included). */
@@ -143,15 +144,35 @@ export function getAllCoachInsights(i: CoachInput): CoachInsight[] {
   // Overall budget
   if (i.budget > 0) {
     if (i.spentToDate > i.budget) {
-      candidates.push({
-        p: 2,
-        insight: {
-          id: `over:${today}`,
-          type: 'over',
-          title: `${i.format(i.spentToDate - i.budget)} over this month's budget`,
-          sub: daysRemaining > 1 ? `${daysRemaining - 1} day${daysRemaining === 2 ? '' : 's'} left in the month. A low-spend day helps.` : 'The month ends today.',
-        },
-      });
+      const over = i.spentToDate - i.budget;
+      const buffer = i.bufferLimit || 0;
+      if (buffer > 0 && over <= buffer) {
+        const bufferRemaining = Math.max(0, buffer - over);
+        candidates.push({
+          p: 2,
+          insight: {
+            id: `buffer:${today}`,
+            type: 'buffer',
+            title: `${i.format(over)} absorbed by salary buffer`,
+            sub: `${i.format(bufferRemaining)} buffer remaining. Your savings goals are safe.`,
+          },
+        });
+      } else {
+        const deficit = buffer > 0 ? over - buffer : over;
+        candidates.push({
+          p: 2,
+          insight: {
+            id: `over:${today}`,
+            type: 'over',
+            title: buffer > 0 ? `${i.format(deficit)} beyond buffer capacity` : `${i.format(over)} over this month's budget`,
+            sub: buffer > 0
+              ? 'Spending is now eating into your locked savings goals.'
+              : daysRemaining > 1
+              ? `${daysRemaining - 1} day${daysRemaining === 2 ? '' : 's'} left in the month. A low-spend day helps.`
+              : 'The month ends today.',
+          },
+        });
+      }
     } else {
       // Predictions need enough real history: 14 days with spending on at least 5 of them, and not the very start of the month
       const enoughHistory = i.dailySpend.length >= 14 && i.dailySpend.filter((v) => v > 0).length >= 5 && day >= 8;

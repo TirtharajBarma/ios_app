@@ -26,6 +26,8 @@ export type CreateExpenseInput = {
   folderName?: string;
   tag?: string;
   subscriptionId?: string;
+  vaultId?: string;
+  excludeFromBudget?: boolean;
 };
 
 export type CreateExpenseResult =
@@ -84,6 +86,8 @@ export function createExpense(input: CreateExpenseInput): CreateExpenseResult {
     note: input.note,
     tag: input.tag,
     subscriptionId: input.subscriptionId,
+    vaultId: input.vaultId,
+    excludeFromBudget: input.excludeFromBudget,
   });
 
   const created = getState().transactions.find((t) => !known.has(t.id));

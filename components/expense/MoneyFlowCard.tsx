@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { View, StyleSheet, TouchableOpacity, Modal, Pressable } from 'react-native';
 import { BlurView } from 'expo-blur';
-import { ArrowDownLeft, ArrowUpRight, TrendingUp, Sparkles, Flame, X } from 'lucide-react-native';
+import { ArrowDownLeft, ArrowUpRight, TrendingUp, Sparkles, Flame, X, Shield } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { AppText } from '@/components/ui';
 import { useExpenseStore, isInMonth, monthKeyToYearMonth } from '@/store/useExpenseStore';
@@ -54,6 +54,7 @@ export const MoneyFlowCard: React.FC = () => {
   getTotalIncome,
   getTotalSpent,
   updateTransaction,
+  getBudgetBufferAnalysis,
 } = useExpenseStore(
   useShallow((s) => ({
     currencySymbol: s.currencySymbol,
@@ -66,6 +67,7 @@ export const MoneyFlowCard: React.FC = () => {
     getTotalIncome: s.getTotalIncome,
     getTotalSpent: s.getTotalSpent,
     updateTransaction: s.updateTransaction,
+    getBudgetBufferAnalysis: s.getBudgetBufferAnalysis,
   }))
 );
 
@@ -76,6 +78,7 @@ export const MoneyFlowCard: React.FC = () => {
 
   const totalIncome = getTotalIncome(selectedMonth);
   const totalSpent = getTotalSpent(selectedMonth);
+  const bufferAnalysis = getBudgetBufferAnalysis(selectedMonth);
 
   const priorMonthUnallocatedSalary = useMemo(() => {
     if (totalIncome > 0) return null;
@@ -278,10 +281,25 @@ export const MoneyFlowCard: React.FC = () => {
                   : `-${sym}${Math.abs(netCashFlow).toLocaleString('en-IN')}`}
               </AppText>
             </View>
-            <View style={styles.ratePill}>
-              <AppText style={styles.ratePillText}>
-                {savingsRate >= 0 ? `${savingsRate}% unspent` : `${Math.abs(savingsRate)}% deficit`}
-              </AppText>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              {bufferAnalysis.bufferLimit > 0 && (
+                <View style={[styles.cushionPill, bufferAnalysis.status === 'buffer' && styles.cushionPillActive]}>
+                  <Shield size={10} color={bufferAnalysis.status === 'buffer' ? '#FBBF24' : '#8CD9C8'} />
+                  <AppText
+                    style={[styles.cushionPillText, bufferAnalysis.status === 'buffer' ? { color: '#FBBF24' } : { color: '#8CD9C8' }]}
+                    numberOfLines={1}
+                  >
+                    {bufferAnalysis.status === 'buffer'
+                      ? `${formatCompactCurrency(bufferAnalysis.bufferRemaining, sym)} cushion left`
+                      : `${formatCompactCurrency(bufferAnalysis.bufferLimit, sym)} cushion`}
+                  </AppText>
+                </View>
+              )}
+              <View style={styles.ratePill}>
+                <AppText style={styles.ratePillText}>
+                  {savingsRate >= 0 ? `${savingsRate}% unspent` : `${Math.abs(savingsRate)}% deficit`}
+                </AppText>
+              </View>
             </View>
           </>
         ) : priorMonthUnallocatedSalary ? (
@@ -567,6 +585,27 @@ const styles = StyleSheet.create({
   footerAmount: {
     fontSize: 11,
     fontWeight: '600',
+  },
+  cushionPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    borderRadius: 8,
+    backgroundColor: 'rgba(140, 217, 200, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(140, 217, 200, 0.2)',
+    flexShrink: 0,
+  },
+  cushionPillActive: {
+    backgroundColor: 'rgba(251, 191, 36, 0.1)',
+    borderColor: 'rgba(251, 191, 36, 0.25)',
+  },
+  cushionPillText: {
+    fontSize: 11,
+    fontFamily: 'PlusJakartaSans-SemiBold',
+    lineHeight: 14,
   },
   ratePill: {
     paddingHorizontal: 8,

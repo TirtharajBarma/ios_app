@@ -18,6 +18,7 @@ import { ExpenseAccount } from '@/types/expense';
 const TONE: Record<CoachInsightType, string> = {
   bill: '#FF8A8A',
   over: '#FF9D66',
+  buffer: '#FBBF24',
   category: '#FF9D66',
   forecast: '#FFC46B',
   recap: '#9DC6EB',
@@ -42,7 +43,7 @@ export const CoachInsightCard: React.FC<CoachInsightCardProps> = ({
   onOpenGoals,
   onFilterCategory,
 }) => {
-  const { transactions, accounts, categories, monthlyBudget, categoryBudgets, selectedMonth, formatAmount, getTotalSpent, currencyCode } =
+  const { transactions, accounts, categories, monthlyBudget, categoryBudgets, selectedMonth, formatAmount, getTotalSpent, currencyCode, getBudgetBufferAnalysis } =
     useExpenseStore(
       useShallow((s) => ({
         transactions: s.transactions,
@@ -54,6 +55,7 @@ export const CoachInsightCard: React.FC<CoachInsightCardProps> = ({
         formatAmount: s.formatAmount,
         getTotalSpent: s.getTotalSpent,
         currencyCode: s.currencyCode,
+        getBudgetBufferAnalysis: s.getBudgetBufferAnalysis,
       }))
     );
   const subscriptions = useSubscriptionStore((s) => s.subscriptions);
@@ -174,6 +176,7 @@ export const CoachInsightCard: React.FC<CoachInsightCardProps> = ({
     return getAllCoachInsights({
       now,
       budget,
+      bufferLimit: getBudgetBufferAnalysis(selectedMonth).bufferLimit,
       spentToDate: getTotalSpent(selectedMonth),
       spentToday: perDay[todayKey] || 0,
       dailySpend,
@@ -184,7 +187,7 @@ export const CoachInsightCard: React.FC<CoachInsightCardProps> = ({
       lastMonth,
       format: coachFormat,
     });
-  }, [transactions, accounts, categories, monthlyBudget, categoryBudgets, selectedMonth, subscriptions, formatAmount, getTotalSpent, currencyCode]);
+  }, [transactions, accounts, categories, monthlyBudget, categoryBudgets, selectedMonth, subscriptions, formatAmount, getTotalSpent, currencyCode, getBudgetBufferAnalysis]);
 
   // Filter out any dismissed insights (Waterfall: next insight surfaces automatically)
   const activeInsights = useMemo(() => {

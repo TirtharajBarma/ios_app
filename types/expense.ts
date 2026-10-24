@@ -71,6 +71,7 @@ export interface ExpenseTransaction {
   toAccountId?: string; // To Account (for transfers or vaults)
   toAccountName?: string; // Historical to-account name snapshot
   vaultId?: string; // Target savings vault if deposit/withdraw
+  excludeFromBudget?: boolean; // When true (e.g. funded from savings vault/goal), excluded from monthly living budget
   folderId?: string; // Linked Event Folder ID
   folderName?: string; // Linked Event Folder Name
   date: string; // ISO format (yyyy-MM-dd)
@@ -117,5 +118,21 @@ export interface PendingTransaction {
   date: string; // YYYY-MM-DD
   timestamp: number;
   status: 'pending' | 'approved' | 'dismissed';
+}
+
+export interface BudgetBufferAnalysis {
+  effectiveBudget: number;
+  totalSpent: number;
+  totalIncome: number;
+  committedGoals: number;
+  liquidBalance: number;
+  bankCash: number;
+  cardDues: number;
+  bufferLimit: number;
+  bufferUsed: number;
+  bufferRemaining: number;
+  status: 'safe' | 'buffer' | 'deficit';
+  overspend: number;
+  deficitAmount: number;
 }
 

@@ -35,6 +35,7 @@ export const BudgetCard: React.FC = () => {
     categoryBudgets,
     transactions,
     categories,
+    getBudgetBufferAnalysis,
   } = useExpenseStore(
     useShallow((s) => ({
       monthlyBudget: s.monthlyBudget,
@@ -47,6 +48,7 @@ export const BudgetCard: React.FC = () => {
       categoryBudgets: s.categoryBudgets,
       transactions: s.transactions,
       categories: s.categories,
+      getBudgetBufferAnalysis: s.getBudgetBufferAnalysis,
     }))
   );
 
@@ -244,10 +246,13 @@ export const BudgetCard: React.FC = () => {
   // ─────────────────────────────────────────────────────────
   // 2. CENTER CONTENT DISPLAY
   // ─────────────────────────────────────────────────────────
+  const bufferAnalysis = getBudgetBufferAnalysis(selectedMonth);
+
   let centerTitle = isPastMonth ? 'UNSPENT / SAVED' : 'LEFT TO SPEND';
   let centerAmount = formatCompactCurrency(Math.max(0, effectiveBudget - totalSpent), sym);
   let centerFootnote = `${formatCompactCurrency(totalSpent, sym)} of ${formatCompactCurrency(effectiveBudget, sym)} used`;
   let isCenterOverBudget = false;
+  let isCenterBuffer = false;
 
   const hasFixedBudget = selectedCategoryItem && categoryBudgets[selectedCategoryItem.category.id] !== undefined;
   const catBudget = selectedCategoryItem && hasFixedBudget ? (categoryBudgets[selectedCategoryItem.category.id] || 0) : 0;
@@ -274,18 +279,30 @@ export const BudgetCard: React.FC = () => {
   } else {
     // Unselected state
     if (effectiveBudget > 0) {
-      const isOverallOver = totalSpent > effectiveBudget;
-      if (isOverallOver) {
-        centerTitle = 'OVER BUDGET';
-        centerAmount = formatCompactCurrency(totalSpent - effectiveBudget, sym);
-        centerFootnote = `${formatCompactCurrency(totalSpent, sym)} spent of ${formatCompactCurrency(effectiveBudget, sym)} limit`;
+      if (bufferAnalysis.status === 'buffer') {
+        centerTitle = 'BUFFER ACTIVE';
+        centerAmount = formatCompactCurrency(bufferAnalysis.bufferRemaining, sym);
+        centerFootnote = `${formatCompactCurrency(bufferAnalysis.bufferUsed, sym)} of ${formatCompactCurrency(bufferAnalysis.bufferLimit, sym)} buffer used`;
+        isCenterBuffer = true;
+      } else if (bufferAnalysis.status === 'deficit') {
+        centerTitle = 'OVER BUFFER';
+        centerAmount = formatCompactCurrency(bufferAnalysis.deficitAmount, sym);
+        centerFootnote = `Deficit • Over safe capacity`;
         isCenterOverBudget = true;
       } else {
-        centerTitle = isPastMonth ? 'UNSPENT / SAVED' : 'LEFT TO SPEND';
-        centerAmount = formatCompactCurrency(effectiveBudget - totalSpent, sym);
-        centerFootnote = isPastMonth
-          ? `${formatCompactCurrency(totalSpent, sym)} spent of ${formatCompactCurrency(effectiveBudget, sym)} limit`
-          : `${formatCompactCurrency(totalSpent, sym)} of ${formatCompactCurrency(effectiveBudget, sym)} used`;
+        const isOverallOver = totalSpent > effectiveBudget;
+        if (isOverallOver) {
+          centerTitle = 'OVER BUDGET';
+          centerAmount = formatCompactCurrency(totalSpent - effectiveBudget, sym);
+          centerFootnote = `${formatCompactCurrency(totalSpent, sym)} spent of ${formatCompactCurrency(effectiveBudget, sym)} limit`;
+          isCenterOverBudget = true;
+        } else {
+          centerTitle = isPastMonth ? 'UNSPENT / SAVED' : 'LEFT TO SPEND';
+          centerAmount = formatCompactCurrency(effectiveBudget - totalSpent, sym);
+          centerFootnote = isPastMonth
+            ? `${formatCompactCurrency(totalSpent, sym)} spent of ${formatCompactCurrency(effectiveBudget, sym)} limit`
+            : `${formatCompactCurrency(totalSpent, sym)} of ${formatCompactCurrency(effectiveBudget, sym)} used`;
+        }
       }
     } else {
       centerTitle = 'TOTAL SPENT';
@@ -397,7 +414,7 @@ export const BudgetCard: React.FC = () => {
                 cx={center}
                 cy={center}
                 r={innerRadius}
-                stroke={expenseColors.accentGreen}
+                stroke={isCenterBuffer ? '#FBBF24' : isCenterOverBudget ? '#FF6B6B' : expenseColors.accentGreen}
                 strokeWidth={innerStrokeWidth}
                 fill="transparent"
                 strokeDasharray={`${overallBudgetDash * sweepProgress} ${Math.max(0, innerCircumference - (overallBudgetDash * sweepProgress))}`}
@@ -420,7 +437,10 @@ export const BudgetCard: React.FC = () => {
           pointerEvents="none"
         >
           <AppText
-            style={styles.centerBudgetLabel}
+            style={[
+              styles.centerBudgetLabel,
+              isCenterBuffer && styles.centerLabelBuffer,
+            ]}
             numberOfLines={1}
             adjustsFontSizeToFit={true}
             minimumFontScale={0.7}
@@ -430,6 +450,7 @@ export const BudgetCard: React.FC = () => {
           <AppText
             style={[
               styles.centerMainAmount,
+              isCenterBuffer && styles.centerMainAmountBuffer,
               isCenterOverBudget && styles.centerMainAmountOver,
             ]}
             numberOfLines={1}
@@ -574,7 +595,9 @@ export const BudgetCard: React.FC = () => {
             <View style={styles.pacingFooterPast}>
               <AppText style={styles.pacingPastText}>
                 {totalSpent > effectiveBudget
-                  ? `Limit exceeded by ${sym}${(totalSpent - effectiveBudget).toLocaleString('en-IN')}`
+                  ? bufferAnalysis.status === 'buffer'
+                    ? `Ended in buffer • ${sym}${bufferAnalysis.bufferUsed.toLocaleString('en-IN')} cushion used`
+                    : `Limit exceeded by ${sym}${(totalSpent - effectiveBudget).toLocaleString('en-IN')}`
                   : `Ended within budget • ${sym}${(effectiveBudget - totalSpent).toLocaleString('en-IN')} saved`}
               </AppText>
             </View>
@@ -584,8 +607,10 @@ export const BudgetCard: React.FC = () => {
                 <Zap
                   size={12}
                   color={
-                    isExceeded
+                    bufferAnalysis.status === 'deficit'
                       ? '#FF6B6B'
+                      : bufferAnalysis.status === 'buffer'
+                      ? '#FBBF24'
                       : isOverPacing
                       ? '#FF9D66'
                       : expenseColors.accentGreen
@@ -600,8 +625,10 @@ export const BudgetCard: React.FC = () => {
               <View
                 style={[
                   styles.pacingStatusPill,
-                  isExceeded
+                  bufferAnalysis.status === 'deficit'
                     ? styles.pacingPillExceeded
+                    : bufferAnalysis.status === 'buffer'
+                    ? styles.pacingPillBuffer
                     : isOverPacing
                     ? styles.pacingPillWarning
                     : styles.pacingPillGood,
@@ -610,15 +637,19 @@ export const BudgetCard: React.FC = () => {
                 <AppText
                   style={[
                     styles.pacingStatusText,
-                    isExceeded
+                    bufferAnalysis.status === 'deficit'
                       ? styles.pacingTextExceeded
+                      : bufferAnalysis.status === 'buffer'
+                      ? styles.pacingTextBuffer
                       : isOverPacing
                       ? styles.pacingTextWarning
                       : styles.pacingTextGood,
                   ]}
                 >
-                  {isExceeded
-                    ? 'Limit Exceeded'
+                  {bufferAnalysis.status === 'deficit'
+                    ? 'Buffer Exceeded'
+                    : bufferAnalysis.status === 'buffer'
+                    ? `Buffer • ${formatCompactCurrency(bufferAnalysis.bufferRemaining, sym)} left`
                     : isOverPacing
                     ? `Burnout ~Day ${projectedBurnoutDay}`
                     : fixedSpent > 0 && variableSpent === 0
@@ -694,6 +725,12 @@ const styles = StyleSheet.create({
   },
   centerMainAmountOver: {
     color: '#F48B8B',
+  },
+  centerMainAmountBuffer: {
+    color: '#FBBF24',
+  },
+  centerLabelBuffer: {
+    color: '#FBBF24',
   },
   centerSubText: {
     color: '#8E919D',
@@ -828,6 +865,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255, 157, 102, 0.25)',
   },
+  pacingPillBuffer: {
+    backgroundColor: 'rgba(251, 191, 36, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(251, 191, 36, 0.25)',
+  },
   pacingPillExceeded: {
     backgroundColor: 'rgba(255, 107, 107, 0.12)',
     borderWidth: 1,
@@ -843,6 +885,9 @@ const styles = StyleSheet.create({
   },
   pacingTextWarning: {
     color: '#FF9D66',
+  },
+  pacingTextBuffer: {
+    color: '#FBBF24',
   },
   pacingTextExceeded: {
     color: '#FF6B6B',

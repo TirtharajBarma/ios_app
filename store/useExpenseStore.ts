@@ -3,7 +3,7 @@ import { AppState } from 'react-native';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@/utils/storage';
 import { logAction, logException, logWarn, logInfo } from '@/utils/auditLog';
-import { ExpenseAccount, ExpenseCategory, ExpenseTransaction, QuickExpensePreset, SavingsVault, EventFolder } from '@/types/expense';
+import { ExpenseAccount, ExpenseCategory, ExpenseTransaction, QuickExpensePreset, SavingsVault, EventFolder, BudgetBufferAnalysis } from '@/types/expense';
 import { expenseColors } from '@/constants/expenseColors';
 import { executeSmartQuery, SmartQueryResult } from '@/services/onDeviceAi';
 import { syncShortcutsParameters } from '@/services/expense/quickAddNative';
@@ -218,6 +218,7 @@ interface ExpenseState {
     amount: number;
     percentage: number;
   } | null;
+  getBudgetBufferAnalysis: (monthKey?: string) => BudgetBufferAnalysis;
 
   // PDF Setup Progress State
   statementSetup: StatementSetupState;
@@ -1773,6 +1774,8 @@ export const useExpenseStore = create<ExpenseState>()(
           (t) =>
             t.type === 'expense' &&
             t.categoryId !== 'cat_debt_repayment' &&
+            !t.excludeFromBudget &&
+            !(t.vaultId && t.type === 'expense') &&
             isInMonth(t.date, year, month)
         )
         .reduce((sum, t) => {
@@ -1822,6 +1825,70 @@ export const useExpenseStore = create<ExpenseState>()(
     return Number((((totalSpent - budget) / budget) * 100).toFixed(1));
   },
 
+  getBudgetBufferAnalysis: (monthKey) => {
+    const { monthlyBudget, categoryBudgets, transactions, selectedMonth } = get();
+    const targetKey = monthKey || selectedMonth;
+    const { year, month } = monthKeyToYearMonth(targetKey);
+    const totalAllocated = Object.values(categoryBudgets || {}).reduce((s, v) => s + (v > 0 ? v : 0), 0);
+    const effectiveBudget = monthlyBudget > 0 ? monthlyBudget : totalAllocated;
+    const totalSpent = get().getTotalSpent(targetKey);
+    const totalIncome = get().getTotalIncome(targetKey);
+
+    const { bankCash, cardDues } = get().getHistoricalAccountBreakdown(targetKey);
+    const liquidBalance = roundMoney(bankCash - cardDues);
+
+    // Committed goals: actual vault deposits made this month
+    const committedGoals = roundMoney(
+      transactions
+        .filter((t) => t.type === 'vault_deposit' && isInMonth(t.date, year, month))
+        .reduce((sum, t) => sum + t.amount, 0)
+    );
+
+    // Dynamic Buffer Capacity:
+    // 1. Primary: Monthly salary surplus (Total Income - Committed Goals - Living Budget)
+    const incomeSurplus = Math.max(0, roundMoney(totalIncome - committedGoals - effectiveBudget));
+    // 2. Secondary: Unallocated liquid bank balance (Bank Cash - Card Dues - Committed Goals - Living Budget)
+    const bankSurplus = Math.max(0, roundMoney(liquidBalance - committedGoals - effectiveBudget));
+
+    let bufferLimit = 0;
+    if (totalIncome > 0 && effectiveBudget > 0) {
+      bufferLimit = incomeSurplus > 0 ? incomeSurplus : Math.min(bankSurplus, effectiveBudget * 0.5);
+    } else if (effectiveBudget > 0 && liquidBalance > effectiveBudget) {
+      bufferLimit = bankSurplus;
+    }
+
+    const overspend = Math.max(0, roundMoney(totalSpent - effectiveBudget));
+    const bufferUsed = Math.min(overspend, bufferLimit);
+    const bufferRemaining = Math.max(0, roundMoney(bufferLimit - overspend));
+
+    let status: 'safe' | 'buffer' | 'deficit' = 'safe';
+    if (overspend > 0) {
+      if (bufferLimit > 0 && overspend <= bufferLimit) {
+        status = 'buffer';
+      } else {
+        status = 'deficit';
+      }
+    }
+
+    const deficitAmount = status === 'deficit' ? roundMoney(overspend - bufferLimit) : 0;
+
+    return {
+      effectiveBudget,
+      totalSpent,
+      totalIncome,
+      committedGoals,
+      liquidBalance,
+      bankCash,
+      cardDues,
+      bufferLimit,
+      bufferUsed,
+      bufferRemaining,
+      status,
+      overspend,
+      deficitAmount,
+    };
+  },
+
   getCategoryBreakdown: (monthKey) => {
     const { categories, transactions, selectedMonth } = get();
     const totalSpent = get().getTotalSpent(monthKey);
@@ -1836,6 +1903,8 @@ export const useExpenseStore = create<ExpenseState>()(
         (t) =>
           t.type === 'expense' &&
           t.categoryId !== 'cat_debt_repayment' &&
+          !t.excludeFromBudget &&
+          !(t.vaultId && t.type === 'expense') &&
           !userCatIds.has(t.categoryId) &&
           isInMonth(t.date, year, month)
       )
@@ -1846,7 +1915,14 @@ export const useExpenseStore = create<ExpenseState>()(
 
     return userCats.map((cat) => {
       let catSpent = transactions
-        .filter((t) => t.type === 'expense' && t.categoryId === cat.id && isInMonth(t.date, year, month))
+        .filter(
+          (t) =>
+            t.type === 'expense' &&
+            t.categoryId === cat.id &&
+            !t.excludeFromBudget &&
+            !(t.vaultId && t.type === 'expense') &&
+            isInMonth(t.date, year, month)
+        )
         .reduce((sum, t) => {
           const personalShare = t.split ? t.split.yourShare : t.amount;
           return sum + personalShare;
