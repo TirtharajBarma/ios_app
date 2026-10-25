@@ -1757,6 +1757,8 @@ export const useExpenseStore = create<ExpenseState>()(
             t.type === 'income' &&
             t.categoryId !== 'cat_split_return' &&
             t.categoryId !== 'cat_debt_repayment' &&
+            !t.settledTxId?.startsWith('split_settle:') &&
+            !t.settledTxId?.startsWith('debt_settle:') &&
             (t.allocatedMonth
               ? t.allocatedMonth.trim().toLowerCase() === targetMonthNormalized
               : isInMonth(t.date, year, month))
@@ -1775,12 +1777,13 @@ export const useExpenseStore = create<ExpenseState>()(
             t.type === 'expense' &&
             t.categoryId !== 'cat_debt_repayment' &&
             !t.excludeFromBudget &&
-            !(t.vaultId && t.type === 'expense') &&
+            !(t.vaultId && t.type === 'expense' && !t.goalFundedAmount) &&
             isInMonth(t.date, year, month)
         )
         .reduce((sum, t) => {
           const personalShare = t.split ? t.split.yourShare : t.amount;
-          return sum + personalShare;
+          const netShare = Math.max(0, personalShare - (t.goalFundedAmount || 0));
+          return sum + netShare;
         }, 0)
     );
   },
@@ -1826,7 +1829,7 @@ export const useExpenseStore = create<ExpenseState>()(
   },
 
   getBudgetBufferAnalysis: (monthKey) => {
-    const { monthlyBudget, categoryBudgets, transactions, selectedMonth } = get();
+    const { monthlyBudget, categoryBudgets, transactions, savingsVaults, selectedMonth } = get();
     const targetKey = monthKey || selectedMonth;
     const { year, month } = monthKeyToYearMonth(targetKey);
     const totalAllocated = Object.values(categoryBudgets || {}).reduce((s, v) => s + (v > 0 ? v : 0), 0);
@@ -1837,11 +1840,19 @@ export const useExpenseStore = create<ExpenseState>()(
     const { bankCash, cardDues } = get().getHistoricalAccountBreakdown(targetKey);
     const liquidBalance = roundMoney(bankCash - cardDues);
 
-    // Committed goals: actual vault deposits made this month
+    // Committed goals: monthly commitments or total saved in vaults
+    const vaultTargetSum = (savingsVaults || []).reduce((sum, v) => sum + (v.monthlyTarget || 0), 0);
+    const vaultDepositsThisMonth = transactions
+      .filter((t) => t.type === 'vault_deposit' && isInMonth(t.date, year, month))
+      .reduce((sum, t) => sum + t.amount, 0);
+    const totalSavedInVaults = (savingsVaults || []).reduce((sum, v) => sum + (v.currentAmount || 0), 0);
+
     const committedGoals = roundMoney(
-      transactions
-        .filter((t) => t.type === 'vault_deposit' && isInMonth(t.date, year, month))
-        .reduce((sum, t) => sum + t.amount, 0)
+      vaultTargetSum > 0
+        ? vaultTargetSum
+        : vaultDepositsThisMonth > 0
+        ? vaultDepositsThisMonth
+        : totalSavedInVaults
     );
 
     // Dynamic Buffer Capacity:
@@ -1904,13 +1915,14 @@ export const useExpenseStore = create<ExpenseState>()(
           t.type === 'expense' &&
           t.categoryId !== 'cat_debt_repayment' &&
           !t.excludeFromBudget &&
-          !(t.vaultId && t.type === 'expense') &&
+          !(t.vaultId && t.type === 'expense' && !t.goalFundedAmount) &&
           !userCatIds.has(t.categoryId) &&
           isInMonth(t.date, year, month)
       )
       .reduce((sum, t) => {
         const personalShare = t.split ? t.split.yourShare : t.amount;
-        return sum + personalShare;
+        const netShare = Math.max(0, personalShare - (t.goalFundedAmount || 0));
+        return sum + netShare;
       }, 0);
 
     return userCats.map((cat) => {
@@ -1920,12 +1932,13 @@ export const useExpenseStore = create<ExpenseState>()(
             t.type === 'expense' &&
             t.categoryId === cat.id &&
             !t.excludeFromBudget &&
-            !(t.vaultId && t.type === 'expense') &&
+            !(t.vaultId && t.type === 'expense' && !t.goalFundedAmount) &&
             isInMonth(t.date, year, month)
         )
         .reduce((sum, t) => {
           const personalShare = t.split ? t.split.yourShare : t.amount;
-          return sum + personalShare;
+          const netShare = Math.max(0, personalShare - (t.goalFundedAmount || 0));
+          return sum + netShare;
         }, 0);
 
       if (cat.id === 'cat_other' && orphanSpent > 0) {
@@ -2164,6 +2177,17 @@ export const useExpenseStore = create<ExpenseState>()(
         if (isSystemCategory(ic.id) && !merged.categories.some((c: ExpenseCategory) => c.id === ic.id)) {
           merged.categories.push(ic);
         }
+      });
+    }
+    if (Array.isArray(merged.transactions)) {
+      merged.transactions = merged.transactions.map((t: ExpenseTransaction) => {
+        if (t.settledTxId?.startsWith('split_settle:') && t.categoryId !== 'cat_split_return') {
+          return { ...t, categoryId: 'cat_split_return' };
+        }
+        if (t.settledTxId?.startsWith('debt_settle:') && t.categoryId !== 'cat_debt_repayment') {
+          return { ...t, categoryId: 'cat_debt_repayment' };
+        }
+        return t;
       });
     }
     if (Array.isArray(merged.accounts) && Array.isArray(merged.transactions)) {

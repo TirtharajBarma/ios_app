@@ -449,8 +449,8 @@ export const ExpenseSettings: React.FC = () => {
   const categoryPanResponder = useMemo(
     () =>
       PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: (_, gesture) => gesture.dy > 4,
+        onStartShouldSetPanResponder: () => false,
+        onMoveShouldSetPanResponder: (_, gesture) => gesture.dy > 6,
         onPanResponderMove: (_, gesture) => {
           if (gesture.dy > 0) {
             categoryTranslateY.setValue(gesture.dy);
@@ -987,6 +987,31 @@ export const ExpenseSettings: React.FC = () => {
 
           <View style={styles.groupedRowDivider} />
 
+          {/* App Feature Tour Row */}
+          <TouchableOpacity
+            style={styles.groupedRowItem}
+            activeOpacity={0.7}
+            onPress={() => {
+              Haptics.selectionAsync();
+              setShowWalkthroughModal(true);
+            }}
+          >
+            <View style={styles.iconRowLeft}>
+              <View style={styles.iconCircleSlate}>
+                <Sparkles size={16} color="#A2AEBB" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <AppText style={styles.groupedRowTitle}>APP FEATURE TOUR</AppText>
+                <AppText style={styles.settingSubValue} numberOfLines={1}>
+                  Replay interactive guide & profile setup
+                </AppText>
+              </View>
+            </View>
+            <ChevronRight size={18} color={expenseColors.textSubtle} />
+          </TouchableOpacity>
+
+          <View style={styles.groupedRowDivider} />
+
           {/* App Version Row */}
           <View style={styles.groupedRowItemStatic}>
             <View style={styles.iconRowLeft}>
@@ -1003,7 +1028,7 @@ export const ExpenseSettings: React.FC = () => {
             {updateInfo.updateId ? (
               <View style={styles.otaHashBadge}>
                 <AppText style={styles.otaHashText}>
-                  #{updateInfo.updateId.substring(0, 8)}
+                  #{updateInfo.updateId.slice(-8)}
                 </AppText>
               </View>
             ) : null}
@@ -1056,11 +1081,39 @@ export const ExpenseSettings: React.FC = () => {
               styles.modalSheet,
               {
                 transform: [{ translateY: categoryTranslateY }],
-                maxHeight: '88%',
+                maxHeight: '90%',
                 paddingBottom: 0,
               },
             ]}
           >
+            {/* Gesture Handle Bar Area (Fixed at top of sheet with persistent Cancel / Title / Save) */}
+            <View {...categoryPanResponder.panHandlers} style={styles.dragHeaderArea}>
+              <View style={styles.sheetHandle} />
+              <View style={styles.modalHeaderRow}>
+                <TouchableOpacity
+                  onPress={closeCategoryModal}
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                  style={styles.modalHeaderSideBtn}
+                  activeOpacity={0.7}
+                >
+                  <AppText style={styles.headerCancelText}>Cancel</AppText>
+                </TouchableOpacity>
+
+                <AppText style={styles.modalTitle}>
+                  {editingCategoryId ? 'EDIT CATEGORY' : 'NEW CATEGORY'}
+                </AppText>
+
+                <TouchableOpacity
+                  onPress={handleSaveCategory}
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                  style={[styles.modalHeaderSideBtn, styles.modalHeaderSaveBtn]}
+                  activeOpacity={0.7}
+                >
+                  <AppText style={styles.headerSaveText}>Save</AppText>
+                </TouchableOpacity>
+              </View>
+            </View>
+
             <ScrollView
               bounces={false}
               keyboardShouldPersistTaps="handled"
@@ -1070,17 +1123,8 @@ export const ExpenseSettings: React.FC = () => {
               style={{ backgroundColor: '#1A1D23' }}
               contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 24) + 40, backgroundColor: '#1A1D23' }}
             >
-            {/* Gesture Handle Bar Area (Swipe down anywhere here closes like iPhone) */}
-            <View {...categoryPanResponder.panHandlers} style={styles.dragHeaderArea}>
-              <View style={styles.sheetHandle} />
-              <AppText style={styles.modalTitle}>
-                {editingCategoryId ? 'EDIT CATEGORY' : 'NEW CATEGORY'}
-              </AppText>
-              <AppText style={styles.dragHintSub}>Swipe down to dismiss</AppText>
-            </View>
-
-            {/* Category Name Input */}
-            <View style={styles.inputContainer}>
+              {/* Category Name Input */}
+              <View style={styles.inputContainer}>
               <TextInput
                 value={categoryName}
                 onChangeText={setCategoryName}
@@ -2127,7 +2171,7 @@ const styles = StyleSheet.create({
   },
   dragHeaderArea: {
     alignItems: 'center',
-    paddingBottom: 8,
+    paddingBottom: 4,
   },
   sheetHandle: {
     width: 36,
@@ -2135,7 +2179,32 @@ const styles = StyleSheet.create({
     borderRadius: 2,
     backgroundColor: 'rgba(255, 255, 255, 0.25)',
     alignSelf: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
+  },
+  modalHeaderRow: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: 4,
+  },
+  modalHeaderSideBtn: {
+    minWidth: 56,
+    paddingVertical: 6,
+    justifyContent: 'center',
+  },
+  modalHeaderSaveBtn: {
+    alignItems: 'flex-end',
+  },
+  headerCancelText: {
+    color: '#8E919D',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  headerSaveText: {
+    color: expenseColors.accentPeach,
+    fontSize: 15,
+    fontWeight: '700',
   },
   modalTitle: {
     color: '#FFFFFF',
@@ -2144,7 +2213,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 1.2,
     textAlign: 'center',
-    marginBottom: 2,
   },
   dragHintSub: {
     color: expenseColors.textMuted,

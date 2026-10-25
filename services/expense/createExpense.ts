@@ -28,6 +28,8 @@ export type CreateExpenseInput = {
   subscriptionId?: string;
   vaultId?: string;
   excludeFromBudget?: boolean;
+  goalFundedAmount?: number;
+  goalAllocations?: Record<string, number>;
 };
 
 export type CreateExpenseResult =
@@ -88,6 +90,8 @@ export function createExpense(input: CreateExpenseInput): CreateExpenseResult {
     subscriptionId: input.subscriptionId,
     vaultId: input.vaultId,
     excludeFromBudget: input.excludeFromBudget,
+    goalFundedAmount: input.goalFundedAmount,
+    goalAllocations: input.goalAllocations,
   });
 
   const created = getState().transactions.find((t) => !known.has(t.id));

@@ -22,7 +22,7 @@ export interface CoachInsight {
 export interface CoachInput {
   now: Date;
   budget: number; // effective monthly budget (0 = none)
-  bufferLimit?: number; // dynamic monthly cushion from income surplus or liquid balance
+  bufferLimit?: number; // dynamic monthly buffer from income surplus or liquid balance
   spentToDate: number; // this month, same definition as the Spent figure
   spentToday: number;
   /** Spend per day for the 14 days before today, oldest first (zeros included). */
@@ -34,7 +34,20 @@ export interface CoachInput {
   /** Categories that have their own monthly budget, with this month's spend. */
   categories: { id: string; name: string; spent: number; budget: number }[];
   /** Previous month, when it had spending: for the month-start recap. */
-  lastMonth: { label: string; spent: number; topCategory?: string } | null;
+  lastMonth: {
+    label: string;
+    spent: number;
+    topCategory?: string;
+    unspentBuffer?: number;
+    isDeficit?: boolean;
+    deficitAmount?: number;
+  } | null;
+  /** Optional breakdown of upcoming non-discretionary commitments (Rent, EMI, Utilities) */
+  fixedCommitments?: {
+    total: number;
+    categories: number;
+    breakdown: Array<{ name: string; amount: number }>;
+  };
   format: (n: number) => string;
 }
 
@@ -110,6 +123,115 @@ export function isFixedCommitmentCategory(cat?: { id?: string; name?: string } |
   );
 }
 
+export interface UpcomingFixedCommitmentsInput {
+  subscriptions: Array<any>;
+  categories: Array<{ id: string; name: string }>;
+  categoryBudgets?: Record<string, number>;
+  transactions: Array<{ date?: string; amount?: number; type?: string; categoryId?: string; isExcludedFromBudget?: boolean }>;
+  accounts?: Array<{ type?: string; dueAmount?: number; unbilledDue?: number; isArchived?: boolean; billingDay?: number; dueDay?: number }>;
+  now: Date;
+  selectedMonth: string; // e.g. "2026-10"
+  currencyCode?: string;
+}
+
+export interface UpcomingFixedCommitmentsResult {
+  total: number;
+  subscriptions: number;
+  categories: number;
+  cardDues: number;
+  breakdown: Array<{ name: string; amount: number }>;
+}
+
+/**
+ * Intelligent Fixed Commitment Engine:
+ * Calculates upcoming non-discretionary commitments for the rest of the current month:
+ * 1. Digital subscriptions renewing between now and month-end.
+ * 2. Contractual fixed categories (Rent, EMI, Utilities, Tuition, WiFi) that have NOT been paid yet this month
+ *    (using explicit category budget or previous month lookback pattern).
+ * 3. Billed credit card statements due this month.
+ */
+export function getUpcomingFixedCommitments(input: UpcomingFixedCommitmentsInput): UpcomingFixedCommitmentsResult {
+  const now = input.now;
+  const currencyCode = input.currencyCode || 'INR';
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+
+  // 1. Digital Subscriptions (renewing in remainder of month)
+  const subTotal = getUpcomingFixedSubscriptions(input.subscriptions || [], now, currencyCode);
+
+  // 2. Fixed Categories (Rent, EMI, Utilities, etc.)
+  let catTotal = 0;
+  const breakdown: Array<{ name: string; amount: number }> = [];
+
+  // Determine previous month key (e.g. "2026-09" from "2026-10")
+  const [curYear, curMonthNum] = input.selectedMonth.split('-').map(Number);
+  const prevDate = new Date(curYear, (curMonthNum || 1) - 2, 1);
+  const prevMonthKey = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
+
+  // Pre-calculate spending by category for current month and previous month
+  const spentThisMonthByCat: Record<string, number> = {};
+  const spentPrevMonthByCat: Record<string, number> = {};
+
+  for (const t of input.transactions || []) {
+    if (t.type !== 'expense' || t.isExcludedFromBudget || !t.categoryId) continue;
+    const tMonth = (t.date || '').slice(0, 7);
+    const amt = Number(t.amount) || 0;
+    if (tMonth === input.selectedMonth) {
+      spentThisMonthByCat[t.categoryId] = (spentThisMonthByCat[t.categoryId] || 0) + amt;
+    } else if (tMonth === prevMonthKey) {
+      spentPrevMonthByCat[t.categoryId] = (spentPrevMonthByCat[t.categoryId] || 0) + amt;
+    }
+  }
+
+  // Iterate over all fixed commitment categories
+  for (const cat of input.categories || []) {
+    if (!isFixedCommitmentCategory(cat)) continue;
+    // Don't double count if the category represents digital subscriptions that are tracked in the subscription store
+    const catNameLower = (cat.name || '').toLowerCase();
+    if (cat.id === 'cat_subs' || (catNameLower === 'subscription' && subTotal > 0)) {
+      continue;
+    }
+
+    const alreadySpent = spentThisMonthByCat[cat.id] || 0;
+    const explicitBudget = input.categoryBudgets?.[cat.id] || 0;
+    const prevMonthSpent = spentPrevMonthByCat[cat.id] || 0;
+
+    // Expected commitment: explicit category budget takes precedence, otherwise look at past month lookback
+    const expected = explicitBudget > 0 ? explicitBudget : prevMonthSpent;
+
+    if (expected > 0) {
+      const pending = Math.max(0, expected - alreadySpent);
+      if (pending > 0) {
+        catTotal += pending;
+        breakdown.push({ name: cat.name, amount: pending });
+      }
+    }
+  }
+
+  // 3. Unpaid billed credit card dues payable this month
+  let cardDuesTotal = 0;
+  for (const acc of input.accounts || []) {
+    if (acc.type !== 'credit' || acc.isArchived) continue;
+    const billed = Math.max(0, (acc.dueAmount || 0) - (acc.unbilledDue || 0));
+    if (billed > 0 && acc.dueDay) {
+      // Check if due day falls between today and month end
+      const dueDay = Math.min(acc.dueDay, monthEnd.getDate());
+      const dueDate = new Date(now.getFullYear(), now.getMonth(), dueDay, 23, 59, 59);
+      if (dueDate >= now && dueDate <= monthEnd) {
+        cardDuesTotal += billed;
+        breakdown.push({ name: 'Card Due', amount: billed });
+      }
+    }
+  }
+
+  return {
+    total: subTotal + catTotal + cardDuesTotal,
+    subscriptions: subTotal,
+    categories: catTotal,
+    cardDues: cardDuesTotal,
+    breakdown,
+  };
+}
+
 const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 /**
@@ -148,13 +270,32 @@ export function getAllCoachInsights(i: CoachInput): CoachInsight[] {
       const buffer = i.bufferLimit || 0;
       if (buffer > 0 && over <= buffer) {
         const bufferRemaining = Math.max(0, buffer - over);
+        const bufferUsedPct = (over / buffer) * 100;
+        const dailyBufferPace = daysRemaining > 0 ? Math.max(0, Math.round(Math.max(0, bufferRemaining - i.upcomingFixed) / daysRemaining)) : 0;
+
+        let title = `${i.format(over)} over budget — covered by your buffer`;
+        let sub = `${i.format(bufferRemaining)} buffer remaining. Your savings goals are safe.`;
+
+        if (bufferUsedPct < 35) {
+          title = `⚠️ Budget breached by ${i.format(over)}`;
+          sub = dailyBufferPace > 0
+            ? `Dipping into salary buffer. Keep spend under ${i.format(dailyBufferPace)}/day to protect your savings.`
+            : `Dipping into salary buffer. Slow down to keep your locked savings safe.`;
+        } else if (bufferUsedPct < 75) {
+          title = `🚨 ${i.format(over)} of ${i.format(buffer)} buffer burned`;
+          sub = `Only ${i.format(bufferRemaining)} buffer left before your locked savings take a direct hit.`;
+        } else {
+          title = `🛑 Safety buffer nearly exhausted`;
+          sub = `Only ${i.format(bufferRemaining)} remaining. Any further spend eats directly into your locked savings!`;
+        }
+
         candidates.push({
           p: 2,
           insight: {
             id: `buffer:${today}`,
             type: 'buffer',
-            title: `${i.format(over)} absorbed by salary buffer`,
-            sub: `${i.format(bufferRemaining)} buffer remaining. Your savings goals are safe.`,
+            title,
+            sub,
           },
         });
       } else {
@@ -164,7 +305,7 @@ export function getAllCoachInsights(i: CoachInput): CoachInsight[] {
           insight: {
             id: `over:${today}`,
             type: 'over',
-            title: buffer > 0 ? `${i.format(deficit)} beyond buffer capacity` : `${i.format(over)} over this month's budget`,
+            title: buffer > 0 ? `${i.format(deficit)} over buffer limit` : `${i.format(over)} over this month's budget`,
             sub: buffer > 0
               ? 'Spending is now eating into your locked savings goals.'
               : daysRemaining > 1
@@ -255,15 +396,53 @@ export function getAllCoachInsights(i: CoachInput): CoachInsight[] {
     });
   }
 
-  // Month start: how last month went
-  if (day <= 2 && i.lastMonth && i.lastMonth.spent > 0) {
+  // Month start: how last month went (Days 1–4 of the new month)
+  if (day <= 4 && i.lastMonth && (i.lastMonth.spent > 0 || (i.lastMonth.unspentBuffer && i.lastMonth.unspentBuffer > 0))) {
+    if (i.lastMonth.isDeficit && i.lastMonth.deficitAmount && i.lastMonth.deficitAmount > 0) {
+      candidates.push({
+        p: 2,
+        insight: {
+          id: `recap-deficit:${month}`,
+          type: 'over',
+          title: `${i.lastMonth.label} ended ${i.format(i.lastMonth.deficitAmount)} in deficit`,
+          sub: `Spend carefully in ${i.now.toLocaleDateString('en-US', { month: 'long' })} to replenish your locked savings.`,
+          action: { type: 'open_goals' },
+        },
+      });
+    } else if (i.lastMonth.unspentBuffer && i.lastMonth.unspentBuffer > 0) {
+      candidates.push({
+        p: 6,
+        insight: {
+          id: `recap-buffer-sweep:${month}`,
+          type: 'recap',
+          title: `${i.lastMonth.label} Wrap-Up: ${i.format(i.lastMonth.unspentBuffer)} buffer protected 🎉`,
+          sub: 'Tap to sweep your unspent buffer into your savings goals.',
+          action: { type: 'open_goals' },
+        },
+      });
+    } else {
+      candidates.push({
+        p: 7,
+        insight: {
+          id: `recap-start:${month}`,
+          type: 'recap',
+          title: `${i.lastMonth.label}: ${i.format(i.lastMonth.spent)} spent`,
+          sub: i.lastMonth.topCategory ? `${i.lastMonth.topCategory} was the biggest category. A fresh month starts now.` : 'A fresh month starts now.',
+        },
+      });
+    }
+  }
+
+  // Fixed obligations reminder (Rent, EMI, etc.) in the first half of the month
+  if (i.fixedCommitments && i.fixedCommitments.categories > 0 && day <= 15) {
+    const fixedList = i.fixedCommitments.breakdown.map((b) => b.name).slice(0, 2).join(' & ');
     candidates.push({
-      p: 7,
+      p: 5,
       insight: {
-        id: `recap-start:${month}`,
-        type: 'recap',
-        title: `${i.lastMonth.label}: ${i.format(i.lastMonth.spent)} spent`,
-        sub: i.lastMonth.topCategory ? `${i.lastMonth.topCategory} was the biggest category. A fresh month starts now.` : 'A fresh month starts now.',
+        id: `fixed-commitments:${month}`,
+        type: 'forecast',
+        title: `${i.format(i.fixedCommitments.categories)} reserved for ${fixedList}`,
+        sub: 'Locked aside from your daily allowance so your major bills stay fully protected.',
       },
     });
   }

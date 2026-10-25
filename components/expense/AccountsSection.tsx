@@ -88,32 +88,9 @@ function SpringAccountCard({
               <AppText style={[styles.accountName, { flexShrink: 1 }]} numberOfLines={1}>
                 {acc.name.toUpperCase()}
               </AppText>
-              {dueStatus?.hasDueInfo && (
-                <View
-                  style={[
-                    styles.dueBadge,
-                    { flexShrink: 0 },
-                    dueStatus.status === 'paid'
-                      ? styles.dueBadgePaid
-                      : dueStatus.isUrgent
-                      ? styles.dueBadgeUrgent
-                      : dueStatus.isUnbilled
-                      ? styles.dueBadgeUnbilled
-                      : styles.dueBadgeUpcoming,
-                  ]}
-                >
-                  <AppText
-                    style={[
-                      styles.dueBadgeText,
-                      dueStatus.status === 'paid'
-                        ? styles.dueBadgePaidText
-                        : dueStatus.isUrgent
-                        ? styles.dueBadgeUrgentText
-                        : dueStatus.isUnbilled
-                        ? styles.dueBadgeUnbilledText
-                        : styles.dueBadgeUpcomingText,
-                    ]}
-                  >
+              {dueStatus?.isUrgent && (
+                <View style={[styles.dueBadge, styles.dueBadgeUrgent, { flexShrink: 0 }]}>
+                  <AppText style={[styles.dueBadgeText, styles.dueBadgeUrgentText]}>
                     {dueStatus.badgeLabel}
                   </AppText>
                 </View>
@@ -148,9 +125,12 @@ function SpringAccountCard({
                     {formatAmount(onlyUnbilled ? acc.dueAmount || 0 : billedDue)}
                   </AppText>
                   {(dueStatus?.dueDateFormatted || (!onlyUnbilled && unbilled > 0)) && (
-                    <AppText style={styles.subtextDue} numberOfLines={2}>
-                      {dueStatus?.dueDateFormatted ? (onlyUnbilled ? `Pay by ${dueStatus.dueDateFormatted}` : `Due ${dueStatus.dueDateFormatted}`) : ''}
-                      {!onlyUnbilled && unbilled > 0 ? `${dueStatus?.dueDateFormatted ? ' • ' : ''}+${formatAmount(unbilled)} upcoming` : ''}
+                    <AppText style={styles.subtextDue} numberOfLines={1}>
+                      {onlyUnbilled
+                        ? `Pay by ${dueStatus?.dueDateFormatted || ''}`
+                        : unbilled > 0
+                        ? `${dueStatus?.dueDateFormatted ? `${dueStatus.dueDateFormatted} • ` : ''}+${formatAmount(unbilled)} upcoming`
+                        : `${dueStatus?.dueDateFormatted || ''}${dueStatus?.badgeLabel ? ` • in ${dueStatus.daysDiff}d` : ''}`}
                     </AppText>
                   )}
                 </View>

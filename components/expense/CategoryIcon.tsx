@@ -36,6 +36,13 @@ import {
   TrendingUp,
   Folder,
   Users,
+  Laptop,
+  Briefcase,
+  PiggyBank,
+  Smartphone,
+  Activity,
+  Wifi,
+  RefreshCw,
 } from 'lucide-react-native';
 import { ExpenseCategory } from '@/types/expense';
 
@@ -48,6 +55,75 @@ export interface CategoryIconProps {
   strokeWidth?: number;
   fill?: boolean;
 }
+
+const ICON_MAP: Record<string, React.ComponentType<any>> = {
+  Cigarette,
+  Flame,
+  Star,
+  Heart,
+  Home,
+  Car,
+  Plane,
+  Gift,
+  BookOpen,
+  Music,
+  Gamepad2,
+  Camera,
+  Wrench,
+  Leaf,
+  ShoppingBag,
+  ShoppingCart,
+  ShoppingBasket,
+  Tv,
+  Film,
+  Zap,
+  Banknote,
+  UtensilsCrossed,
+  Utensils,
+  MoreHorizontal,
+  Coins,
+  Sparkles,
+  Tag,
+  Coffee,
+  Shield,
+  Smile,
+  Repeat,
+  Subscription: Repeat,
+  Wallet,
+  Landmark,
+  TrendingUp,
+  Folder,
+  Users,
+  Laptop,
+  Briefcase,
+  PiggyBank,
+  Smartphone,
+  Activity,
+  Wifi,
+  RefreshCw,
+};
+
+const DEFAULT_CATEGORY_ICONS: Record<string, React.ComponentType<any>> = {
+  cat_cig: Cigarette,
+  cat_health: Heart,
+  cat_income: Coins,
+  cat_trans: Car,
+  cat_shop: ShoppingBag,
+  cat_ent: Tv,
+  cat_util: Zap,
+  cat_fin: Banknote,
+  cat_food: UtensilsCrossed,
+  cat_subs: Repeat,
+  cat_split_return: Users,
+  cat_split: Users,
+  cat_salary: Briefcase,
+  cat_freelance: Laptop,
+  cat_invest: TrendingUp,
+  cat_bonus: Gift,
+  cat_rental: Home,
+  cat_refund: RefreshCw,
+  cat_other_inc: Coins,
+};
 
 /**
  * Universal Category Icon component
@@ -68,95 +144,31 @@ export const CategoryIcon: React.FC<CategoryIconProps> = ({
   const resolvedId = catId || category?.id || '';
   const resolvedColor = color || category?.color || '#FFFFFF';
 
-  const props = {
+  const props: Record<string, any> = {
     size,
     color: resolvedColor,
     strokeWidth,
   };
 
-  // 1. Check iconName first (user customized icon) & default category ID fallbacks
-  if (
-    resolvedName === 'Cigarette' ||
-    resolvedName === 'Flame' ||
-    (!resolvedName && resolvedId === 'cat_cig')
-  ) {
-    return <Cigarette {...props} />;
+  // 1. Direct iconName match (user customized icon)
+  if (resolvedName && ICON_MAP[resolvedName]) {
+    const IconComp = ICON_MAP[resolvedName];
+    if (resolvedName === 'Star' || resolvedName === 'Heart') {
+      props.fill = fill ? resolvedColor : 'none';
+    }
+    return <IconComp {...props} />;
   }
-  if (resolvedName === 'Star') {
-    return <Star {...props} fill={fill ? resolvedColor : 'none'} />;
-  }
-  if (resolvedName === 'Heart' || (!resolvedName && resolvedId === 'cat_health')) {
-    return <Heart {...props} fill={fill ? resolvedColor : 'none'} />;
-  }
-  if (resolvedName === 'Coins' || (!resolvedName && resolvedId === 'cat_income')) {
-    return <Coins {...props} />;
-  }
-  if (resolvedName === 'Car' || (!resolvedName && resolvedId === 'cat_trans')) {
-    return <Car {...props} />;
-  }
-  if (
-    resolvedName === 'ShoppingBag' ||
-    resolvedName === 'ShoppingCart' ||
-    resolvedName === 'ShoppingBasket' ||
-    (!resolvedName && resolvedId === 'cat_shop')
-  ) {
-    return <ShoppingBag {...props} />;
-  }
-  if (
-    resolvedName === 'Tv' ||
-    resolvedName === 'Film' ||
-    (!resolvedName && resolvedId === 'cat_ent')
-  ) {
-    return <Tv {...props} />;
-  }
-  if (resolvedName === 'Zap' || (!resolvedName && resolvedId === 'cat_util')) {
-    return <Zap {...props} />;
-  }
-  if (
-    resolvedName === 'Banknote' ||
-    resolvedName === 'Wallet' ||
-    resolvedName === 'Landmark' ||
-    (!resolvedName && resolvedId === 'cat_fin')
-  ) {
-    return <Banknote {...props} />;
-  }
-  if (
-    resolvedName === 'UtensilsCrossed' ||
-    resolvedName === 'Utensils' ||
-    (!resolvedName && resolvedId === 'cat_food')
-  ) {
-    return <UtensilsCrossed {...props} />;
-  }
-  if (
-    resolvedName === 'Repeat' ||
-    resolvedName === 'Subscription' ||
-    (!resolvedName && resolvedId === 'cat_subs')
-  ) {
-    return <Repeat {...props} />;
-  }
-  if (resolvedName === 'Home') return <Home {...props} />;
-  if (resolvedName === 'Plane') return <Plane {...props} />;
-  if (resolvedName === 'Gift') return <Gift {...props} />;
-  if (resolvedName === 'BookOpen') return <BookOpen {...props} />;
-  if (resolvedName === 'Music') return <Music {...props} />;
-  if (resolvedName === 'Gamepad2') return <Gamepad2 {...props} />;
-  if (resolvedName === 'Camera') return <Camera {...props} />;
-  if (resolvedName === 'Wrench') return <Wrench {...props} />;
-  if (resolvedName === 'Leaf') return <Leaf {...props} />;
-  if (resolvedName === 'Sparkles') return <Sparkles {...props} />;
-  if (resolvedName === 'Tag') return <Tag {...props} />;
-  if (resolvedName === 'Coffee') return <Coffee {...props} />;
-  if (resolvedName === 'Shield') return <Shield {...props} />;
-  if (resolvedName === 'Smile') return <Smile {...props} />;
-  if (resolvedName === 'Folder') return <Folder {...props} />;
-  if (resolvedName === 'Users' || (!resolvedName && (resolvedId === 'cat_split_return' || resolvedId === 'cat_split'))) {
-    return <Users {...props} />;
-  }
-  if (resolvedName === 'Wallet') return <Wallet {...props} />;
-  if (resolvedName === 'Landmark') return <Landmark {...props} />;
-  if (resolvedName === 'TrendingUp') return <TrendingUp {...props} />;
 
-  // Default fallback for Misc or unknown
+  // 2. Default category ID fallback
+  if (resolvedId && DEFAULT_CATEGORY_ICONS[resolvedId]) {
+    const FallbackComp = DEFAULT_CATEGORY_ICONS[resolvedId];
+    if (resolvedId === 'cat_health') {
+      props.fill = fill ? resolvedColor : 'none';
+    }
+    return <FallbackComp {...props} />;
+  }
+
+  // 3. Fallback for Misc or unknown
   return <MoreHorizontal {...props} />;
 };
 

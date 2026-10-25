@@ -55,6 +55,7 @@ export interface SavingsVault {
   emoji: string;
   targetAmount: number;
   currentAmount: number;
+  monthlyTarget?: number;
   color: string;
   category?: string;
   isCompleted?: boolean;
@@ -72,6 +73,8 @@ export interface ExpenseTransaction {
   toAccountName?: string; // Historical to-account name snapshot
   vaultId?: string; // Target savings vault if deposit/withdraw
   excludeFromBudget?: boolean; // When true (e.g. funded from savings vault/goal), excluded from monthly living budget
+  goalFundedAmount?: number; // Amount pre-funded from savings goal(s), deducted from living budget calculation
+  goalAllocations?: Record<string, number>; // vaultId -> allocated amount funded from goal
   folderId?: string; // Linked Event Folder ID
   folderName?: string; // Linked Event Folder Name
   date: string; // ISO format (yyyy-MM-dd)

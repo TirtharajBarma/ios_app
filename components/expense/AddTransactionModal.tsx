@@ -280,8 +280,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   const [merchant, setMerchant] = useState<string>('');
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
   const [selectedGoalId, setSelectedGoalId] = useState<string>('');
-  const [selectedFundVaultId, setSelectedFundVaultId] = useState<string>('');
-  const [deductFromVault, setDeductFromVault] = useState<boolean>(true);
+  const [isGoalFundEnabled, setIsGoalFundEnabled] = useState<boolean>(false);
+  const [goalFundAllocations, setGoalFundAllocations] = useState<Record<string, string>>({});
   const [goalAllocationAmount, setGoalAllocationAmount] = useState<string>('');
   const [selectedFolderId, setSelectedFolderId] = useState<string>('');
   const [toAccountId, setToAccountId] = useState<string>('');
@@ -410,8 +410,23 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             : ''
         );
         setSelectedFolderId(tx.folderId || '');
-        setSelectedFundVaultId(tx.vaultId || '');
-        setDeductFromVault(false);
+        const hasGoalFunding = Boolean((tx.goalFundedAmount && tx.goalFundedAmount > 0) || (tx.vaultId && tx.type === 'expense'));
+        setIsGoalFundEnabled(hasGoalFunding);
+        if (hasGoalFunding) {
+          if (tx.goalAllocations && Object.keys(tx.goalAllocations).length > 0) {
+            const mapped: Record<string, string> = {};
+            Object.entries(tx.goalAllocations).forEach(([k, v]) => {
+              mapped[k] = v.toString();
+            });
+            setGoalFundAllocations(mapped);
+          } else if (tx.vaultId) {
+            setGoalFundAllocations({
+              [tx.vaultId]: (tx.goalFundedAmount || tx.amount).toString(),
+            });
+          }
+        } else {
+          setGoalFundAllocations({});
+        }
         setSelectedTag(tx.tag || '');
         setCustomTagInput('');
         setDebtPerson(tx.borrowerOrLender || '');
@@ -465,8 +480,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
         setMerchant(initialNote || '');
         setSelectedAccountId(initialFromAccountId || '');
         setSelectedGoalId('');
-        setSelectedFundVaultId('');
-        setDeductFromVault(true);
+        setIsGoalFundEnabled(false);
+        setGoalFundAllocations({});
         setGoalAllocationAmount('');
         setGoalAllocations({});
         setSelectedFolderId('');
@@ -526,6 +541,14 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
       : numAmount > 0 ? Math.round((numAmount * 100) / 2) / 100 : 0;
   const totalFriendsEntered = splitFriends.reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0);
   const friendsShare = totalFriendsEntered > 0 ? totalFriendsEntered : Math.max(0, numAmount - numYourShare);
+
+  const totalGoalFunded = useMemo(() => {
+    if (!isGoalFundEnabled) return 0;
+    return Object.entries(goalFundAllocations).reduce((sum, [, amtStr]) => {
+      const val = parseFloat(amtStr);
+      return !isNaN(val) && val > 0 ? sum + val : sum;
+    }, 0);
+  }, [isGoalFundEnabled, goalFundAllocations]);
 
   const handleAmountChange = (text: string) => {
     setAmount(text);
@@ -954,6 +977,35 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
         }
       }
 
+      // Parse active goal fund allocations
+      const activeFundAllocations: Record<string, number> = {};
+      let finalFundedSum = 0;
+      let primaryVaultId: string | undefined = undefined;
+      let maxAlloc = 0;
+
+      if (isGoalFundEnabled) {
+        Object.entries(goalFundAllocations).forEach(([vaultId, amtStr]) => {
+          const val = parseFloat(amtStr);
+          if (!isNaN(val) && val > 0) {
+            activeFundAllocations[vaultId] = val;
+            finalFundedSum += val;
+            if (val > maxAlloc) {
+              maxAlloc = val;
+              primaryVaultId = vaultId;
+            }
+          }
+        });
+      }
+
+      const isFullyFunded = finalFundedSum >= numAmount;
+
+      // Auto-withdraw from allocated vaults for new transactions
+      if (!initialTransaction && isGoalFundEnabled && finalFundedSum > 0) {
+        Object.entries(activeFundAllocations).forEach(([vaultId, allocAmt]) => {
+          withdrawFromVault(vaultId, allocAmt, selectedAccountId);
+        });
+      }
+
       if (isSplitEnabled) {
         const existingFriends = initialTransaction?.split?.friends || [];
         const mappedFriends = splitFriends
@@ -992,8 +1044,10 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             accountId: selectedAccountId,
             folderId: selectedFolderId || undefined,
             folderName: selectedFolderObj?.name || undefined,
-            vaultId: selectedFundVaultId || undefined,
-            excludeFromBudget: Boolean(selectedFundVaultId),
+            vaultId: primaryVaultId || undefined,
+            goalFundedAmount: finalFundedSum > 0 ? Math.min(finalFundedSum, numAmount) : undefined,
+            goalAllocations: Object.keys(activeFundAllocations).length > 0 ? activeFundAllocations : undefined,
+            excludeFromBudget: isFullyFunded,
             date: format(txDate, 'yyyy-MM-dd'),
             merchant: finalMerchant || `Split with ${friendNamesStr}`,
             note: finalNote || undefined,
@@ -1002,9 +1056,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             subscriptionId: linkedSubscriptionId,
           });
         } else {
-          if (selectedFundVaultId && deductFromVault && numAmount > 0) {
-            withdrawFromVault(selectedFundVaultId, numAmount, selectedAccountId);
-          }
           addTransaction({
             amount: numAmount,
             type: 'expense',
@@ -1012,8 +1063,10 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             accountId: selectedAccountId,
             folderId: selectedFolderId || undefined,
             folderName: selectedFolderObj?.name || undefined,
-            vaultId: selectedFundVaultId || undefined,
-            excludeFromBudget: Boolean(selectedFundVaultId),
+            vaultId: primaryVaultId || undefined,
+            goalFundedAmount: finalFundedSum > 0 ? Math.min(finalFundedSum, numAmount) : undefined,
+            goalAllocations: Object.keys(activeFundAllocations).length > 0 ? activeFundAllocations : undefined,
+            excludeFromBudget: isFullyFunded,
             date: format(txDate, 'yyyy-MM-dd'),
             merchant: finalMerchant || `Split with ${friendNamesStr}`,
             note: finalNote || undefined,
@@ -1028,8 +1081,10 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
           updateTransaction(initialTransaction.id, {
             amount: numAmount,
             type: isVaultTx ? initialTransaction.type : 'expense',
-            vaultId: selectedFundVaultId ? selectedFundVaultId : (isVaultTx ? initialTransaction.vaultId : undefined),
-            excludeFromBudget: Boolean(selectedFundVaultId),
+            vaultId: primaryVaultId ? primaryVaultId : (isVaultTx ? initialTransaction.vaultId : undefined),
+            goalFundedAmount: finalFundedSum > 0 ? Math.min(finalFundedSum, numAmount) : undefined,
+            goalAllocations: Object.keys(activeFundAllocations).length > 0 ? activeFundAllocations : undefined,
+            excludeFromBudget: isFullyFunded,
             categoryId: selectedCategoryId,
             accountId: selectedAccountId,
             folderId: selectedFolderId || undefined,
@@ -1042,9 +1097,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             subscriptionId: linkedSubscriptionId,
           });
         } else {
-          if (selectedFundVaultId && deductFromVault && numAmount > 0) {
-            withdrawFromVault(selectedFundVaultId, numAmount, selectedAccountId);
-          }
           const quickAddResult = createExpense({
             amount: numAmount,
             categoryId: selectedCategoryId,
@@ -1056,8 +1108,10 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             note: finalNote || (finalMerchant ? undefined : (selectedCatObj?.name || 'Expense')),
             tag: finalTag || undefined,
             subscriptionId: linkedSubscriptionId,
-            vaultId: selectedFundVaultId || undefined,
-            excludeFromBudget: Boolean(selectedFundVaultId),
+            vaultId: primaryVaultId || undefined,
+            goalFundedAmount: finalFundedSum > 0 ? Math.min(finalFundedSum, numAmount) : undefined,
+            goalAllocations: Object.keys(activeFundAllocations).length > 0 ? activeFundAllocations : undefined,
+            excludeFromBudget: isFullyFunded,
           });
           if (!quickAddResult.ok) {
             await rollbackRef.current?.();
@@ -1313,17 +1367,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
     })),
     { id: '__CREATE_GOAL__', title: '+ Create New Goal...', image: 'plus.circle.fill' as any },
   ];
-
-  const fundingGoalActions: MenuAction[] = [
-    { id: '', title: 'None (Count in Monthly Budget)', image: 'xmark.circle' as any },
-    ...savingsVaults.map((vault) => ({
-      id: vault.id,
-      title: `${vault.emoji} ${vault.name} • Available: ${sym}${vault.currentAmount.toLocaleString('en-IN')}`,
-      image: 'shield.fill' as any,
-      state: (selectedFundVaultId === vault.id ? 'on' : 'off') as 'on' | 'off',
-    })),
-  ];
-  const selectedFundVault = savingsVaults.find((v) => v.id === selectedFundVaultId);
 
   const modeThemeColor = expenseColors.accentPeach;
 
@@ -1987,61 +2030,145 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             </View>
           )}
 
-          {/* ── SAVINGS GOAL FUNDING (Only in Expense Mode, when vaults exist) ── */}
+          {/* ── FUND FROM SAVINGS GOALS (Expense Mode) ── */}
           {tabMode === 'expense' && savingsVaults.length > 0 && (
-            <View style={styles.section}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <AppText style={styles.label}>PAID FROM SAVINGS GOAL (OPTIONAL)</AppText>
-                {selectedFundVault && (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                    <Shield size={11} color="#8CD9C8" />
-                    <AppText style={{ fontSize: 11, color: '#8CD9C8', fontFamily: 'PlusJakartaSans-SemiBold' }}>
-                      Budget Protected
-                    </AppText>
+            <View style={styles.goalFundContainer}>
+              <View style={styles.goalFundToggleRow}>
+                <View style={{ flex: 1, paddingRight: 8 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                    <Shield size={13} color={isGoalFundEnabled ? '#8CD9C8' : '#8E919D'} />
+                    <AppText style={styles.goalFundToggleTitle}>FUND FROM SAVINGS GOAL</AppText>
                   </View>
-                )}
-              </View>
-              <NativeLiquidMenu
-                title="Paid from Savings Goal"
-                actions={fundingGoalActions}
-                onSelect={(vaultId) => {
-                  Haptics.selectionAsync().catch(() => {});
-                  setSelectedFundVaultId(vaultId);
-                  if (vaultId) {
-                    const v = savingsVaults.find((s) => s.id === vaultId);
-                    setDeductFromVault((v?.currentAmount || 0) >= numAmount);
-                  }
-                }}
-                style={{ alignSelf: 'stretch' }}
-              >
-                <View style={styles.dropdownTrigger}>
-                  <View style={styles.dropdownTriggerLeft}>
-                    <AppText style={styles.dropdownTriggerValue} numberOfLines={1}>
-                      {selectedFundVault
-                        ? `${selectedFundVault.emoji} ${selectedFundVault.name} • Saved: ${sym}${selectedFundVault.currentAmount.toLocaleString('en-IN')}`
-                        : 'None (Count in Monthly Budget)'}
-                    </AppText>
-                  </View>
-                  <ChevronDown size={15} color="#7E8394" />
+                  <AppText style={styles.goalFundToggleSubtitle}>
+                    {isGoalFundEnabled
+                      ? totalGoalFunded > 0
+                        ? `${sym}${totalGoalFunded.toLocaleString('en-IN')} pre-funded • ${totalGoalFunded >= numAmount ? '100% covered' : `${sym}${Math.max(0, numAmount - totalGoalFunded).toLocaleString('en-IN')} from budget`}`
+                        : 'Select goal(s) to fund this spend'
+                      : 'Pay 100% from monthly living budget'}
+                  </AppText>
                 </View>
-              </NativeLiquidMenu>
+                <Switch
+                  value={isGoalFundEnabled}
+                  onValueChange={(val) => {
+                    Haptics.selectionAsync().catch(() => {});
+                    setIsGoalFundEnabled(val);
+                    if (!val) {
+                      setGoalFundAllocations({});
+                    } else if (savingsVaults.length === 1 && numAmount > 0) {
+                      const v = savingsVaults[0];
+                      const alloc = Math.min(numAmount, v.currentAmount);
+                      setGoalFundAllocations({ [v.id]: (alloc > 0 ? alloc : numAmount).toString() });
+                    }
+                  }}
+                  trackColor={{ false: '#2B2E3D', true: '#8CD9C8' }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
 
-              {selectedFundVault && !initialTransaction && (
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, paddingVertical: 8, paddingHorizontal: 12, backgroundColor: '#181A22', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.06)' }}>
-                  <View style={{ flex: 1, marginRight: 10 }}>
-                    <AppText style={{ fontSize: 12, color: '#FFFFFF', fontFamily: 'PlusJakartaSans-SemiBold' }}>
-                      Deduct from goal balance
-                    </AppText>
-                    <AppText style={{ fontSize: 11, color: '#8E919D', marginTop: 1 }}>
-                      Auto-withdraws {sym}{numAmount.toLocaleString('en-IN')} from {selectedFundVault.name}
-                    </AppText>
-                  </View>
-                  <Switch
-                    value={deductFromVault}
-                    onValueChange={(val) => setDeductFromVault(val)}
-                    trackColor={{ false: '#2B2E3D', true: '#8CD9C8' }}
-                    thumbColor="#FFFFFF"
-                  />
+              {isGoalFundEnabled && (
+                <View style={styles.goalFundBody}>
+                  {savingsVaults.map((vault) => {
+                    const allocStr = goalFundAllocations[vault.id];
+                    const isAllocated = allocStr !== undefined;
+                    const allocVal = parseFloat(allocStr || '0') || 0;
+
+                    return (
+                      <View key={vault.id} style={[styles.goalFundCard, isAllocated && styles.goalFundCardActive]}>
+                        <TouchableOpacity
+                          style={styles.goalFundCardHeader}
+                          activeOpacity={0.7}
+                          onPress={() => {
+                            Haptics.selectionAsync().catch(() => {});
+                            setGoalFundAllocations((prev) => {
+                              const next = { ...prev };
+                              if (next[vault.id] !== undefined) {
+                                delete next[vault.id];
+                              } else {
+                                const alreadyAllocated = Object.entries(next).reduce(
+                                  (sum, [, val]) => sum + (parseFloat(val) || 0),
+                                  0
+                                );
+                                const needed = Math.max(0, numAmount - alreadyAllocated);
+                                const suggested = Math.min(needed > 0 ? needed : numAmount, vault.currentAmount);
+                                next[vault.id] = (suggested > 0 ? suggested : (numAmount > 0 ? numAmount : 1000)).toString();
+                              }
+                              return next;
+                            });
+                          }}
+                        >
+                          <View style={styles.goalFundLeft}>
+                            <View style={[styles.goalCheckbox, isAllocated && styles.goalCheckboxActive]}>
+                              {isAllocated && <Check size={12} color="#0D0E12" strokeWidth={3} />}
+                            </View>
+                            <AppText style={{ fontSize: 16 }}>{vault.emoji}</AppText>
+                            <View style={{ flex: 1 }}>
+                              <AppText style={styles.goalFundName} numberOfLines={1}>
+                                {vault.name}
+                              </AppText>
+                              <AppText style={styles.goalFundBalance}>
+                                Saved: {sym}{vault.currentAmount.toLocaleString('en-IN')}
+                              </AppText>
+                            </View>
+                          </View>
+                          <AppText style={[styles.goalFundStatus, isAllocated && { color: '#8CD9C8' }]}>
+                            {isAllocated ? `${sym}${allocVal.toLocaleString('en-IN')}` : 'Not used'}
+                          </AppText>
+                        </TouchableOpacity>
+
+                        {isAllocated && (
+                          <View style={styles.goalFundInputRow}>
+                            <View style={styles.goalFundInputWrapper}>
+                              <AppText style={styles.goalFundCurrency}>{sym}</AppText>
+                              <TextInput
+                                style={styles.goalFundTextInput}
+                                value={allocStr}
+                                placeholder="0"
+                                placeholderTextColor="#5E6272"
+                                keyboardType="numeric"
+                                onChangeText={(t) => {
+                                  setGoalFundAllocations((prev) => ({
+                                    ...prev,
+                                    [vault.id]: t,
+                                  }));
+                                }}
+                              />
+                            </View>
+                            <TouchableOpacity
+                              style={styles.goalFundMaxChip}
+                              activeOpacity={0.7}
+                              onPress={() => {
+                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                                const maxPossible = Math.min(numAmount > 0 ? numAmount : vault.currentAmount, vault.currentAmount);
+                                setGoalFundAllocations((prev) => ({
+                                  ...prev,
+                                  [vault.id]: maxPossible.toString(),
+                                }));
+                              }}
+                            >
+                              <AppText style={styles.goalFundMaxText}>Max ({sym}{vault.currentAmount.toLocaleString('en-IN')})</AppText>
+                            </TouchableOpacity>
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })}
+
+                  {numAmount > 0 && (
+                    <View style={styles.goalFundSummaryBar}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
+                        <AppText style={{ fontSize: 11, color: '#8E919D' }}>Pre-funded by Goals:</AppText>
+                        <AppText style={{ fontSize: 11, color: '#8CD9C8', fontFamily: 'PlusJakartaSans-SemiBold' }}>
+                          {sym}{Math.min(totalGoalFunded, numAmount).toLocaleString('en-IN')}
+                        </AppText>
+                      </View>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                        <AppText style={{ fontSize: 11, color: '#8E919D' }}>From Monthly Living Budget:</AppText>
+                        <AppText style={{ fontSize: 11, color: totalGoalFunded >= numAmount ? '#8CD9C8' : '#FF9D66', fontFamily: 'PlusJakartaSans-SemiBold' }}>
+                          {sym}{Math.max(0, numAmount - totalGoalFunded).toLocaleString('en-IN')}
+                        </AppText>
+                      </View>
+                    </View>
+                  )}
                 </View>
               )}
             </View>
@@ -3620,6 +3747,132 @@ const styles = StyleSheet.create({
     color: '#FF9D66',
     fontSize: 11,
     fontWeight: '700',
+  },
+
+  // ── Goal Funding Card ──
+  goalFundContainer: {
+    backgroundColor: '#1A1D23',
+    borderRadius: 18,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.07)',
+    marginBottom: 16,
+  },
+  goalFundToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  goalFundToggleTitle: {
+    color: '#D1D5DB',
+    fontSize: 12,
+    fontFamily: 'PlusJakartaSans-SemiBold',
+    letterSpacing: 0.5,
+  },
+  goalFundToggleSubtitle: {
+    color: '#8E919D',
+    fontSize: 11,
+    marginTop: 2,
+    lineHeight: 15,
+  },
+  goalFundBody: {
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  goalFundCard: {
+    backgroundColor: '#13151B',
+    borderRadius: 14,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.05)',
+    marginBottom: 8,
+  },
+  goalFundCardActive: {
+    borderColor: 'rgba(140, 217, 200, 0.3)',
+    backgroundColor: 'rgba(140, 217, 200, 0.04)',
+  },
+  goalFundCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  goalFundLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  goalFundName: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontFamily: 'PlusJakartaSans-SemiBold',
+  },
+  goalFundBalance: {
+    color: '#7E8394',
+    fontSize: 11,
+    marginTop: 1,
+  },
+  goalFundStatus: {
+    fontSize: 12,
+    color: '#656A7A',
+    fontFamily: 'PlusJakartaSans-SemiBold',
+    marginLeft: 8,
+  },
+  goalFundInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  goalFundInputWrapper: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1E212A',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    height: 38,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  goalFundCurrency: {
+    color: '#8E919D',
+    fontSize: 13,
+    fontFamily: 'PlusJakartaSans-Bold',
+    marginRight: 4,
+  },
+  goalFundTextInput: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontFamily: 'PlusJakartaSans-SemiBold',
+    paddingVertical: 0,
+  },
+  goalFundMaxChip: {
+    backgroundColor: 'rgba(140, 217, 200, 0.12)',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(140, 217, 200, 0.25)',
+  },
+  goalFundMaxText: {
+    color: '#8CD9C8',
+    fontSize: 11,
+    fontFamily: 'PlusJakartaSans-SemiBold',
+  },
+  goalFundSummaryBar: {
+    backgroundColor: '#12141A',
+    borderRadius: 10,
+    padding: 10,
+    marginTop: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.04)',
   },
 
   // ── Split Bill Card ──

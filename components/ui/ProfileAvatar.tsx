@@ -10,10 +10,12 @@ import Svg, {
   LinearGradient,
   Stop,
 } from 'react-native-svg';
-import { AVATAR_OPTIONS, AvatarOption } from '@/constants/avatars';
+import { Image } from 'expo-image';
+import { AVATAR_OPTIONS, AvatarOption, resolveAvatar } from '@/constants/avatars';
+import { AVATAR_3D_IMAGES } from '@/constants/avatarImages';
 import AppText from './AppText';
 
-interface ProfileAvatarProps {
+export interface ProfileAvatarProps {
   avatarId?: string | null;
   name?: string;
   size?: number;
@@ -276,7 +278,37 @@ export const ProfileAvatar: React.FC<ProfileAvatarProps> = ({
   style,
   showBorder = true,
 }) => {
-  const avatar = AVATAR_OPTIONS.find((a) => a.id === avatarId) || AVATAR_OPTIONS[0];
+  const avatar = resolveAvatar(avatarId);
+  const imageSource = avatarId
+    ? (AVATAR_3D_IMAGES[avatarId] || AVATAR_3D_IMAGES[avatar.id])
+    : AVATAR_3D_IMAGES[avatar.id];
+
+  // 1. Render 3D Vinyl Collectible Image if available
+  if (imageSource) {
+    return (
+      <View
+        style={[
+          styles.container,
+          {
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            backgroundColor: avatar.bgColor,
+            borderColor: showBorder ? `${avatar.accentColor}66` : 'transparent',
+            borderWidth: showBorder ? 1.5 : 0,
+          },
+          style,
+        ]}
+      >
+        <Image
+          source={imageSource}
+          style={{ width: '100%', height: '100%', borderRadius: size / 2 }}
+          contentFit="cover"
+          transition={120}
+        />
+      </View>
+    );
+  }
 
   const svgInnerSize = Math.round(size * 0.62);
 

@@ -4,6 +4,7 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Pressable,
   Platform,
   StatusBar,
 } from 'react-native';
@@ -39,6 +40,15 @@ import { SplitDetailsModal } from '@/components/expense/SplitDetailsModal';
 import { format, isToday, isYesterday, parseISO } from 'date-fns';
 
 type FilterType = 'all' | 'expense' | 'income' | 'transfer' | 'debt';
+
+const formatSplitSubtitle = (friendNames?: string): string => {
+  if (!friendNames) return 'Split with friends';
+  const names = friendNames.split(',').map((n) => n.trim()).filter(Boolean);
+  if (names.length === 0) return 'Split with friends';
+  if (names.length === 1) return `Split with ${names[0]}`;
+  if (names.length === 2) return `Split with ${names[0]} & ${names[1]}`;
+  return `Split with ${names[0]} +${names.length - 1} others`;
+};
 
 export default function AccountDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -495,8 +505,10 @@ export default function AccountDetailScreen() {
                         ? `Lent to ${tx.borrowerOrLender || 'Friend'}`
                         : `Borrowed from ${tx.borrowerOrLender || 'Friend'}`;
                     } else if (tx.split) {
-                      subtitle = `Split with ${tx.split.friendNames || 'Friends'}`;
+                      subtitle = formatSplitSubtitle(tx.split.friendNames);
                     }
+
+                    let txPressStartTime = 0;
 
                     return (
                       <NativeLiquidMenu
@@ -506,13 +518,17 @@ export default function AccountDetailScreen() {
                         shouldOpenOnLongPress={true}
                         onSelect={(actionId) => handleActionSelect(actionId, tx)}
                       >
-                        <TouchableOpacity
-                          style={[
+                        <Pressable
+                          style={({ pressed }) => [
                             styles.txRow,
                             idx < txList.length - 1 && styles.txRowBorder,
+                            pressed && { opacity: 0.7 },
                           ]}
-                          activeOpacity={0.7}
+                          onPressIn={() => {
+                            txPressStartTime = Date.now();
+                          }}
                           onPress={() => {
+                            if (Date.now() - txPressStartTime > 280) return;
                             Haptics.selectionAsync().catch(() => {});
                             router.push(`/transaction/${tx.id}`);
                           }}
@@ -544,12 +560,12 @@ export default function AccountDetailScreen() {
                               {amountPrefix}{formatAmount(tx.amount)}
                             </AppText>
                             {tx.split && (
-                              <AppText style={styles.txYourShareText}>
+                              <AppText style={styles.txYourShareText} numberOfLines={1}>
                                 Share: {formatAmount(tx.split.yourShare)}
                               </AppText>
                             )}
                           </View>
-                        </TouchableOpacity>
+                        </Pressable>
                       </NativeLiquidMenu>
                     );
                   })}
@@ -840,6 +856,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     gap: 3,
+    marginRight: 8,
   },
   txTitle: {
     color: '#FFFFFF',
@@ -850,6 +867,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    minWidth: 0,
+    flexShrink: 1,
   },
   txSubtitle: {
     color: expenseColors.textMuted,
@@ -862,6 +881,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 6,
+    flexShrink: 0,
   },
   txTagText: {
     color: '#A0A5B5',
@@ -872,6 +892,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     gap: 2,
     flexShrink: 0,
+    minWidth: 72,
   },
   txAmountText: {
     fontSize: 15,

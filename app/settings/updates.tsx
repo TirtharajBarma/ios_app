@@ -326,13 +326,15 @@ export default function UpdatesScreen() {
 
                 <View style={styles.separator} />
 
-                <AppText style={styles.bodyDescription}>
-                  {availableRelease?.summary ||
-                    'This update includes verified performance optimizations, bug fixes, and user interface enhancements.'}
-                </AppText>
+                {(!availableRelease?.notes || availableRelease.notes.length === 0) && (
+                  <AppText style={styles.bodyDescription}>
+                    {availableRelease?.summary ||
+                      'This update includes verified performance optimizations, bug fixes, and user interface enhancements.'}
+                  </AppText>
+                )}
 
                 {availableRelease?.notes && availableRelease.notes.length > 0 && (
-                  <View style={styles.releaseNotesBox}>
+                  <View style={[styles.releaseNotesBox, { marginTop: 0 }]}>
                     <AppText style={styles.releaseNotesTitle}>What's New</AppText>
                     {availableRelease.notes.map((note, idx) => (
                       <View key={idx} style={styles.bulletRow}>
@@ -480,7 +482,7 @@ export default function UpdatesScreen() {
               <AppText style={styles.rowLabel}>Bundle ID</AppText>
               <View style={styles.rowValueWithIcon}>
                 <AppText style={[styles.rowValue, styles.monospaceText]}>
-                  {updateId ? `#${updateId.slice(0, 10)}…` : isEmbeddedLaunch ? 'Embedded' : 'Live Bundle'}
+                  {updateId ? `#…${updateId.slice(-8)}` : isEmbeddedLaunch ? 'Embedded' : 'Live Bundle'}
                 </AppText>
                 {updateId && (
                   copiedHash ? (

@@ -198,7 +198,7 @@ export function getCreditCardDueStatus(
         isUnbilled = false;
       }
     } else {
-      // Current day is past this month's due day (e.g. today is 9th, dueDay was 4th)
+      // Current day is past this month's due day (e.g. today is 28th, dueDay was 25th)
       const daysPassed = Math.abs(diffDaysThisMonth);
       const nextMonthYear = currentMonth === 11 ? currentYear + 1 : currentYear;
       const nextMonth = currentMonth === 11 ? 0 : currentMonth + 1;
@@ -206,46 +206,24 @@ export function getCreditCardDueStatus(
       const nextMonthDueDate = new Date(nextMonthYear, nextMonth, Math.min(dueDay, nextMaxDays), 0, 0, 0, 0);
       const daysUntilNextDue = Math.round((nextMonthDueDate.getTime() - todayMidnight.getTime()) / (1000 * 60 * 60 * 24));
 
-      if (billingDay && billingDay > dueDay) {
-        // e.g. Bill 17th, Due 4th
-        targetDueDate = nextMonthDueDate;
-        daysDiff = daysUntilNextDue;
-        status = 'upcoming';
+      // A card past due day with an unpaid billed balance is strictly OVERDUE
+      const hasBilledDebt = unbilledAmount !== undefined ? (dueAmount - unbilledAmount > 0) : (dueAmount > 0);
 
-        if (currentDay < billingDay) {
-          // Between due day and billing day (e.g. Oct 5 - Oct 16):
-          // Fresh spend is UNBILLED. It will be billed on the 17th and payable on next month's 4th.
-          isUnbilled = true;
-          badgeLabel = `Bill: ${getOrdinalDay(billingDay)}`;
-          isUrgent = false;
-        } else {
-          // Bill has generated on the 17th, payable on next month's 4th
-          isUnbilled = false;
-          badgeLabel = daysDiff === 1 ? 'Due Tomorrow' : `Due in ${daysDiff}d`;
-          isUrgent = daysDiff <= 3;
-        }
-      } else if (billingDay && billingDay <= dueDay) {
-        // e.g. Bill 5th, Due 25th, today is 28th
-        // Past this month's due day; next statement is on 5th of next month, due on 25th of next month
-        targetDueDate = nextMonthDueDate;
-        daysDiff = daysUntilNextDue;
-        status = 'upcoming';
-        isUnbilled = true;
-        badgeLabel = `Bill: ${getOrdinalDay(billingDay)}`;
-        isUrgent = false;
-      } else if (daysPassed > 15) {
-        // No billingDay configured, but more than 15 days passed: assume next cycle
-        targetDueDate = nextMonthDueDate;
-        daysDiff = daysUntilNextDue;
-        status = 'upcoming';
-        badgeLabel = daysDiff === 1 ? 'Due Tomorrow' : `Due in ${daysDiff}d`;
-        isUrgent = daysDiff <= 3;
-      } else {
-        // No billingDay configured and < 15 days: mark as overdue
+      if (hasBilledDebt) {
         status = 'overdue';
         badgeLabel = daysPassed === 1 ? 'Overdue 1d' : `Overdue ${daysPassed}d`;
         isUrgent = true;
         daysDiff = -daysPassed;
+        targetDueDate = thisMonthDueDate;
+        isUnbilled = false;
+      } else {
+        // Statement was settled; remaining due balance is purely unbilled spend for the next cycle
+        targetDueDate = nextMonthDueDate;
+        daysDiff = daysUntilNextDue;
+        status = 'upcoming';
+        isUnbilled = true;
+        badgeLabel = billingDay ? `Bill: ${getOrdinalDay(billingDay)}` : `Due in ${daysDiff}d`;
+        isUrgent = false;
       }
     }
   }

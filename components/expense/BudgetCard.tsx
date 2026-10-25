@@ -14,7 +14,7 @@ import { AppText } from '@/components/ui';
 import { useRouter } from 'expo-router';
 import { useExpenseStore, monthKeyToYearMonth } from '@/store/useExpenseStore';
 import { useSubscriptionStore } from '@/store/useSubscriptionStore';
-import { getUpcomingFixedSubscriptions, isFixedCommitmentCategory } from '@/utils/coachInsight';
+import { getUpcomingFixedSubscriptions, getUpcomingFixedCommitments, isFixedCommitmentCategory } from '@/utils/coachInsight';
 import { useShallow } from 'zustand/react/shallow';
 import { expenseColors } from '@/constants/expenseColors';
 import { formatCompactCurrency } from './MoneyFlowCard';
@@ -35,6 +35,7 @@ export const BudgetCard: React.FC = () => {
     categoryBudgets,
     transactions,
     categories,
+    accounts,
     getBudgetBufferAnalysis,
   } = useExpenseStore(
     useShallow((s) => ({
@@ -48,6 +49,7 @@ export const BudgetCard: React.FC = () => {
       categoryBudgets: s.categoryBudgets,
       transactions: s.transactions,
       categories: s.categories,
+      accounts: s.accounts,
       getBudgetBufferAnalysis: s.getBudgetBufferAnalysis,
     }))
   );
@@ -238,9 +240,18 @@ export const BudgetCard: React.FC = () => {
   const currentDay = isCurrentMonth ? now.getDate() : isPastMonth ? daysInMonth : 0;
   const daysRemaining = isCurrentMonth ? Math.max(1, daysInMonth - currentDay + 1) : isPastMonth ? 0 : daysInMonth;
 
-  // Upcoming fixed commitments (subscriptions with user split share respected)
+  // Upcoming fixed commitments (subscriptions, unpaid card dues, and recurring Rent/EMI)
   const upcomingFixed = isCurrentMonth
-    ? getUpcomingFixedSubscriptions(subscriptions, now, currencyCode || 'INR')
+    ? getUpcomingFixedCommitments({
+        subscriptions,
+        categories,
+        categoryBudgets,
+        transactions,
+        accounts,
+        now,
+        selectedMonth,
+        currencyCode: currencyCode || 'INR',
+      }).total
     : 0;
 
   // ─────────────────────────────────────────────────────────
@@ -280,9 +291,9 @@ export const BudgetCard: React.FC = () => {
     // Unselected state
     if (effectiveBudget > 0) {
       if (bufferAnalysis.status === 'buffer') {
-        centerTitle = 'BUFFER ACTIVE';
-        centerAmount = formatCompactCurrency(bufferAnalysis.bufferRemaining, sym);
-        centerFootnote = `${formatCompactCurrency(bufferAnalysis.bufferUsed, sym)} of ${formatCompactCurrency(bufferAnalysis.bufferLimit, sym)} buffer used`;
+        centerTitle = isPastMonth ? 'ENDED IN BUFFER' : 'BUFFER LEFT';
+        centerAmount = `${sym}${bufferAnalysis.bufferRemaining.toLocaleString('en-IN')}`;
+        centerFootnote = `${sym}${bufferAnalysis.bufferUsed.toLocaleString('en-IN')} of ${sym}${bufferAnalysis.bufferLimit.toLocaleString('en-IN')} buffer used`;
         isCenterBuffer = true;
       } else if (bufferAnalysis.status === 'deficit') {
         centerTitle = 'OVER BUFFER';
@@ -320,6 +331,10 @@ export const BudgetCard: React.FC = () => {
   const budgetRunway = Math.max(0, effectiveBudget - totalSpent);
   const netBudgetRunway = Math.max(0, budgetRunway - upcomingFixed);
   const safeDailyPace = effectiveBudget > 0 && daysRemaining > 0 ? Math.max(0, Math.round(netBudgetRunway / daysRemaining)) : 0;
+  const bufferDailyPace =
+    daysRemaining > 0 && bufferAnalysis.bufferRemaining > 0
+      ? Math.max(0, Math.round(Math.max(0, bufferAnalysis.bufferRemaining - upcomingFixed) / daysRemaining))
+      : 0;
 
   // Over-pacing: at today's average variable burn, the rest of the month would use more than the budget that is left
   // (15% tolerance). Needs at least 3 days elapsed to avoid Day 1 false alarms.
@@ -596,7 +611,7 @@ export const BudgetCard: React.FC = () => {
               <AppText style={styles.pacingPastText}>
                 {totalSpent > effectiveBudget
                   ? bufferAnalysis.status === 'buffer'
-                    ? `Ended in buffer • ${sym}${bufferAnalysis.bufferUsed.toLocaleString('en-IN')} cushion used`
+                    ? `Ended in buffer • ${sym}${bufferAnalysis.bufferUsed.toLocaleString('en-IN')} buffer used`
                     : `Limit exceeded by ${sym}${(totalSpent - effectiveBudget).toLocaleString('en-IN')}`
                   : `Ended within budget • ${sym}${(effectiveBudget - totalSpent).toLocaleString('en-IN')} saved`}
               </AppText>
@@ -616,10 +631,12 @@ export const BudgetCard: React.FC = () => {
                       : expenseColors.accentGreen
                   }
                 />
-                <AppText style={styles.pacingValueText}>
-                  {sym} {safeDailyPace.toLocaleString('en-IN')}/day
+                <AppText style={[styles.pacingValueText, bufferAnalysis.status === 'buffer' && { color: '#FBBF24' }]}>
+                  {sym} {(bufferAnalysis.status === 'buffer' ? bufferDailyPace : safeDailyPace).toLocaleString('en-IN')}/day
                 </AppText>
-                <AppText style={styles.pacingLabelText}>daily limit</AppText>
+                <AppText style={styles.pacingLabelText}>
+                  {bufferAnalysis.status === 'buffer' ? 'buffer pace' : 'daily limit'}
+                </AppText>
               </View>
 
               <View
@@ -649,7 +666,7 @@ export const BudgetCard: React.FC = () => {
                   {bufferAnalysis.status === 'deficit'
                     ? 'Buffer Exceeded'
                     : bufferAnalysis.status === 'buffer'
-                    ? `Buffer • ${formatCompactCurrency(bufferAnalysis.bufferRemaining, sym)} left`
+                    ? 'Buffer Active'
                     : isOverPacing
                     ? `Burnout ~Day ${projectedBurnoutDay}`
                     : fixedSpent > 0 && variableSpent === 0

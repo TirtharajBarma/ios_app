@@ -36,7 +36,7 @@ export default function PersonalizationScreen() {
   const [nameInput, setNameInput] = useState(userName);
   const [emailInput, setEmailInput] = useState(userEmail);
   const [taglineInput, setTaglineInput] = useState(userTagline);
-  const [selectedAvatar, setSelectedAvatar] = useState(userAvatarId || "avatar_solaris");
+  const [selectedAvatar, setSelectedAvatar] = useState(userAvatarId || "avatar_astro");
   const [saved, setSaved] = useState(false);
   
   const scrollRef = useRef<ScrollView>(null);
@@ -48,7 +48,7 @@ export default function PersonalizationScreen() {
     setNameInput(userName);
     setEmailInput(userEmail);
     setTaglineInput(userTagline);
-    setSelectedAvatar(userAvatarId || "avatar_solaris");
+    setSelectedAvatar(userAvatarId || "avatar_astro");
   }, [userName, userEmail, userTagline, userAvatarId]);
 
   const handleSave = async () => {
@@ -69,7 +69,7 @@ export default function PersonalizationScreen() {
     nameInput.trim() !== userName ||
     emailInput.trim() !== userEmail ||
     taglineInput.trim() !== userTagline ||
-    selectedAvatar !== (userAvatarId || "avatar_solaris");
+    selectedAvatar !== (userAvatarId || "avatar_astro");
 
   const handleFocus = (offset: number) => {
     setTimeout(() => {

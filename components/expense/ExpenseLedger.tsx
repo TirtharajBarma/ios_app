@@ -4,6 +4,7 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Pressable,
   TextInput,
   Modal,
   Platform,
@@ -45,7 +46,7 @@ import { BlurView } from 'expo-blur';
 import * as Clipboard from 'expo-clipboard';
 import { AppText, NativeLiquidMenu } from '@/components/ui';
 import type { MenuAction } from '@/components/ui';
-import { useExpenseStore, compareTransactions, getUserCategories } from '@/store/useExpenseStore';
+import { useExpenseStore, compareTransactions, getUserCategories, DEFAULT_INCOME_CATEGORIES } from '@/store/useExpenseStore';
 import { useSettingsStore } from '@/store/useSettingsStore';
 import { ReviewPendingModal } from './ReviewPendingModal';
 import { useShallow } from 'zustand/react/shallow';
@@ -312,10 +313,16 @@ export const ExpenseLedger: React.FC = () => {
   const filteredTxs = useMemo(() => {
     let list = getFilteredTransactions();
     if (selectedCategoryFilter !== 'All') {
-      list = list.filter((t) =>
-        t.categoryId === selectedCategoryFilter ||
-        (selectedCategoryFilter === 'cat_split_return' && Boolean(t.settledTxId?.startsWith('split_settle:')))
-      );
+      list = list.filter((t) => {
+        if (t.categoryId === selectedCategoryFilter) return true;
+        if (selectedCategoryFilter === 'cat_split_return' && Boolean(t.settledTxId?.startsWith('split_settle:'))) return true;
+        if (
+          selectedCategoryFilter === 'cat_salary' &&
+          t.type === 'income' &&
+          (!t.categoryId || t.categoryId === 'cat_income' || t.categoryId === 'cat_salary')
+        ) return true;
+        return false;
+      });
     }
     return list;
   }, [transactions, activeAccountFilter, smartSearchQuery, accounts, categories, selectedCategoryFilter]);
@@ -328,6 +335,9 @@ export const ExpenseLedger: React.FC = () => {
 
   const categoryFilterDropdownActions: MenuAction[] = useMemo(() => {
     const isAll = selectedCategoryFilter === 'All';
+    const expenseCats = getUserCategories(categories);
+    const incomeCats = DEFAULT_INCOME_CATEGORIES;
+
     return [
       {
         id: 'All',
@@ -335,20 +345,40 @@ export const ExpenseLedger: React.FC = () => {
         image: 'tag.fill' as any,
         state: isAll ? 'on' : 'off',
       },
-      ...getUserCategories(categories)
-        .map((c) => ({
+      ...expenseCats.map((c) => ({
+        id: c.id,
+        title: c.name,
+        image: 'tag' as any,
+        state: (selectedCategoryFilter === c.id ? 'on' : 'off') as 'on' | 'off',
+      })),
+      ...incomeCats.map((c) => {
+        let sfImage = 'dollarsign.circle';
+        if (c.id === 'cat_salary') sfImage = 'briefcase';
+        else if (c.id === 'cat_freelance') sfImage = 'laptopcomputer';
+        else if (c.id === 'cat_invest') sfImage = 'chart.line.uptrend.xyaxis';
+        else if (c.id === 'cat_bonus') sfImage = 'gift';
+        else if (c.id === 'cat_rental') sfImage = 'house';
+        else if (c.id === 'cat_refund') sfImage = 'arrow.triangle.2.circlepath';
+        return {
           id: c.id,
           title: c.name,
-          image: 'tag' as any,
+          image: sfImage as any,
           state: (selectedCategoryFilter === c.id ? 'on' : 'off') as 'on' | 'off',
-        })),
+        };
+      }),
+      {
+        id: 'cat_split_return',
+        title: 'Split Received',
+        image: 'arrow.triangle.swap' as any,
+        state: (selectedCategoryFilter === 'cat_split_return' ? 'on' : 'off') as 'on' | 'off',
+      },
     ];
   }, [categories, selectedCategoryFilter]);
 
   const getCategoryObj = (catId?: string, type?: string): ExpenseCategory => {
     const cat = categories.find((c) => c.id === catId);
     if (cat) return cat;
-    const incMatch = INCOME_CATEGORIES.find((c) => c.id === catId);
+    const incMatch = DEFAULT_INCOME_CATEGORIES.find((c) => c.id === catId);
     if (incMatch) return incMatch;
     if (type === 'income' || catId?.includes('income') || catId?.includes('salary') || catId?.includes('bonus') || catId?.includes('freelance') || catId?.includes('invest')) {
       return { id: 'cat_salary', name: 'Salary / Income', emoji: '💼', color: '#8CD9C8', iconName: 'Briefcase' };
@@ -498,6 +528,7 @@ export const ExpenseLedger: React.FC = () => {
       tx.type === 'expense' &&
       !tx.excludeFromBudget &&
       !tx.vaultId &&
+      !tx.goalFundedAmount &&
       catStats &&
       catStats.stdDev > 25 &&
       effectivePersonalAmt > catStats.avg + 1.8 * catStats.stdDev;
@@ -879,11 +910,13 @@ export const ExpenseLedger: React.FC = () => {
             )}
 
             {/* Goal Pre-Funded Badge */}
-            {tx.type === 'expense' && (tx.vaultId || tx.excludeFromBudget) && (
+            {tx.type === 'expense' && (tx.vaultId || tx.excludeFromBudget || Boolean(tx.goalFundedAmount && tx.goalFundedAmount > 0)) && (
               <View style={styles.goalFundedBadge}>
                 <Shield size={9} color="#8CD9C8" />
                 <AppText style={styles.goalFundedBadgeText} numberOfLines={1}>
-                  GOAL FUNDED
+                  {tx.goalFundedAmount && tx.goalFundedAmount < tx.amount
+                    ? `GOAL: ${sym}${Math.round(tx.goalFundedAmount).toLocaleString('en-IN')}`
+                    : 'GOAL FUNDED'}
                 </AppText>
               </View>
             )}
@@ -953,14 +986,26 @@ export const ExpenseLedger: React.FC = () => {
       </View>
     );
 
+    let touchStartTime = 0;
+
     const rowTouchable = Platform.OS === 'ios' ? (
-      <TouchableOpacity
-        style={[styles.transactionRow, !isLast && styles.rowDivider, rowBgStyle]}
-        activeOpacity={0.75}
-        onPress={handleTxPress}
+      <Pressable
+        style={({ pressed }) => [
+          styles.transactionRow,
+          !isLast && styles.rowDivider,
+          rowBgStyle,
+          pressed && { opacity: 0.75 },
+        ]}
+        onPressIn={() => {
+          touchStartTime = Date.now();
+        }}
+        onPress={() => {
+          if (Date.now() - touchStartTime > 280) return;
+          handleTxPress();
+        }}
       >
         {rowInner}
-      </TouchableOpacity>
+      </Pressable>
     ) : rowContent;
 
     return (
@@ -1153,14 +1198,25 @@ export const ExpenseLedger: React.FC = () => {
       </View>
     );
 
+    let folderTouchStartTime = 0;
+
     const folderTouchable = Platform.OS === 'ios' ? (
-      <TouchableOpacity
-        style={[styles.folderRowContainer, !isLast && styles.rowDivider]}
-        activeOpacity={0.75}
-        onPress={handleFolderPress}
+      <Pressable
+        style={({ pressed }) => [
+          styles.folderRowContainer,
+          !isLast && styles.rowDivider,
+          pressed && { opacity: 0.75 },
+        ]}
+        onPressIn={() => {
+          folderTouchStartTime = Date.now();
+        }}
+        onPress={() => {
+          if (Date.now() - folderTouchStartTime > 280) return;
+          handleFolderPress();
+        }}
       >
         {folderRowInner}
-      </TouchableOpacity>
+      </Pressable>
     ) : folderContent;
 
     return (

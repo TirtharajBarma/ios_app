@@ -2,8 +2,8 @@
  * Application Version and Release Configuration
  * Auto-synced with EAS Updates & Local Builds
  */
-export const CURRENT_RELEASE_VERSION = "v1.2.3";
-export const RELEASE_DESCRIPTION = "Fix split settlement category persistence, lock predefined categories against manipulation, and fix participant layout for long names";
+export const CURRENT_RELEASE_VERSION = "v1.3.3";
+export const RELEASE_DESCRIPTION = "Fixed commitments pacing engine, credit card overdue fix, and settings walkthrough tour";
 export const APP_BINARY_VERSION = "v1.0.0 (Build 1)";
 export const ADMIN_NAME = "Tirtharaj";
 export const AUTHOR_CREDIT = "Built with ❤️ by Tirtharaj";
@@ -18,6 +18,109 @@ export interface ReleaseHistoryItem {
 }
 
 export const INITIAL_RELEASE_HISTORY: ReleaseHistoryItem[] = [
+  {
+    version: "v1.3.3",
+    date: "Oct 25, 2026",
+    title: "Fixed commitments pacing engine, credit card overdue fix, and settings walkthrough tour",
+    notes: [
+          "Fixed commitments pacing engine, credit card overdue fix, and settings walkthrough tour"
+    ],
+    type: "ota",
+    isNativeBuild: false,
+  },
+  {
+    version: "v1.3.2",
+    date: "Oct 25, 2026",
+    title: "3D Vinyl Collectible Avatar System across Cashveil",
+    notes: [
+          "3D Vinyl Collectible Avatar System across Cashveil"
+    ],
+    type: "ota",
+    isNativeBuild: false,
+  },
+  {
+    version: "v1.3.1",
+    date: "Oct 25, 2026",
+    title: "Category icon mapping fix, sticky Save header in Category modal, and Software Update polish",
+    notes: [
+      "Fix category icon mapping so Flame, Laptop, Briefcase and all 30 icons save and display faithfully",
+      "Add sticky top Save and Cancel buttons in Category editor so users never have to scroll to save",
+      "Software Update: Display unique tail hash for Bundle ID and eliminate duplicate description layout",
+      "Remove accidental navigation on budget breach coach alert",
+    ],
+    type: "ota",
+    isNativeBuild: false,
+  },
+  {
+    version: "v1.3.0",
+    date: "Oct 25, 2026",
+    title: "Premium polish - dynamic Budget + Buffer pills, tiered spending discipline, and month rollover buffer sweep",
+    notes: [
+          "Premium polish - dynamic Budget + Buffer pills, tiered spending discipline, and month rollover buffer sweep"
+    ],
+    type: "ota",
+    isNativeBuild: false,
+  },
+  {
+    version: "v1.2.9",
+    date: "Oct 25, 2026",
+    title: "Fix transaction long-press race condition and include pre-defined income categories in Ledger filter",
+    notes: [
+          "Fix transaction long-press race condition and include pre-defined income categories in Ledger filter"
+    ],
+    type: "ota",
+    isNativeBuild: false,
+  },
+  {
+    version: "v1.2.8",
+    date: "Oct 25, 2026",
+    title: "Fix credit card name truncation, smart split summarization, and budget-aware streak pacing",
+    notes: [
+          "Fix credit card name truncation, smart split summarization, and budget-aware streak pacing"
+    ],
+    type: "ota",
+    isNativeBuild: false,
+  },
+  {
+    version: "v1.2.7",
+    date: "Oct 25, 2026",
+    title: "Professional polish - unified buffer terminology, aligned unspent leftover, and clean non-repeating labels",
+    notes: [
+          "Professional polish - unified buffer terminology, aligned unspent leftover, and clean non-repeating labels"
+    ],
+    type: "ota",
+    isNativeBuild: false,
+  },
+  {
+    version: "v1.2.6",
+    date: "Oct 25, 2026",
+    title: "Auto-heal split returns from income, exact 31917 salary lock, and 7.9k cushion",
+    notes: [
+          "Auto-heal split returns from income, exact 31917 salary lock, and 7.9k cushion"
+    ],
+    type: "ota",
+    isNativeBuild: false,
+  },
+  {
+    version: "v1.2.5",
+    date: "Oct 25, 2026",
+    title: "Fix cushion buffer calculation, remove cashflow text overlap, top hero buffer state, and multi-goal funding",
+    notes: [
+          "Fix cushion buffer calculation, remove cashflow text overlap, top hero buffer state, and multi-goal funding"
+    ],
+    type: "ota",
+    isNativeBuild: false,
+  },
+  {
+    version: "v1.2.4",
+    date: "Oct 25, 2026",
+    title: "Dynamic salary cushion buffer, savings goal funding protection, and liquid reserve analytics",
+    notes: [
+          "Dynamic salary cushion buffer, savings goal funding protection, and liquid reserve analytics"
+    ],
+    type: "ota",
+    isNativeBuild: false,
+  },
   {
     version: "v1.2.3",
     date: "Oct 23, 2026",

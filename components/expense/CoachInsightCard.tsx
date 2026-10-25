@@ -8,7 +8,7 @@ import { AppText } from '@/components/ui';
 import AsyncStorage from '@/utils/storage';
 import { useExpenseStore, monthKeyOf } from '@/store/useExpenseStore';
 import { useSubscriptionStore } from '@/store/useSubscriptionStore';
-import { getAllCoachInsights, getUpcomingFixedSubscriptions, isFixedCommitmentCategory, COACH_DISMISSED_STORAGE_KEY, type CoachInsight, type CoachInsightType } from '@/utils/coachInsight';
+import { getAllCoachInsights, getUpcomingFixedSubscriptions, getUpcomingFixedCommitments, isFixedCommitmentCategory, COACH_DISMISSED_STORAGE_KEY, type CoachInsight, type CoachInsightType } from '@/utils/coachInsight';
 import { getBilledDueDate } from '@/utils/creditCard';
 import { getSubscriptionActivePrice, toLocalDateString } from '@/utils/date';
 import { convertCurrency } from '@/utils/currency';
@@ -118,6 +118,7 @@ export const CoachInsightCard: React.FC<CoachInsightCardProps> = ({
     // This month's spend per category and last month's recap
     const monthPrefix = todayKey.slice(0, 7);
     const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const prevKey = monthKeyOf(prev);
     const prevPrefix = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`;
     const catSpentThisMonth: Record<string, number> = {};
     const catSpentLastMonth: Record<string, number> = {};
@@ -134,9 +135,17 @@ export const CoachInsightCard: React.FC<CoachInsightCardProps> = ({
       .map(([id, budget]) => ({ id, name: nameOf(id), spent: catSpentThisMonth[id] || 0, budget }));
     const lastTotal = Object.values(catSpentLastMonth).reduce((a, b) => a + b, 0);
     const topLast = Object.entries(catSpentLastMonth).sort((a, b) => b[1] - a[1])[0];
+    const prevAnalysis = getBudgetBufferAnalysis(prevKey);
     const lastMonth =
-      lastTotal > 0
-        ? { label: prev.toLocaleDateString('en-US', { month: 'long' }), spent: lastTotal, topCategory: topLast ? nameOf(topLast[0]) : undefined }
+      lastTotal > 0 || (prevAnalysis.bufferRemaining > 0)
+        ? {
+            label: prev.toLocaleDateString('en-US', { month: 'long' }),
+            spent: lastTotal,
+            topCategory: topLast ? nameOf(topLast[0]) : undefined,
+            unspentBuffer: prevAnalysis.bufferRemaining,
+            isDeficit: prevAnalysis.status === 'deficit',
+            deficitAmount: prevAnalysis.deficitAmount,
+          }
         : null;
 
     const dailySpend: number[] = [];
@@ -149,8 +158,18 @@ export const CoachInsightCard: React.FC<CoachInsightCardProps> = ({
     const totalAllocated = Object.values(categoryBudgets || {}).reduce((s, v) => s + (v > 0 ? v : 0), 0);
     const budget = monthlyBudget > 0 ? monthlyBudget : totalAllocated;
 
-    // Subscriptions still to renew this month (with split bill rules honored)
-    const upcomingFixed = getUpcomingFixedSubscriptions(subscriptions, now, currencyCode || 'INR');
+    // Upcoming fixed commitments (subscriptions, unpaid card dues, and recurring Rent/EMI)
+    const fixedCommitments = getUpcomingFixedCommitments({
+      subscriptions,
+      categories,
+      categoryBudgets,
+      transactions,
+      accounts,
+      now,
+      selectedMonth,
+      currencyCode: currencyCode || 'INR',
+    });
+    const upcomingFixed = fixedCommitments.total;
 
     const bills = accounts
       .filter((a) => a.type === 'credit' && !a.isArchived && a.dueDay)
@@ -181,6 +200,7 @@ export const CoachInsightCard: React.FC<CoachInsightCardProps> = ({
       spentToday: perDay[todayKey] || 0,
       dailySpend,
       upcomingFixed,
+      fixedCommitments,
       bills,
       liquid,
       categories: categoriesWithBudget,

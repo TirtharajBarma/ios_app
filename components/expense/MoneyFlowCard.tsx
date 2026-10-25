@@ -6,7 +6,7 @@ import * as Haptics from 'expo-haptics';
 import { AppText } from '@/components/ui';
 import { useExpenseStore, isInMonth, monthKeyToYearMonth } from '@/store/useExpenseStore';
 import { useSubscriptionStore } from '@/store/useSubscriptionStore';
-import { getUpcomingFixedSubscriptions, isFixedCommitmentCategory } from '@/utils/coachInsight';
+import { getUpcomingFixedSubscriptions, getUpcomingFixedCommitments, isFixedCommitmentCategory } from '@/utils/coachInsight';
 import { useShallow } from 'zustand/react/shallow';
 import { expenseColors } from '@/constants/expenseColors';
 import { parseTxDate } from '@/utils/localDate';
@@ -50,6 +50,7 @@ export const MoneyFlowCard: React.FC = () => {
   monthlyBudget,
   categoryBudgets,
   categories,
+  accounts,
   currencyCode,
   getTotalIncome,
   getTotalSpent,
@@ -64,6 +65,7 @@ export const MoneyFlowCard: React.FC = () => {
     monthlyBudget: s.monthlyBudget,
     categoryBudgets: s.categoryBudgets,
     categories: s.categories,
+    accounts: s.accounts,
     getTotalIncome: s.getTotalIncome,
     getTotalSpent: s.getTotalSpent,
     updateTransaction: s.updateTransaction,
@@ -87,7 +89,13 @@ export const MoneyFlowCard: React.FC = () => {
     return (
       transactions.find((t) => {
         if (t.type !== 'income' || t.allocatedMonth) return false;
-        if (t.categoryId === 'cat_split_return' || t.categoryId === 'cat_debt_repayment') return false;
+        if (
+          t.categoryId === 'cat_split_return' ||
+          t.categoryId === 'cat_debt_repayment' ||
+          t.settledTxId?.startsWith('split_settle:') ||
+          t.settledTxId?.startsWith('debt_settle:')
+        )
+          return false;
         const parts = t.date.match(/^(\d{4})-(\d{2})-(\d{2})/);
         if (!parts) return false;
         const y = parseInt(parts[1], 10);
@@ -123,7 +131,8 @@ export const MoneyFlowCard: React.FC = () => {
 
   const [showStreakModal, setShowStreakModal] = useState(false);
 
-  const netCashFlow = totalIncome - totalSpent - vaultDepositsThisMonth + vaultWithdrawsThisMonth;
+  const committedSavings = Math.max(vaultDepositsThisMonth, bufferAnalysis.committedGoals || 0);
+  const netCashFlow = totalIncome - totalSpent - committedSavings + vaultWithdrawsThisMonth;
   const savingsRate = totalIncome > 0
     ? Math.round((netCashFlow / totalIncome) * 100)
     : 0;
@@ -141,7 +150,16 @@ export const MoneyFlowCard: React.FC = () => {
   const currentDay = isCurMonth ? now.getDate() : daysInSelectedMonth;
   const daysRemaining = isCurMonth ? Math.max(1, daysInSelectedMonth - currentDay + 1) : 0;
   const upcomingFixed = isCurMonth
-    ? getUpcomingFixedSubscriptions(subscriptions, now, currencyCode || 'INR')
+    ? getUpcomingFixedCommitments({
+        subscriptions,
+        categories,
+        categoryBudgets,
+        transactions,
+        accounts,
+        now,
+        selectedMonth,
+        currencyCode: currencyCode || 'INR',
+      }).total
     : 0;
   const budgetRunway = Math.max(0, effectiveBudget - totalSpent);
   const netBudgetRunway = Math.max(0, budgetRunway - upcomingFixed);
@@ -201,6 +219,12 @@ export const MoneyFlowCard: React.FC = () => {
     return streak;
   }, [transactions, selectedMonth, averageDailyLimit]);
 
+  const isPacingDanger =
+    effectiveBudget > 0 &&
+    (totalSpent >= effectiveBudget ||
+      (daysRemaining > 0 && safeDailyPace < Math.max(50, averageDailyLimit * 0.4)));
+  const showStreakPill = streakDays > 0 && !isPacingDanger;
+
   return (
     <View style={styles.cardContainer}>
       {/* 1. Header: Icon + Title + Streak */}
@@ -212,7 +236,7 @@ export const MoneyFlowCard: React.FC = () => {
           <AppText style={styles.cardTitle}>CASH FLOW</AppText>
         </View>
 
-        {streakDays > 0 && (
+        {showStreakPill ? (
           <TouchableOpacity
             style={styles.streakPill}
             activeOpacity={0.7}
@@ -224,7 +248,11 @@ export const MoneyFlowCard: React.FC = () => {
             <Flame size={12} color="#FF9D66" />
             <AppText style={styles.streakPillText}>{streakDays}d streak</AppText>
           </TouchableOpacity>
-        )}
+        ) : isCurMonth && daysRemaining > 0 ? (
+          <View style={styles.daysLeftPill}>
+            <AppText style={styles.daysLeftPillText}>{daysRemaining}d left</AppText>
+          </View>
+        ) : null}
       </View>
 
       {/* 2. Inflow / Outflow Split Metric Tiles */}
@@ -240,9 +268,11 @@ export const MoneyFlowCard: React.FC = () => {
           <AppText style={styles.tileAmount} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
             {sym}{totalSpent.toLocaleString('en-IN')}
           </AppText>
-          <AppText style={styles.tileSub}>
+          <AppText style={styles.tileSub} numberOfLines={1}>
             {vaultDepositsThisMonth > 0
               ? `+${sym}${vaultDepositsThisMonth.toLocaleString('en-IN')} in vaults`
+              : committedSavings > 0
+              ? `${sym}${committedSavings.toLocaleString('en-IN')} goals safe`
               : 'Total Outflow'}
           </AppText>
         </View>
@@ -281,25 +311,10 @@ export const MoneyFlowCard: React.FC = () => {
                   : `-${sym}${Math.abs(netCashFlow).toLocaleString('en-IN')}`}
               </AppText>
             </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              {bufferAnalysis.bufferLimit > 0 && (
-                <View style={[styles.cushionPill, bufferAnalysis.status === 'buffer' && styles.cushionPillActive]}>
-                  <Shield size={10} color={bufferAnalysis.status === 'buffer' ? '#FBBF24' : '#8CD9C8'} />
-                  <AppText
-                    style={[styles.cushionPillText, bufferAnalysis.status === 'buffer' ? { color: '#FBBF24' } : { color: '#8CD9C8' }]}
-                    numberOfLines={1}
-                  >
-                    {bufferAnalysis.status === 'buffer'
-                      ? `${formatCompactCurrency(bufferAnalysis.bufferRemaining, sym)} cushion left`
-                      : `${formatCompactCurrency(bufferAnalysis.bufferLimit, sym)} cushion`}
-                  </AppText>
-                </View>
-              )}
-              <View style={styles.ratePill}>
-                <AppText style={styles.ratePillText}>
-                  {savingsRate >= 0 ? `${savingsRate}% unspent` : `${Math.abs(savingsRate)}% deficit`}
-                </AppText>
-              </View>
+            <View style={styles.ratePill}>
+              <AppText style={styles.ratePillText}>
+                {savingsRate >= 0 ? `${savingsRate}% unspent` : `${Math.abs(savingsRate)}% deficit`}
+              </AppText>
             </View>
           </>
         ) : priorMonthUnallocatedSalary ? (
@@ -483,6 +498,20 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     lineHeight: 14,
   },
+  daysLeftPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  daysLeftPillText: {
+    color: '#8E919D',
+    fontSize: 11,
+    fontWeight: '600',
+    lineHeight: 14,
+  },
   tilesContainer: {
     flexDirection: 'row',
     gap: 10,
@@ -585,27 +614,6 @@ const styles = StyleSheet.create({
   footerAmount: {
     fontSize: 11,
     fontWeight: '600',
-  },
-  cushionPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 7,
-    paddingVertical: 4,
-    borderRadius: 8,
-    backgroundColor: 'rgba(140, 217, 200, 0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(140, 217, 200, 0.2)',
-    flexShrink: 0,
-  },
-  cushionPillActive: {
-    backgroundColor: 'rgba(251, 191, 36, 0.1)',
-    borderColor: 'rgba(251, 191, 36, 0.25)',
-  },
-  cushionPillText: {
-    fontSize: 11,
-    fontFamily: 'PlusJakartaSans-SemiBold',
-    lineHeight: 14,
   },
   ratePill: {
     paddingHorizontal: 8,

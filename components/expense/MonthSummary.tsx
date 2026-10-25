@@ -49,6 +49,7 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
     transactions,
     formatAmount,
     setSelectedMonth,
+    getBudgetBufferAnalysis,
   } = useExpenseStore(
     useShallow((s) => ({
       selectedMonth: s.selectedMonth,
@@ -64,6 +65,7 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
       transactions: s.transactions,
       formatAmount: s.formatAmount,
       setSelectedMonth: s.setSelectedMonth,
+      getBudgetBufferAnalysis: s.getBudgetBufferAnalysis,
     }))
   );
 
@@ -139,6 +141,9 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
   const totalSpent = getTotalSpent(selectedMonth);
   const remainingBudget = getRemainingBudget(selectedMonth);
   const breakdown = getCategoryBreakdown(selectedMonth);
+  const bufferAnalysis = getBudgetBufferAnalysis(selectedMonth);
+  const isBufferActive = isBudgetMode && effectiveBudget > 0 && remainingBudget < 0 && bufferAnalysis.status === 'buffer';
+  const isBudgetDeficit = isBudgetMode && effectiveBudget > 0 && remainingBudget < 0 && bufferAnalysis.status === 'deficit';
 
   // ── HERO SWITCH SPEED CONTROLS ───────────────────────────────────────────
   // Adjust `tension` (higher = faster) and `friction` (lower = bouncier) below.
@@ -399,7 +404,11 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
                 {isBudgetMode
                   ? effectiveBudget > 0
                     ? remainingBudget < 0
-                      ? 'Over budget'
+                      ? isBufferActive
+                        ? isPastMonth
+                          ? 'Ended in buffer'
+                          : 'Buffer left'
+                        : 'Over budget'
                       : isPastMonth
                       ? 'Saved / Unspent'
                       : 'Budget left'
@@ -414,13 +423,15 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
                 numberOfLines={1}
                 style={[
                   styles.balanceAmount,
-                  isBudgetMode && effectiveBudget > 0 && remainingBudget < 0 && styles.negativeAmount,
-                  !isBudgetMode && totalBalance < 0 && styles.negativeAmount,
+                  isBufferActive && styles.bufferAmount,
+                  (isBudgetDeficit || (!isBudgetMode && totalBalance < 0)) && styles.negativeAmount,
                 ]}
                 value={
                   isBudgetMode
                     ? effectiveBudget > 0
-                      ? Math.abs(remainingBudget)
+                      ? isBufferActive
+                        ? bufferAnalysis.bufferRemaining
+                        : Math.abs(remainingBudget)
                       : totalSpent
                     : totalBalance
                 }
@@ -438,10 +449,19 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
                         {effectiveBudget > 0 ? formatAmount(effectiveBudget) : 'No limit'}
                       </AppText>
                     </View>
-                    <View style={styles.accountChip}>
-                      <AppText style={styles.accountChipLabel}>Spent </AppText>
-                      <AppText style={styles.accountChipVal}>{formatAmount(totalSpent)}</AppText>
-                    </View>
+                    {isBufferActive ? (
+                      <View style={[styles.accountChip, styles.accountChipBuffer]}>
+                        <AppText style={styles.accountChipBufferLabel}>Buffer </AppText>
+                        <AppText style={styles.accountChipBufferVal}>
+                          {formatAmount(bufferAnalysis.bufferLimit)}
+                        </AppText>
+                      </View>
+                    ) : (
+                      <View style={styles.accountChip}>
+                        <AppText style={styles.accountChipLabel}>Spent </AppText>
+                        <AppText style={styles.accountChipVal}>{formatAmount(totalSpent)}</AppText>
+                      </View>
+                    )}
                   </View>
                 ) : (
                   <View style={styles.accountChipsRow}>
@@ -692,6 +712,9 @@ const styles = StyleSheet.create({
   negativeAmount: {
     color: '#FF6B6B',
   },
+  bufferAmount: {
+    color: '#FBBF24',
+  },
   chipsRowContainer: {
     minHeight: 28,
     justifyContent: 'center',
@@ -749,6 +772,21 @@ const styles = StyleSheet.create({
   },
   accountChipDueVal: {
     color: '#F48B8B',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  accountChipBuffer: {
+    backgroundColor: 'rgba(251, 191, 36, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(251, 191, 36, 0.25)',
+  },
+  accountChipBufferLabel: {
+    color: '#FBBF24',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  accountChipBufferVal: {
+    color: '#FBBF24',
     fontSize: 12,
     fontWeight: '700',
   },

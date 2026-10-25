@@ -2,7 +2,7 @@
   "expo": {
     "name": "Cashveil",
     "slug": "subscription",
-    "version": "1.2.3",
+    "version": "1.3.3",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "cashveil",
@@ -85,12 +85,12 @@
       },
       "supabaseUrl": "https://nvsjrfzzessvynnuurcg.supabase.co",
       "supabaseAnonKey": "sb_publishable_hmdnizlu8wzE6EwOj2IJvw_0mc9qG7J",
-      "updateVersion": "v1.2.3",
-      "updateDescription": "Fix split settlement category persistence, lock predefined categories against manipulation, and fix participant layout for long names",
+      "updateVersion": "v1.3.3",
+      "updateDescription": "Fixed commitments pacing engine, credit card overdue fix, and settings walkthrough tour",
       "updateNotes": [
-        "Fix split settlement category persistence, lock predefined categories against manipulation, and fix participant layout for long names"
+        "Fixed commitments pacing engine, credit card overdue fix, and settings walkthrough tour"
       ],
-      "easUpdateMessage": "v1.2.3: Fix split settlement category persistence, lock predefined categories against manipulation, and fix participant layout for long names"
+      "easUpdateMessage": "v1.3.3: Fixed commitments pacing engine, credit card overdue fix, and settings walkthrough tour"
     },
     "owner": "tirtharaj_barma",
     "runtimeVersion": "1",
