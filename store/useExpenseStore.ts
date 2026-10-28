@@ -1090,6 +1090,7 @@ export const useExpenseStore = create<ExpenseState>()(
         const amount = remainingUnsettledAmount;
         const targetAccId = targetOrSourceAccountId || tx.accountId || state.accounts[0]?.id;
 
+        const cleanParentNote = tx.note ? tx.note.replace(/\s*\((?:renewal|renew)\)$/i, '').trim() : '';
         const settlementTx: ExpenseTransaction = {
           id: genId('tx'),
           amount,
@@ -1098,7 +1099,7 @@ export const useExpenseStore = create<ExpenseState>()(
           accountId: targetAccId,
           date: todayISO,
           createdAt: Date.now(),
-          note: tx.note ? `From ${tx.split.friendNames || 'Friends'} · ${tx.note}` : `From ${tx.split.friendNames || 'Friends'}`,
+          note: cleanParentNote ? `From ${tx.split.friendNames || 'Friends'} · ${cleanParentNote}` : `From ${tx.split.friendNames || 'Friends'}`,
           isSettled: true,
           settledTxId: txId,
         };
@@ -1213,6 +1214,7 @@ export const useExpenseStore = create<ExpenseState>()(
       );
       const allFriendsSettled = updatedFriends.every((f) => f.settled);
 
+      const cleanParentNote = tx.note ? tx.note.replace(/\s*\((?:renewal|renew)\)$/i, '').trim() : '';
       const settlementTx: ExpenseTransaction = {
         id: genId('tx'),
         amount,
@@ -1221,7 +1223,7 @@ export const useExpenseStore = create<ExpenseState>()(
         accountId: targetAccId,
         date: todayISO,
         createdAt: Date.now(),
-        note: tx.note ? `From ${friend.name || 'Friend'} · ${tx.note}` : `From ${friend.name || 'Friend'}`,
+        note: cleanParentNote ? `From ${friend.name || 'Friend'} · ${cleanParentNote}` : `From ${friend.name || 'Friend'}`,
         isSettled: true,
         settledTxId: `split_settle:${txId}:${friend.id}`,
       };

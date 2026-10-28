@@ -596,10 +596,21 @@ export const ExpenseLedger: React.FC = () => {
     const isDebtRepayment = cat.id === 'cat_debt_repayment' || cat.name?.toLowerCase().includes('debt repayment');
 
     const { displayTitle, displayContext } = (() => {
+      const stripRenewal = (val: string | null | undefined): string => {
+        if (!val) return '';
+        return val.replace(/\s*\((?:renewal|renew)\)$/i, '').trim();
+      };
+
+      const cleanCtx = (val: string | null | undefined): string | null => {
+        if (!val) return null;
+        const cleaned = stripRenewal(val);
+        return cleaned ? cleaned.toUpperCase() : null;
+      };
+
       // 1. Direct Debt Transactions (Lend / Borrow)
       if (isDebtLend || isDebtBorrow) {
         const person = (tx.merchant || tx.borrowerOrLender || 'Friend').trim();
-        const cleanNote = tx.note?.trim();
+        const cleanNote = stripRenewal(tx.note?.trim());
         const isDefaultDebtNote =
           !cleanNote ||
           /^Lent to /i.test(cleanNote) ||
@@ -625,7 +636,7 @@ export const ExpenseLedger: React.FC = () => {
         const title = vault ? `${vault.emoji ? vault.emoji + ' ' : ''}${vault.name}`.trim() : fallbackName;
 
         return {
-          displayTitle: title.toUpperCase(),
+          displayTitle: stripRenewal(title).toUpperCase(),
           displayContext: null,
         };
       }
@@ -633,14 +644,14 @@ export const ExpenseLedger: React.FC = () => {
       // 3. Explicit Merchant field
       if (tx.merchant && tx.merchant.trim()) {
         const isAutoTracked = tx.note?.startsWith('Auto-tracked');
-        const merchantTrim = tx.merchant.trim();
+        const merchantTrim = stripRenewal(tx.merchant.trim());
 
         // Support dot separator in merchant field as well: "From Aditi · Youtube"
         const matchDotReason = /^From (.+?)\s*·\s*(.+)$/i.exec(merchantTrim);
         if (matchDotReason) {
           return {
             displayTitle: matchDotReason[1].trim().toUpperCase(),
-            displayContext: matchDotReason[2].trim().toUpperCase(),
+            displayContext: cleanCtx(matchDotReason[2]),
           };
         }
 
@@ -648,13 +659,13 @@ export const ExpenseLedger: React.FC = () => {
         if (matchFromSimple && (isSplitReturn || isDebtRepayment || isSettled)) {
           return {
             displayTitle: matchFromSimple[1].trim().toUpperCase(),
-            displayContext: !isAutoTracked && tx.note && tx.note.trim() ? tx.note.trim().toUpperCase() : null,
+            displayContext: !isAutoTracked && tx.note && tx.note.trim() ? cleanCtx(tx.note) : null,
           };
         }
 
         return {
           displayTitle: merchantTrim.toUpperCase(),
-          displayContext: !isAutoTracked && tx.note && tx.note.trim() ? tx.note.trim().toUpperCase() : null,
+          displayContext: !isAutoTracked && tx.note && tx.note.trim() ? cleanCtx(tx.note) : null,
         };
       }
 
@@ -670,8 +681,8 @@ export const ExpenseLedger: React.FC = () => {
       if (trimmed.includes(' - ')) {
         const parts = trimmed.split(' - ');
         return {
-          displayTitle: parts[0].trim().toUpperCase(),
-          displayContext: parts.slice(1).join(' - ').trim().toUpperCase() || null,
+          displayTitle: stripRenewal(parts[0]).toUpperCase(),
+          displayContext: cleanCtx(parts.slice(1).join(' - ')),
         };
       }
 
@@ -680,7 +691,7 @@ export const ExpenseLedger: React.FC = () => {
       if (matchDotReason) {
         return {
           displayTitle: matchDotReason[1].trim().toUpperCase(),
-          displayContext: matchDotReason[2].trim().toUpperCase(),
+          displayContext: cleanCtx(matchDotReason[2]),
         };
       }
 
@@ -689,7 +700,7 @@ export const ExpenseLedger: React.FC = () => {
       if (matchSplitWithReason) {
         return {
           displayTitle: matchSplitWithReason[1].trim().toUpperCase(),
-          displayContext: matchSplitWithReason[2].trim().toUpperCase(),
+          displayContext: cleanCtx(matchSplitWithReason[2]),
         };
       }
 
@@ -721,7 +732,7 @@ export const ExpenseLedger: React.FC = () => {
       }
 
       return {
-        displayTitle: trimmed.toUpperCase(),
+        displayTitle: stripRenewal(trimmed).toUpperCase(),
         displayContext: null,
       };
     })();
@@ -2251,6 +2262,8 @@ const styles = StyleSheet.create({
   },
   transactionRow: {
     width: '100%',
+    maxWidth: '100%',
+    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
@@ -2365,6 +2378,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
     justifyContent: 'center',
     marginRight: 8,
+    overflow: 'hidden',
   },
   transactionTitle: {
     color: '#FFFFFF',
@@ -2381,55 +2395,57 @@ const styles = StyleSheet.create({
     flexWrap: 'nowrap',
     gap: 5,
     maxWidth: '100%',
+    minWidth: 0,
+    flexShrink: 1,
     overflow: 'hidden',
   },
   transferFlowPill: {
-    // Cap the pill so a long label cannot push the flexShrink:0 amount
-    // column off the row. Android text metrics are wider than iOS, so this
-    // overflowed on standalone Android builds.
     maxWidth: '100%',
     flexShrink: 1,
+    minWidth: 0,
     backgroundColor: 'rgba(96, 165, 250, 0.15)',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
     borderRadius: 6,
   },
   transferFlowText: {
     color: '#9DC6EB',
-    fontSize: 11,
+    fontSize: 10,
+    lineHeight: 14,
     fontWeight: '700',
+    flexShrink: 1,
   },
   debtLentPill: {
-    // Cap the pill so a long label cannot push the flexShrink:0 amount
-    // column off the row. Android text metrics are wider than iOS, so this
-    // overflowed on standalone Android builds.
     maxWidth: '100%',
     flexShrink: 1,
+    minWidth: 0,
     backgroundColor: expenseColors.accentRedBg,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
     borderRadius: 6,
   },
   debtLentText: {
     color: expenseColors.accentRed,
-    fontSize: 11,
+    fontSize: 10,
+    lineHeight: 14,
     fontWeight: '700',
+    flexShrink: 1,
   },
   debtBorrowPill: {
-    // Cap the pill so a long label cannot push the flexShrink:0 amount
-    // column off the row. Android text metrics are wider than iOS, so this
-    // overflowed on standalone Android builds.
     maxWidth: '100%',
     flexShrink: 1,
+    minWidth: 0,
     backgroundColor: 'rgba(244, 205, 137, 0.12)',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
     borderRadius: 6,
   },
   debtBorrowText: {
     color: '#F4CD89',
-    fontSize: 11,
+    fontSize: 10,
+    lineHeight: 14,
     fontWeight: '700',
+    flexShrink: 1,
   },
   settledPill: {
     backgroundColor: expenseColors.accentGreenBg,
@@ -2501,52 +2517,59 @@ const styles = StyleSheet.create({
   },
   splitReturnPill: {
     flexShrink: 0,
+    maxWidth: 125,
+    minWidth: 0,
     backgroundColor: 'rgba(169, 223, 191, 0.12)',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
     borderRadius: 6,
   },
   splitReturnPillText: {
     color: '#A9DFBF',
-    fontSize: 11,
+    fontSize: 10,
+    lineHeight: 14,
     fontWeight: '700',
+    flexShrink: 1,
   },
   debtRepaidPill: {
     maxWidth: '100%',
     flexShrink: 1,
+    minWidth: 0,
     backgroundColor: 'rgba(96, 165, 250, 0.12)',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
     borderRadius: 6,
   },
   debtRepaidPillText: {
     color: '#9DC6EB',
-    fontSize: 11,
+    fontSize: 10,
+    lineHeight: 14,
     fontWeight: '700',
+    flexShrink: 1,
   },
   debtRecoveredPill: {
     maxWidth: '100%',
     flexShrink: 1,
+    minWidth: 0,
     backgroundColor: expenseColors.accentGreenBg,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
     borderRadius: 6,
   },
   debtRecoveredPillText: {
     color: expenseColors.accentGreen,
-    fontSize: 11,
+    fontSize: 10,
+    lineHeight: 14,
     fontWeight: '700',
+    flexShrink: 1,
   },
   splitContextPill: {
-    // Cap the pill so a long label cannot push the flexShrink:0 amount
-    // column off the row. Android text metrics are wider than iOS, so this
-    // overflowed on standalone Android builds.
     maxWidth: '100%',
     flexShrink: 1,
     minWidth: 0,
     backgroundColor: 'rgba(255, 255, 255, 0.07)',
-    paddingHorizontal: 7,
-    paddingVertical: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
     borderRadius: 6,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
@@ -2554,8 +2577,10 @@ const styles = StyleSheet.create({
   splitContextPillText: {
     color: '#D1D5DB',
     fontSize: 10,
+    lineHeight: 14,
     fontWeight: '700',
     letterSpacing: 0.3,
+    flexShrink: 1,
   },
   splitPeoplePill: {
     // Cap the pill so a long label cannot push the flexShrink:0 amount

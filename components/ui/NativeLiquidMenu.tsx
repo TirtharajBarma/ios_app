@@ -158,9 +158,9 @@ export const NativeLiquidMenu: React.FC<NativeLiquidMenuProps> = ({
             }
           }}
           shouldOpenOnLongPress={shouldOpenOnLongPress}
-          style={isFullWidth && containerWidth ? { width: containerWidth, alignSelf: 'stretch' } : { alignSelf: compactAlign }}
+          style={isFullWidth ? { width: containerWidth ?? '100%', alignSelf: 'stretch', minWidth: 0 } : { alignSelf: compactAlign }}
         >
-          <View style={isFullWidth && containerWidth ? { width: containerWidth, alignSelf: 'stretch' } : { alignSelf: compactAlign }}>
+          <View style={isFullWidth ? { width: containerWidth ?? '100%', alignSelf: 'stretch', minWidth: 0, overflow: 'hidden' } : { alignSelf: compactAlign }}>
             {children}
           </View>
         </ExpoMenuView>

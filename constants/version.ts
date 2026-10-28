@@ -2,8 +2,8 @@
  * Application Version and Release Configuration
  * Auto-synced with EAS Updates & Local Builds
  */
-export const CURRENT_RELEASE_VERSION = "v1.3.3";
-export const RELEASE_DESCRIPTION = "Fixed commitments pacing engine, credit card overdue fix, and settings walkthrough tour";
+export const CURRENT_RELEASE_VERSION = "v1.3.4";
+export const RELEASE_DESCRIPTION = "Fix split recovery pill layout overflow and clean redundant (Renewal) tags in ledger";
 export const APP_BINARY_VERSION = "v1.0.0 (Build 1)";
 export const ADMIN_NAME = "Tirtharaj";
 export const AUTHOR_CREDIT = "Built with ❤️ by Tirtharaj";
@@ -18,6 +18,16 @@ export interface ReleaseHistoryItem {
 }
 
 export const INITIAL_RELEASE_HISTORY: ReleaseHistoryItem[] = [
+  {
+    version: "v1.3.4",
+    date: "Oct 29, 2026",
+    title: "Fix split recovery pill layout overflow and clean redundant (Renewal) tags in ledger",
+    notes: [
+          "Fix split recovery pill layout overflow and clean redundant (Renewal) tags in ledger"
+    ],
+    type: "ota",
+    isNativeBuild: false,
+  },
   {
     version: "v1.3.3",
     date: "Oct 25, 2026",
