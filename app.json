@@ -2,7 +2,7 @@
   "expo": {
     "name": "Cashveil",
     "slug": "subscription",
-    "version": "1.3.4",
+    "version": "1.3.5",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "cashveil",
@@ -85,12 +85,12 @@
       },
       "supabaseUrl": "https://nvsjrfzzessvynnuurcg.supabase.co",
       "supabaseAnonKey": "sb_publishable_hmdnizlu8wzE6EwOj2IJvw_0mc9qG7J",
-      "updateVersion": "v1.3.4",
-      "updateDescription": "Fix split recovery pill layout overflow and clean redundant (Renewal) tags in ledger",
+      "updateVersion": "v1.3.5",
+      "updateDescription": "Fix early salary goal allocation, streamline cash flow card, and remove auto-allocation after 25th",
       "updateNotes": [
-        "Fix split recovery pill layout overflow and clean redundant (Renewal) tags in ledger"
+        "Fix early salary goal allocation, streamline cash flow card, and remove auto-allocation after 25th"
       ],
-      "easUpdateMessage": "v1.3.4: Fix split recovery pill layout overflow and clean redundant (Renewal) tags in ledger"
+      "easUpdateMessage": "v1.3.5: Fix early salary goal allocation, streamline cash flow card, and remove auto-allocation after 25th"
     },
     "owner": "tirtharaj_barma",
     "runtimeVersion": "1",

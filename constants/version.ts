@@ -2,8 +2,8 @@
  * Application Version and Release Configuration
  * Auto-synced with EAS Updates & Local Builds
  */
-export const CURRENT_RELEASE_VERSION = "v1.3.4";
-export const RELEASE_DESCRIPTION = "Fix split recovery pill layout overflow and clean redundant (Renewal) tags in ledger";
+export const CURRENT_RELEASE_VERSION = "v1.3.5";
+export const RELEASE_DESCRIPTION = "Fix early salary goal allocation, streamline cash flow card, and remove auto-allocation after 25th";
 export const APP_BINARY_VERSION = "v1.0.0 (Build 1)";
 export const ADMIN_NAME = "Tirtharaj";
 export const AUTHOR_CREDIT = "Built with ❤️ by Tirtharaj";
@@ -18,6 +18,16 @@ export interface ReleaseHistoryItem {
 }
 
 export const INITIAL_RELEASE_HISTORY: ReleaseHistoryItem[] = [
+  {
+    version: "v1.3.5",
+    date: "Nov 1, 2026",
+    title: "Fix early salary goal allocation, streamline cash flow card, and remove auto-allocation after 25th",
+    notes: [
+          "Fix early salary goal allocation, streamline cash flow card, and remove auto-allocation after 25th"
+    ],
+    type: "ota",
+    isNativeBuild: false,
+  },
   {
     version: "v1.3.4",
     date: "Oct 29, 2026",

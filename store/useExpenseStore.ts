@@ -176,7 +176,7 @@ interface ExpenseState {
   addSavingsVault: (vault: Omit<SavingsVault, 'id' | 'currentAmount'>) => void;
   updateSavingsVault: (id: string, updates: Partial<SavingsVault>) => void;
   deleteSavingsVault: (id: string, refundAccountId?: string) => void;
-  depositToVault: (vaultId: string, amount: number, sourceAccountId?: string) => void;
+  depositToVault: (vaultId: string, amount: number, sourceAccountId?: string, allocatedMonth?: string) => void;
   withdrawFromVault: (vaultId: string, amount: number, targetAccountId?: string) => void;
 
   categoryBudgets: Record<string, number>; // categoryId -> custom budget limit
@@ -1342,7 +1342,7 @@ export const useExpenseStore = create<ExpenseState>()(
     logAction('vault', `Deleted savings vault ${vault.name}, refunded ${vault.currentAmount}`, { id, refundedAmount: vault.currentAmount });
   },
 
-  depositToVault: (vaultId, amount, sourceAccountId) => {
+  depositToVault: (vaultId, amount, sourceAccountId, allocatedMonth) => {
     if (amount <= 0) return;
     const targetVault = get().savingsVaults.find((v) => v.id === vaultId);
     if (!targetVault) return;
@@ -1368,6 +1368,7 @@ export const useExpenseStore = create<ExpenseState>()(
         accountId: effectiveSource,
         vaultId,
         date: localISODate(new Date()),
+        allocatedMonth: allocatedMonth?.trim() || undefined,
         createdAt: Date.now(),
         note: `Saved to ${targetVault.emoji} ${targetVault.name}`,
       };
@@ -1382,7 +1383,7 @@ export const useExpenseStore = create<ExpenseState>()(
       };
     });
 
-    logAction('vault', `Deposited ${amount} into vault`, { vaultId, amount, sourceAccountId });
+    logAction('vault', `Deposited ${amount} into vault`, { vaultId, amount, sourceAccountId, allocatedMonth });
   },
 
   withdrawFromVault: (vaultId, amount, targetAccountId) => {
@@ -1803,11 +1804,19 @@ export const useExpenseStore = create<ExpenseState>()(
 
   getSafeToSpend: (monthKey) => {
     const { monthlyBudget, categoryBudgets, transactions, selectedMonth } = get();
-    const totalSpent = get().getTotalSpent(monthKey);
-    const { year, month } = monthKeyToYearMonth(monthKey || selectedMonth);
+    const targetKey = monthKey || selectedMonth;
+    const totalSpent = get().getTotalSpent(targetKey);
+    const { year, month } = monthKeyToYearMonth(targetKey);
+    const targetMonthNormalized = targetKey.trim().toLowerCase();
 
     const vaultDepositsThisMonth = transactions
-      .filter((t) => t.type === 'vault_deposit' && isInMonth(t.date, year, month))
+      .filter(
+        (t) =>
+          t.type === 'vault_deposit' &&
+          (t.allocatedMonth
+            ? t.allocatedMonth.trim().toLowerCase() === targetMonthNormalized
+            : isInMonth(t.date, year, month))
+      )
       .reduce((sum, t) => sum + t.amount, 0);
 
     const totalAllocated = Object.values(categoryBudgets || {}).reduce((s, v) => s + (v > 0 ? v : 0), 0);
@@ -1834,6 +1843,7 @@ export const useExpenseStore = create<ExpenseState>()(
     const { monthlyBudget, categoryBudgets, transactions, savingsVaults, selectedMonth } = get();
     const targetKey = monthKey || selectedMonth;
     const { year, month } = monthKeyToYearMonth(targetKey);
+    const targetMonthNormalized = targetKey.trim().toLowerCase();
     const totalAllocated = Object.values(categoryBudgets || {}).reduce((s, v) => s + (v > 0 ? v : 0), 0);
     const effectiveBudget = monthlyBudget > 0 ? monthlyBudget : totalAllocated;
     const totalSpent = get().getTotalSpent(targetKey);
@@ -1842,26 +1852,28 @@ export const useExpenseStore = create<ExpenseState>()(
     const { bankCash, cardDues } = get().getHistoricalAccountBreakdown(targetKey);
     const liquidBalance = roundMoney(bankCash - cardDues);
 
-    // Committed goals: monthly commitments or total saved in vaults
+    // Committed goals: monthly commitments or actual vault deposits made for this month
     const vaultTargetSum = (savingsVaults || []).reduce((sum, v) => sum + (v.monthlyTarget || 0), 0);
     const vaultDepositsThisMonth = transactions
-      .filter((t) => t.type === 'vault_deposit' && isInMonth(t.date, year, month))
+      .filter(
+        (t) =>
+          t.type === 'vault_deposit' &&
+          (t.allocatedMonth
+            ? t.allocatedMonth.trim().toLowerCase() === targetMonthNormalized
+            : isInMonth(t.date, year, month))
+      )
       .reduce((sum, t) => sum + t.amount, 0);
     const totalSavedInVaults = (savingsVaults || []).reduce((sum, v) => sum + (v.currentAmount || 0), 0);
 
     const committedGoals = roundMoney(
-      vaultTargetSum > 0
-        ? vaultTargetSum
-        : vaultDepositsThisMonth > 0
-        ? vaultDepositsThisMonth
-        : totalSavedInVaults
+      vaultTargetSum > 0 ? vaultTargetSum : vaultDepositsThisMonth
     );
 
     // Dynamic Buffer Capacity:
     // 1. Primary: Monthly salary surplus (Total Income - Committed Goals - Living Budget)
     const incomeSurplus = Math.max(0, roundMoney(totalIncome - committedGoals - effectiveBudget));
-    // 2. Secondary: Unallocated liquid bank balance (Bank Cash - Card Dues - Committed Goals - Living Budget)
-    const bankSurplus = Math.max(0, roundMoney(liquidBalance - committedGoals - effectiveBudget));
+    // 2. Secondary: Unallocated liquid bank balance (Bank Cash - Card Dues - Total Saved in Vaults - Living Budget)
+    const bankSurplus = Math.max(0, roundMoney(liquidBalance - totalSavedInVaults - effectiveBudget));
 
     let bufferLimit = 0;
     if (totalIncome > 0 && effectiveBudget > 0) {

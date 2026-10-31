@@ -595,7 +595,7 @@ export default function TransactionDetailScreen() {
                     <AppText style={styles.fieldLabel}>BUDGET CYCLE ALLOCATION</AppText>
                     <AppText style={styles.fieldValue}>{transaction.allocatedMonth}</AppText>
                     <AppText style={styles.fieldSubtext}>
-                      Funds {transaction.allocatedMonth} cash flow & leftover
+                      Funds {transaction.allocatedMonth} cash flow & buffer
                     </AppText>
                   </View>
                 </View>

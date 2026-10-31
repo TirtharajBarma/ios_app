@@ -118,16 +118,28 @@ export const MoneyFlowCard: React.FC = () => {
   }, [transactions, selectedMonth, year, month]);
 
   const vaultDepositsThisMonth = useMemo(() => {
+    const targetMonthNormalized = selectedMonth.trim().toLowerCase();
     return transactions
-      .filter((t) => t.type === 'vault_deposit' && isInMonth(t.date, year, month))
+      .filter((t) =>
+        t.type === 'vault_deposit' &&
+        (t.allocatedMonth
+          ? t.allocatedMonth.trim().toLowerCase() === targetMonthNormalized
+          : isInMonth(t.date, year, month))
+      )
       .reduce((sum, t) => sum + t.amount, 0);
-  }, [transactions, year, month]);
+  }, [transactions, selectedMonth, year, month]);
 
   const vaultWithdrawsThisMonth = useMemo(() => {
+    const targetMonthNormalized = selectedMonth.trim().toLowerCase();
     return transactions
-      .filter((t) => t.type === 'vault_withdraw' && isInMonth(t.date, year, month))
+      .filter((t) =>
+        t.type === 'vault_withdraw' &&
+        (t.allocatedMonth
+          ? t.allocatedMonth.trim().toLowerCase() === targetMonthNormalized
+          : isInMonth(t.date, year, month))
+      )
       .reduce((sum, t) => sum + t.amount, 0);
-  }, [transactions, year, month]);
+  }, [transactions, selectedMonth, year, month]);
 
   const [showStreakModal, setShowStreakModal] = useState(false);
 
@@ -257,23 +269,25 @@ export const MoneyFlowCard: React.FC = () => {
 
       {/* 2. Inflow / Outflow Split Metric Tiles */}
       <View style={styles.tilesContainer}>
-        {/* Spent Tile */}
+        {/* Outflows Tile (Expenses + Savings Goals) */}
         <View style={styles.metricTile}>
           <View style={styles.tileHeader}>
             <View style={[styles.arrowBadge, { backgroundColor: 'rgba(244, 139, 139, 0.12)' }]}>
               <ArrowDownLeft size={12} color={pastelColors.coral} strokeWidth={2.5} />
             </View>
-            <AppText style={styles.tileLabel}>SPENT</AppText>
+            <AppText style={styles.tileLabel}>OUTFLOWS</AppText>
           </View>
           <AppText style={styles.tileAmount} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-            {sym}{totalSpent.toLocaleString('en-IN')}
+            {sym}{(totalSpent + vaultDepositsThisMonth).toLocaleString('en-IN')}
           </AppText>
           <AppText style={styles.tileSub} numberOfLines={1}>
-            {vaultDepositsThisMonth > 0
-              ? `+${sym}${vaultDepositsThisMonth.toLocaleString('en-IN')} in vaults`
-              : committedSavings > 0
-              ? `${sym}${committedSavings.toLocaleString('en-IN')} goals safe`
-              : 'Total Outflow'}
+            {vaultDepositsThisMonth > 0 && totalSpent > 0
+              ? `${sym}${totalSpent.toLocaleString('en-IN')} spent · ${sym}${vaultDepositsThisMonth.toLocaleString('en-IN')} goals`
+              : vaultDepositsThisMonth > 0
+              ? `${sym}${vaultDepositsThisMonth.toLocaleString('en-IN')} in savings goals`
+              : totalSpent > 0
+              ? `${sym}${totalSpent.toLocaleString('en-IN')} living spent`
+              : '₹0 spent · ₹0 in goals'}
           </AppText>
         </View>
 
@@ -303,8 +317,7 @@ export const MoneyFlowCard: React.FC = () => {
         {totalIncome > 0 ? (
           <>
             <View style={styles.footerLeft}>
-              {/* <Sparkles size={12} color={pastelColors.purple} /> */}
-              <AppText style={styles.footerLabel}>Month Leftover</AppText>
+              <AppText style={styles.footerLabel}>Net Cash Flow</AppText>
               <AppText style={[styles.footerAmount, { color: netCashFlow >= 0 ? pastelColors.mint : pastelColors.coral }]}>
                 {netCashFlow >= 0
                   ? `+${sym}${netCashFlow.toLocaleString('en-IN')}`
@@ -342,7 +355,7 @@ export const MoneyFlowCard: React.FC = () => {
           <View style={styles.footerLeft}>
             <Sparkles size={12} color={pastelColors.purple} />
             <AppText style={styles.footerLabel}>
-              Log monthly income to see month leftover & unspent %
+              Log monthly income to see net cash flow & unspent %
             </AppText>
           </View>
         )}

@@ -488,7 +488,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
         setSelectedCategoryId('');
         const nowDate = new Date();
         setTxDate(nowDate);
-        setIsAllocateToNextMonth(nowDate.getDate() >= 25);
+        setIsAllocateToNextMonth(false);
         setToAccountId(initialToAccountId || '');
         setBillingCycle('monthly');
         setNextBillDate(advanceCycleDate(nowDate, 'monthly'));
@@ -1078,6 +1078,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
       } else {
         if (initialTransaction) {
           const isVaultTx = initialTransaction.type === 'vault_deposit' || initialTransaction.type === 'vault_withdraw';
+          const finalAllocatedMonth = isAllocateToNextMonth ? nextMonthKey : undefined;
           updateTransaction(initialTransaction.id, {
             amount: numAmount,
             type: isVaultTx ? initialTransaction.type : 'expense',
@@ -1090,6 +1091,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             folderId: selectedFolderId || undefined,
             folderName: selectedFolderObj?.name || undefined,
             date: format(txDate, 'yyyy-MM-dd'),
+            allocatedMonth: isVaultTx ? finalAllocatedMonth : undefined,
             merchant: finalMerchant || undefined,
             note: finalNote || (finalMerchant ? undefined : (selectedCatObj?.name || 'Expense')),
             tag: finalTag || undefined,
@@ -1180,11 +1182,11 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
         if (activeAllocations.length > 0) {
           activeAllocations.forEach(([vaultId, amtStr]) => {
             const allocAmt = parseFloat(amtStr);
-            depositToVault(vaultId, Math.min(allocAmt, numAmount), effectiveAccId);
+            depositToVault(vaultId, Math.min(allocAmt, numAmount), effectiveAccId, finalAllocatedMonth);
           });
         } else if (selectedGoalId) {
           const alloc = parseFloat(goalAllocationAmount) || numAmount;
-          depositToVault(selectedGoalId, Math.min(alloc, numAmount), effectiveAccId);
+          depositToVault(selectedGoalId, Math.min(alloc, numAmount), effectiveAccId, finalAllocatedMonth);
         }
       }
     }
@@ -1971,8 +1973,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             </View>
           </View>
 
-          {/* ── BUDGET MONTH ALLOCATION (Income Mode) ── */}
-          {tabMode === 'income' && (
+          {/* ── BUDGET MONTH ALLOCATION (Income Mode & Goal Deposits) ── */}
+          {(tabMode === 'income' || initialTransaction?.type === 'vault_deposit') && (
             <View style={styles.section}>
               <View style={styles.allocatedMonthCard}>
                 <View style={{ flex: 1, paddingRight: 12 }}>
@@ -1982,7 +1984,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                   </View>
                   <AppText style={styles.allocatedMonthSubtitle}>
                     {isAllocateToNextMonth
-                      ? `Funds ${nextMonthKey} cash flow & leftover`
+                      ? `Funds ${nextMonthKey} cash flow & buffer`
                       : `Funds ${currentMonthKey} (current month)`}
                   </AppText>
                 </View>

@@ -30,7 +30,7 @@ import {
 import * as Haptics from 'expo-haptics';
 import { AppText, NativeLiquidMenu } from '@/components/ui';
 import type { MenuAction } from '@/components/ui';
-import { useExpenseStore } from '@/store/useExpenseStore';
+import { useExpenseStore, monthKeyOf } from '@/store/useExpenseStore';
 import { useShallow } from 'zustand/react/shallow';
 import { expenseColors } from '@/constants/expenseColors';
 import { ExpenseAccount, SavingsVault } from '@/types/expense';
@@ -242,7 +242,12 @@ export const AccountsListModal: React.FC<AccountsListModalProps> = ({
     }
 
     if (actionType === 'deposit') {
-      depositToVault(selectedVault.id, amt, sourceAccountId || undefined);
+      const activeMonth = useExpenseStore.getState().selectedMonth;
+      const curCalMonth = monthKeyOf(new Date());
+      const allocMonth = activeMonth && activeMonth.trim().toLowerCase() !== curCalMonth.trim().toLowerCase()
+        ? activeMonth
+        : undefined;
+      depositToVault(selectedVault.id, amt, sourceAccountId || undefined, allocMonth);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     } else {
       if (amt > selectedVault.currentAmount) {
