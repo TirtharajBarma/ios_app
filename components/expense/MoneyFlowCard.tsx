@@ -53,6 +53,7 @@ export const MoneyFlowCard: React.FC = () => {
   accounts,
   currencyCode,
   getTotalIncome,
+  getOtherIncome,
   getTotalSpent,
   updateTransaction,
   getBudgetBufferAnalysis,
@@ -67,6 +68,7 @@ export const MoneyFlowCard: React.FC = () => {
     categories: s.categories,
     accounts: s.accounts,
     getTotalIncome: s.getTotalIncome,
+    getOtherIncome: s.getOtherIncome,
     getTotalSpent: s.getTotalSpent,
     updateTransaction: s.updateTransaction,
     getBudgetBufferAnalysis: s.getBudgetBufferAnalysis,
@@ -79,6 +81,7 @@ export const MoneyFlowCard: React.FC = () => {
   const { year, month } = useMemo(() => monthKeyToYearMonth(selectedMonth), [selectedMonth]);
 
   const totalIncome = getTotalIncome(selectedMonth);
+  const otherIncome = getOtherIncome ? getOtherIncome(selectedMonth) : 0;
   const totalSpent = getTotalSpent(selectedMonth);
   const bufferAnalysis = getBudgetBufferAnalysis(selectedMonth);
 
@@ -88,7 +91,12 @@ export const MoneyFlowCard: React.FC = () => {
     const prevMonth = month === 0 ? 11 : month - 1;
     return (
       transactions.find((t) => {
-        if (t.type !== 'income' || t.allocatedMonth) return false;
+        if (
+          t.type !== 'income' ||
+          t.allocatedMonth ||
+          (t.categoryId && t.categoryId !== 'cat_salary')
+        )
+          return false;
         if (
           t.categoryId === 'cat_split_return' ||
           t.categoryId === 'cat_debt_repayment' ||
@@ -304,8 +312,12 @@ export const MoneyFlowCard: React.FC = () => {
             {totalIncome > 0
               ? hasAllocatedIncome
                 ? 'Includes allocated'
-                : 'Total Inflow'
-              : 'No Inflow'}
+                : otherIncome > 0
+                ? `+${sym}${otherIncome.toLocaleString('en-IN')} extra`
+                : 'Monthly Salary'
+              : otherIncome > 0
+              ? `${sym}${otherIncome.toLocaleString('en-IN')} extra`
+              : 'No Salary'}
           </AppText>
         </View>
       </View>

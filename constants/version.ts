@@ -2,8 +2,8 @@
  * Application Version and Release Configuration
  * Auto-synced with EAS Updates & Local Builds
  */
-export const CURRENT_RELEASE_VERSION = "v1.3.5";
-export const RELEASE_DESCRIPTION = "Fix early salary goal allocation, streamline cash flow card, and remove auto-allocation after 25th";
+export const CURRENT_RELEASE_VERSION = "v1.3.6";
+export const RELEASE_DESCRIPTION = "Salary-anchored cash flow, expense-offsetting refunds, and strict non-salary isolation";
 export const APP_BINARY_VERSION = "v1.0.0 (Build 1)";
 export const ADMIN_NAME = "Tirtharaj";
 export const AUTHOR_CREDIT = "Built with ❤️ by Tirtharaj";
@@ -18,6 +18,19 @@ export interface ReleaseHistoryItem {
 }
 
 export const INITIAL_RELEASE_HISTORY: ReleaseHistoryItem[] = [
+  {
+    version: "v1.3.6",
+    date: "Nov 4, 2026",
+    title: "Salary-anchored cash flow, expense-offsetting refunds, and strict non-salary isolation",
+    notes: [
+      "Strictly anchor monthly living cash flow and buffer capacity to Salary (cat_salary)",
+      "Refunds directly offset monthly living expenses rather than falsely inflating income",
+      "Bonus and non-salary inflows update account balances without distorting recurring monthly salary baseline",
+      "Hide budget cycle allocation when logging non-salary inflows or refunds"
+    ],
+    type: "ota",
+    isNativeBuild: false,
+  },
   {
     version: "v1.3.5",
     date: "Nov 1, 2026",

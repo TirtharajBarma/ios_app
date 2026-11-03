@@ -1142,7 +1142,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
         : 'cat_salary';
 
       const effectiveAccId = selectedAccountId || accounts[0]?.id || 'acc_primary';
-      const finalAllocatedMonth = isAllocateToNextMonth ? nextMonthKey : undefined;
+      const finalAllocatedMonth = (isAllocateToNextMonth && finalIncomeCatId === 'cat_salary') ? nextMonthKey : undefined;
 
       const isSplitDotFormat = Boolean(finalMerchant && /^From (.+?)\s*·\s*(.+)$/i.test(finalMerchant));
       const effectiveMerchant = isSplitSettle && isSplitDotFormat ? undefined : (finalMerchant || undefined);
@@ -1973,8 +1973,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             </View>
           </View>
 
-          {/* ── BUDGET MONTH ALLOCATION (Income Mode & Goal Deposits) ── */}
-          {(tabMode === 'income' || initialTransaction?.type === 'vault_deposit') && (
+          {/* ── BUDGET MONTH ALLOCATION (Salary Income & Goal Deposits) ── */}
+          {((tabMode === 'income' && (!selectedCategoryId || selectedCategoryId === 'cat_salary')) || initialTransaction?.type === 'vault_deposit') && (
             <View style={styles.section}>
               <View style={styles.allocatedMonthCard}>
                 <View style={{ flex: 1, paddingRight: 12 }}>

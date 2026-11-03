@@ -201,6 +201,7 @@ interface ExpenseState {
   getHistoricalAccountBreakdown: (monthKey?: string) => { bankCash: number; cardDues: number };
   getTotalBalance: (monthKey?: string) => number;
   getTotalIncome: (monthKey?: string) => number;
+  getOtherIncome: (monthKey?: string) => number;
   getTotalSpent: (monthKey?: string) => number;
   getNetBalance: (monthKey?: string) => number;
   getRemainingBudget: (monthKey?: string) => number;
@@ -1758,6 +1759,35 @@ export const useExpenseStore = create<ExpenseState>()(
         .filter(
           (t) =>
             t.type === 'income' &&
+            // Primary living income: explicitly Salary or legacy income without non-salary category
+            (t.categoryId === 'cat_salary' || !t.categoryId) &&
+            t.categoryId !== 'cat_refund' &&
+            t.categoryId !== 'cat_bonus' &&
+            t.categoryId !== 'cat_other_inc' &&
+            t.categoryId !== 'cat_split_return' &&
+            t.categoryId !== 'cat_debt_repayment' &&
+            !t.settledTxId?.startsWith('split_settle:') &&
+            !t.settledTxId?.startsWith('debt_settle:') &&
+            (t.allocatedMonth
+              ? t.allocatedMonth.trim().toLowerCase() === targetMonthNormalized
+              : isInMonth(t.date, year, month))
+        )
+        .reduce((sum, t) => sum + t.amount, 0)
+    );
+  },
+
+  getOtherIncome: (monthKey) => {
+    const { transactions, selectedMonth } = get();
+    const targetMonthKey = monthKey || selectedMonth;
+    const { year, month } = monthKeyToYearMonth(targetMonthKey);
+    const targetMonthNormalized = targetMonthKey.trim().toLowerCase();
+    return roundMoney(
+      transactions
+        .filter(
+          (t) =>
+            t.type === 'income' &&
+            t.categoryId !== 'cat_salary' &&
+            t.categoryId !== 'cat_refund' &&
             t.categoryId !== 'cat_split_return' &&
             t.categoryId !== 'cat_debt_repayment' &&
             !t.settledTxId?.startsWith('split_settle:') &&
@@ -1773,22 +1803,31 @@ export const useExpenseStore = create<ExpenseState>()(
   getTotalSpent: (monthKey) => {
     const { transactions, selectedMonth } = get();
     const { year, month } = monthKeyToYearMonth(monthKey || selectedMonth);
-    return roundMoney(
-      transactions
-        .filter(
-          (t) =>
-            t.type === 'expense' &&
-            t.categoryId !== 'cat_debt_repayment' &&
-            !t.excludeFromBudget &&
-            !(t.vaultId && t.type === 'expense' && !t.goalFundedAmount) &&
-            isInMonth(t.date, year, month)
-        )
-        .reduce((sum, t) => {
-          const personalShare = t.split ? t.split.yourShare : t.amount;
-          const netShare = Math.max(0, personalShare - (t.goalFundedAmount || 0));
-          return sum + netShare;
-        }, 0)
-    );
+    const grossSpent = transactions
+      .filter(
+        (t) =>
+          t.type === 'expense' &&
+          t.categoryId !== 'cat_debt_repayment' &&
+          !t.excludeFromBudget &&
+          !(t.vaultId && t.type === 'expense' && !t.goalFundedAmount) &&
+          isInMonth(t.date, year, month)
+      )
+      .reduce((sum, t) => {
+        const personalShare = t.split ? t.split.yourShare : t.amount;
+        const netShare = Math.max(0, personalShare - (t.goalFundedAmount || 0));
+        return sum + netShare;
+      }, 0);
+
+    // Refunds offset monthly living expenses
+    const refundsThisMonth = transactions
+      .filter(
+        (t) =>
+          t.categoryId === 'cat_refund' &&
+          isInMonth(t.date, year, month)
+      )
+      .reduce((sum, t) => sum + t.amount, 0);
+
+    return roundMoney(Math.max(0, grossSpent - refundsThisMonth));
   },
 
   getNetBalance: (monthKey) => {
