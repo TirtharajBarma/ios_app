@@ -75,11 +75,19 @@ export default function RootLayout() {
 
         logInfo("app", "App launch started");
         installConsoleCapture();
-        // Best-effort, non-blocking: never delay the UI behind log init.
-        await initAuditLogs().catch(() => {});
-        await initDatabase();
-        await requestNotificationPermissions();
-        await loadSettings();
+
+        // Load critical essentials concurrently (eliminates cold start waterfall)
+        await Promise.all([
+          loadSettings().catch((e) => console.warn("Startup: loadSettings error:", e)),
+          initDatabase().catch((e) => console.warn("Startup: initDatabase error:", e)),
+        ]);
+
+        // Unblock UI immediately so the user doesn't wait on background tasks
+        setIsReady(true);
+
+        // Best-effort, non-blocking background initialization tasks
+        initAuditLogs().catch(() => {});
+        requestNotificationPermissions().catch(() => {});
 
         logInfo("app", "App initialized successfully", {
           hasBiometrics: useSettingsStore.getState().faceIdEnabled,

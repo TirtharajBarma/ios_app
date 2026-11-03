@@ -2,8 +2,8 @@
  * Application Version and Release Configuration
  * Auto-synced with EAS Updates & Local Builds
  */
-export const CURRENT_RELEASE_VERSION = "v1.3.6";
-export const RELEASE_DESCRIPTION = "Salary-anchored cash flow, expense-offsetting refunds, and strict non-salary isolation";
+export const CURRENT_RELEASE_VERSION = "v1.3.7";
+export const RELEASE_DESCRIPTION = "Optimize iOS cold start, virtualize ledger list, throttle rolling animations & batch SQLite audit logs";
 export const APP_BINARY_VERSION = "v1.0.0 (Build 1)";
 export const ADMIN_NAME = "Tirtharaj";
 export const AUTHOR_CREDIT = "Built with ❤️ by Tirtharaj";
@@ -18,6 +18,16 @@ export interface ReleaseHistoryItem {
 }
 
 export const INITIAL_RELEASE_HISTORY: ReleaseHistoryItem[] = [
+  {
+    version: "v1.3.7",
+    date: "Nov 4, 2026",
+    title: "Optimize iOS cold start, virtualize ledger list, throttle rolling animations & batch SQLite audit logs",
+    notes: [
+          "Optimize iOS cold start, virtualize ledger list, throttle rolling animations & batch SQLite audit logs"
+    ],
+    type: "ota",
+    isNativeBuild: false,
+  },
   {
     version: "v1.3.6",
     date: "Nov 4, 2026",

@@ -3,6 +3,7 @@ import {
   View,
   StyleSheet,
   ScrollView,
+  FlatList,
   TouchableOpacity,
   Pressable,
   TextInput,
@@ -42,7 +43,6 @@ import {
   Shield,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
-import { BlurView } from 'expo-blur';
 import * as Clipboard from 'expo-clipboard';
 import { AppText, NativeLiquidMenu } from '@/components/ui';
 import type { MenuAction } from '@/components/ui';
@@ -79,10 +79,33 @@ const ROTATING_SEARCH_PLACEHOLDERS = [
   '"Coffee & cafe orders in September"',
 ];
 
+// Module-level cache to avoid repeated expensive Intl / toLocaleDateString passes
+const DATE_HEADING_CACHE = new Map<string, string>();
+
+function formatCachedDateHeading(dateKey: string, rawDate: string): string {
+  const cached = DATE_HEADING_CACHE.get(dateKey);
+  if (cached) return cached;
+  const parts = dateKey.split('-').map(Number);
+  const dateObj =
+    parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])
+      ? new Date(parts[0], parts[1] - 1, parts[2])
+      : new Date(rawDate);
+
+  const heading = dateObj
+    .toLocaleDateString('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+    })
+    .toUpperCase();
+  DATE_HEADING_CACHE.set(dateKey, heading);
+  return heading;
+}
+
 export const ExpenseLedger: React.FC = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<FlatList>(null);
   const {
   accounts,
   categories,
@@ -179,7 +202,7 @@ export const ExpenseLedger: React.FC = () => {
   useFocusEffect(
     useCallback(() => {
       handleTabFocus('ledger', () => {
-        scrollRef.current?.scrollTo({ y: 0, animated: false });
+        scrollRef.current?.scrollToOffset({ offset: 0, animated: false });
       });
     }, [])
   );
@@ -423,18 +446,7 @@ export const ExpenseLedger: React.FC = () => {
     sortedFilteredTxs.forEach((tx) => {
       const rawDate = tx.date || '';
       const dateKey = rawDate.slice(0, 10);
-      const parts = dateKey.split('-').map(Number);
-      const dateObj = parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])
-        ? new Date(parts[0], parts[1] - 1, parts[2])
-        : new Date(rawDate);
-
-      const dateHeading = dateObj
-        .toLocaleDateString('en-US', {
-          month: 'long',
-          day: 'numeric',
-          year: 'numeric',
-        })
-        .toUpperCase();
+      const dateHeading = formatCachedDateHeading(dateKey, rawDate);
 
       if (!groupsMap.has(dateKey)) {
         groupsMap.set(dateKey, { dateHeading, items: [] });
@@ -1288,6 +1300,95 @@ export const ExpenseLedger: React.FC = () => {
     );
   };
 
+  const renderDateGroupItem = useCallback(
+    ({ item }: { item: { dateKey: string; dateHeading: string; items: LedgerGroupItem[] } }) => (
+      <View key={item.dateKey} style={styles.dateGroupContainer}>
+        {/* Apple Dark Floating Date Header Pill */}
+        <View style={styles.dateHeaderPillWrapper}>
+          <View style={styles.dateHeaderPill}>
+            <AppText style={styles.dateHeadingText}>{item.dateHeading}</AppText>
+          </View>
+        </View>
+
+        {/* Group Card */}
+        <View style={styles.groupCard}>
+          {item.items.map((subItem, idx) => {
+            const isLast = idx === item.items.length - 1;
+            if (subItem.type === 'folder' && subItem.folderKey && subItem.folderTxs) {
+              return renderFolderItem(
+                subItem.folderKey,
+                subItem.folderName || 'Event',
+                subItem.folderEmoji || '🌴',
+                subItem.folderTxs,
+                subItem.folderTotal || 0,
+                isLast
+              );
+            } else if (subItem.tx) {
+              return renderTransactionItem(subItem.tx, isLast);
+            }
+            return null;
+          })}
+        </View>
+      </View>
+    ),
+    [renderFolderItem, renderTransactionItem]
+  );
+
+  const renderEmptyList = useMemo(
+    () => (
+      <View style={styles.emptyStateContainer}>
+        <View style={styles.emptyIconCircle}>
+          <Search size={22} color={expenseColors.textMuted} />
+        </View>
+        <AppText style={styles.emptyStateTitle}>
+          {smartSearchQuery ? 'No matching transactions' : 'No transactions found'}
+        </AppText>
+        <AppText style={styles.emptyStateSubtitle}>
+          {smartSearchQuery
+            ? `No transactions matched "${smartSearchQuery}".`
+            : 'Try adjusting your account selection or add a new transaction.'}
+        </AppText>
+        {smartSearchQuery.length > 0 && (
+          <TouchableOpacity
+            style={styles.clearSearchBtn}
+            onPress={() => {
+              Haptics.selectionAsync().catch(() => {});
+              setSmartSearchQuery('');
+            }}
+            activeOpacity={0.8}
+          >
+            <AppText style={styles.clearSearchBtnText}>Clear Search</AppText>
+          </TouchableOpacity>
+        )}
+        {activeAccountFilter !== 'All' && (
+          <TouchableOpacity
+            style={[styles.clearSearchBtn, { marginTop: 8 }]}
+            onPress={() => {
+              Haptics.selectionAsync().catch(() => {});
+              setActiveAccountFilter('All');
+            }}
+            activeOpacity={0.8}
+          >
+            <AppText style={styles.clearSearchBtnText}>Show All Accounts</AppText>
+          </TouchableOpacity>
+        )}
+        {selectedCategoryFilter !== 'All' && (
+          <TouchableOpacity
+            style={[styles.clearSearchBtn, { marginTop: 8 }]}
+            onPress={() => {
+              Haptics.selectionAsync().catch(() => {});
+              setSelectedCategoryFilter('All');
+            }}
+            activeOpacity={0.8}
+          >
+            <AppText style={styles.clearSearchBtnText}>Reset Category Filter</AppText>
+          </TouchableOpacity>
+        )}
+      </View>
+    ),
+    [smartSearchQuery, activeAccountFilter, selectedCategoryFilter]
+  );
+
   return (
     <View style={styles.screenContainer}>
       {/* Top Safe Area Background */}
@@ -1616,126 +1717,48 @@ export const ExpenseLedger: React.FC = () => {
 
       </View>
 
-      {/* ── INDEPENDENT SCROLLABLE TRANSACTIONS LIST ── */}
-      <ScrollView
-        ref={scrollRef}
-        style={styles.transactionsScroll}
-        contentContainerStyle={[
-          styles.transactionsScrollContent,
-          {
-            paddingTop: 8,
-            paddingBottom: insets.bottom + (isSelectMode ? 150 : 80),
-          },
-        ]}
-        keyboardDismissMode="on-drag"
-        keyboardShouldPersistTaps="handled"
-        onScrollBeginDrag={() => {
-          Keyboard.dismiss();
-          setIsSearchFocused(false);
+      {/* ── VIRTUALIZED INDEPENDENT SCROLLABLE TRANSACTIONS LIST ── */}
+      <Animated.View
+        style={{
+          flex: 1,
+          opacity: animList,
+          transform: [
+            {
+              translateY: animList.interpolate({
+                inputRange: [0, 1],
+                outputRange: [16, 0],
+              }),
+            },
+          ],
         }}
-        showsVerticalScrollIndicator={false}
       >
-        <Animated.View
-          style={{
-            opacity: animList,
-            transform: [
-              {
-                translateY: animList.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [16, 0],
-                }),
-              },
-            ],
+        <FlatList
+          ref={scrollRef}
+          data={dateGroups}
+          keyExtractor={(item) => item.dateKey}
+          renderItem={renderDateGroupItem}
+          ListEmptyComponent={renderEmptyList}
+          style={styles.transactionsScroll}
+          contentContainerStyle={[
+            styles.transactionsScrollContent,
+            {
+              paddingTop: 8,
+              paddingBottom: insets.bottom + (isSelectMode ? 150 : 80),
+            },
+          ]}
+          keyboardDismissMode="on-drag"
+          keyboardShouldPersistTaps="handled"
+          onScrollBeginDrag={() => {
+            Keyboard.dismiss();
+            setIsSearchFocused(false);
           }}
-        >
-          {dateGroups.length === 0 ? (
-            <View style={styles.emptyStateContainer}>
-              <View style={styles.emptyIconCircle}>
-                <Search size={22} color={expenseColors.textMuted} />
-              </View>
-              <AppText style={styles.emptyStateTitle}>
-                {smartSearchQuery ? 'No matching transactions' : 'No transactions found'}
-              </AppText>
-              <AppText style={styles.emptyStateSubtitle}>
-                {smartSearchQuery
-                  ? `No transactions matched "${smartSearchQuery}".`
-                  : 'Try adjusting your account selection or add a new transaction.'}
-              </AppText>
-              {smartSearchQuery.length > 0 && (
-                <TouchableOpacity
-                  style={styles.clearSearchBtn}
-                  onPress={() => {
-                    Haptics.selectionAsync().catch(() => {});
-                    setSmartSearchQuery('');
-                  }}
-                  activeOpacity={0.8}
-                >
-                  <AppText style={styles.clearSearchBtnText}>Clear Search</AppText>
-                </TouchableOpacity>
-              )}
-              {activeAccountFilter !== 'All' && (
-                <TouchableOpacity
-                  style={[styles.clearSearchBtn, { marginTop: 8 }]}
-                  onPress={() => {
-                    Haptics.selectionAsync().catch(() => {});
-                    setActiveAccountFilter('All');
-                  }}
-                  activeOpacity={0.8}
-                >
-                  <AppText style={styles.clearSearchBtnText}>Show All Accounts</AppText>
-                </TouchableOpacity>
-              )}
-              {selectedCategoryFilter !== 'All' && (
-                <TouchableOpacity
-                  style={[styles.clearSearchBtn, { marginTop: 8 }]}
-                  onPress={() => {
-                    Haptics.selectionAsync().catch(() => {});
-                    setSelectedCategoryFilter('All');
-                  }}
-                  activeOpacity={0.8}
-                >
-                  <AppText style={styles.clearSearchBtnText}>Reset Category Filter</AppText>
-                </TouchableOpacity>
-              )}
-            </View>
-          ) : (
-            dateGroups.map(({ dateKey, dateHeading, items }) => (
-              <View key={dateKey} style={styles.dateGroupContainer}>
-                {/* Apple Frosted Glass Floating Date Header Pill */}
-                <View style={styles.dateHeaderPillWrapper}>
-                  <BlurView
-                    intensity={28}
-                    tint="systemUltraThinMaterialDark"
-                    style={styles.dateHeaderPill}
-                  >
-                    <AppText style={styles.dateHeadingText}>{dateHeading}</AppText>
-                  </BlurView>
-                </View>
-
-                {/* Group Card */}
-                <View style={styles.groupCard}>
-                  {items.map((item, idx) => {
-                    const isLast = idx === items.length - 1;
-                    if (item.type === 'folder' && item.folderKey && item.folderTxs) {
-                      return renderFolderItem(
-                        item.folderKey,
-                        item.folderName || 'Event',
-                        item.folderEmoji || '🌴',
-                        item.folderTxs,
-                        item.folderTotal || 0,
-                        isLast
-                      );
-                    } else if (item.tx) {
-                      return renderTransactionItem(item.tx, isLast);
-                    }
-                    return null;
-                  })}
-                </View>
-              </View>
-            ))
-          )}
-        </Animated.View>
-      </ScrollView>
+          showsVerticalScrollIndicator={false}
+          initialNumToRender={6}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+          removeClippedSubviews={Platform.OS === 'android'}
+        />
+      </Animated.View>
 
       {/* ── FIXED BOTTOM ACTION BAR IN SELECTION MODE ── */}
       {isSelectMode && (
@@ -2237,9 +2260,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 4,
     borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    backgroundColor: '#1E2028',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.07)',
+    borderColor: 'rgba(255, 255, 255, 0.08)',
     overflow: 'hidden',
   },
   dateHeadingText: {

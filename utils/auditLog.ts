@@ -189,29 +189,53 @@ function enqueue(level: AuditLevel, scope: AuditScope | string, message: string,
   }
 }
 
-function queueWrite(entry: AuditLogEntry): void {
+let writeBuffer: AuditLogEntry[] = [];
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+function flushBatch(): void {
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+  if (writeBuffer.length === 0 || !dbRef) return;
+  const batch = writeBuffer;
+  writeBuffer = [];
+
   writeChain = writeChain.then(async () => {
     const db = dbRef;
     if (!db) return;
     try {
-      await db.runAsync(
-        "INSERT INTO app_logs (id, ts, level, scope, message, meta) VALUES (?, ?, ?, ?, ?, ?);",
-        entry.id,
-        entry.ts,
-        entry.level,
-        entry.scope,
-        entry.message,
-        entry.meta
-      );
-      writeCounter += 1;
-      // Prune roughly every 50 writes (cheap: avoids unbounded growth).
-      if (writeCounter % 50 === 0) {
+      await db.withTransactionAsync(async () => {
+        for (const item of batch) {
+          await db.runAsync(
+            "INSERT INTO app_logs (id, ts, level, scope, message, meta) VALUES (?, ?, ?, ?, ?, ?);",
+            item.id,
+            item.ts,
+            item.level,
+            item.scope,
+            item.message,
+            item.meta
+          );
+        }
+      });
+      writeCounter += batch.length;
+      if (writeCounter >= 50) {
+        writeCounter = 0;
         await pruneOverflow(db);
       }
     } catch {
       // Non-fatal — the logger must never crash the app.
     }
   });
+}
+
+function queueWrite(entry: AuditLogEntry): void {
+  writeBuffer.push(entry);
+  if (writeBuffer.length >= 10) {
+    flushBatch();
+  } else if (!flushTimer) {
+    flushTimer = setTimeout(flushBatch, 250);
+  }
 }
 
 async function pruneOverflow(db: SQLite.SQLiteDatabase): Promise<void> {
@@ -253,6 +277,7 @@ export async function initAuditLogs(): Promise<void> {
     const buffered = pending;
     pending = [];
     for (const entry of buffered) queueWrite(entry);
+    flushBatch();
     await writeChain;
 
     await pruneOverflow(db);

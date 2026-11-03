@@ -41,12 +41,24 @@ export function AnimatedAmountText({ value, format, resetKey, duration = 500, st
       return;
     }
     const start = Date.now();
+    let lastUpdate = 0;
+    const FRAME_INTERVAL = 33; // ~30 fps cap: silky smooth roll without choking React JS thread with 60 re-renders
     const tick = () => {
-      const t = Math.min(1, (Date.now() - start) / duration);
-      const next = t >= 1 ? value : from + (value - from) * easeOutCubic(t);
-      shownRef.current = next;
-      setShown(next);
-      if (t < 1) frame.current = requestAnimationFrame(tick);
+      const now = Date.now();
+      const elapsed = now - start;
+      const t = Math.min(1, elapsed / duration);
+      if (t >= 1) {
+        shownRef.current = value;
+        setShown(value);
+        return;
+      }
+      if (now - lastUpdate >= FRAME_INTERVAL) {
+        lastUpdate = now;
+        const next = from + (value - from) * easeOutCubic(t);
+        shownRef.current = next;
+        setShown(next);
+      }
+      frame.current = requestAnimationFrame(tick);
     };
     frame.current = requestAnimationFrame(tick);
     return () => {

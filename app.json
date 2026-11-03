@@ -2,7 +2,7 @@
   "expo": {
     "name": "Cashveil",
     "slug": "subscription",
-    "version": "1.3.6",
+    "version": "1.3.7",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "cashveil",
@@ -85,12 +85,12 @@
       },
       "supabaseUrl": "https://nvsjrfzzessvynnuurcg.supabase.co",
       "supabaseAnonKey": "sb_publishable_hmdnizlu8wzE6EwOj2IJvw_0mc9qG7J",
-      "updateVersion": "v1.3.6",
-      "updateDescription": "Salary-anchored cash flow, expense-offsetting refunds, and strict non-salary isolation",
+      "updateVersion": "v1.3.7",
+      "updateDescription": "Optimize iOS cold start, virtualize ledger list, throttle rolling animations & batch SQLite audit logs",
       "updateNotes": [
-        "Salary-anchored cash flow, expense-offsetting refunds, and strict non-salary isolation"
+        "Optimize iOS cold start, virtualize ledger list, throttle rolling animations & batch SQLite audit logs"
       ],
-      "easUpdateMessage": "v1.3.6: Salary-anchored cash flow, expense-offsetting refunds, and strict non-salary isolation"
+      "easUpdateMessage": "v1.3.7: Optimize iOS cold start, virtualize ledger list, throttle rolling animations & batch SQLite audit logs"
     },
     "owner": "tirtharaj_barma",
     "runtimeVersion": "1",
