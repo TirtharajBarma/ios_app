@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { View, StyleSheet, TouchableOpacity, Animated, LayoutAnimation, Platform, UIManager, PanResponder, Easing } from 'react-native';
-import { Zap, ArrowLeftRight, ChevronLeft, ChevronRight } from 'lucide-react-native';
+import { Zap, ArrowLeftRight, ChevronLeft, ChevronRight, Check } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { AppText } from '@/components/ui';
 import { useExpenseStore, monthKeyToYearMonth, monthKeyOf } from '@/store/useExpenseStore';
@@ -50,6 +50,7 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
     formatAmount,
     setSelectedMonth,
     getBudgetBufferAnalysis,
+    savingsVaults,
   } = useExpenseStore(
     useShallow((s) => ({
       selectedMonth: s.selectedMonth,
@@ -66,6 +67,7 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
       formatAmount: s.formatAmount,
       setSelectedMonth: s.setSelectedMonth,
       getBudgetBufferAnalysis: s.getBudgetBufferAnalysis,
+      savingsVaults: s.savingsVaults,
     }))
   );
 
@@ -143,6 +145,10 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
   const totalBalance = useMemo(
     () => getTotalBalance(selectedMonth),
     [getTotalBalance, selectedMonth, accounts, transactions]
+  );
+  const totalSavedInVaults = useMemo(
+    () => (savingsVaults || []).reduce((sum, v) => sum + (v.currentAmount || 0), 0),
+    [savingsVaults]
   );
   const totalSpent = useMemo(
     () => getTotalSpent(selectedMonth),
@@ -432,8 +438,8 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
                       : 'Budget left'
                     : 'Total spent'
                   : isCurrentMonth
-                  ? 'Total balance'
-                  : 'Balance at month end'}
+                  ? 'Net balance'
+                  : 'Net at month end'}
               </AppText>
 
               {/* Rolls to the new figure when it changes in place (e.g. an expense is added); jumps on month/mode switch */}
@@ -483,15 +489,30 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
                   </View>
                 ) : (
                   <View style={styles.accountChipsRow}>
-                    <View style={styles.accountChip}>
-                      <AppText style={styles.accountChipLabel}>Bank </AppText>
-                      <AppText style={styles.accountChipVal}>{formatAmount(bankCash)}</AppText>
-                    </View>
-                    {cardDues > 0 && (
-                      <View style={[styles.accountChip, styles.accountChipDue]}>
-                        <AppText style={styles.accountChipDueLabel}>Bills </AppText>
-                        <AppText style={styles.accountChipDueVal}>{formatAmount(cardDues)}</AppText>
-                      </View>
+                    {cardDues > 0 ? (
+                      <>
+                        <View style={styles.accountChip}>
+                          <AppText style={styles.accountChipLabel}>Bank </AppText>
+                          <AppText style={styles.accountChipVal}>{formatAmount(bankCash)}</AppText>
+                        </View>
+                        <View style={[styles.accountChip, styles.accountChipDue]}>
+                          <AppText style={styles.accountChipDueLabel}>CC Due </AppText>
+                          <AppText style={styles.accountChipDueVal}>-{formatAmount(cardDues)}</AppText>
+                        </View>
+                      </>
+                    ) : (
+                      <>
+                        <View style={[styles.accountChip, styles.accountChipClear]}>
+                          <Check size={11} color={expenseColors.accentGreen} strokeWidth={2.8} style={styles.chipCheckIcon} />
+                          <AppText style={styles.accountChipClearText}>All Dues Clear</AppText>
+                        </View>
+                        {totalSavedInVaults > 0 && (
+                          <View style={styles.accountChip}>
+                            <AppText style={styles.accountChipLabel}>Vaults </AppText>
+                            <AppText style={styles.accountChipVal}>{formatAmount(totalSavedInVaults)}</AppText>
+                          </View>
+                        )}
+                      </>
                     )}
                   </View>
                 )}
@@ -792,6 +813,20 @@ const styles = StyleSheet.create({
     color: '#F48B8B',
     fontSize: 12,
     fontWeight: '700',
+  },
+  accountChipClear: {
+    backgroundColor: 'rgba(112, 214, 188, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(112, 214, 188, 0.22)',
+  },
+  accountChipClearText: {
+    color: expenseColors.accentGreen,
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  chipCheckIcon: {
+    marginRight: 4,
   },
   accountChipBuffer: {
     backgroundColor: 'rgba(251, 191, 36, 0.1)',

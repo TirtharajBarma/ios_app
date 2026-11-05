@@ -2,7 +2,7 @@
   "expo": {
     "name": "Cashveil",
     "slug": "subscription",
-    "version": "1.3.9",
+    "version": "1.3.10",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "cashveil",
@@ -85,12 +85,12 @@
       },
       "supabaseUrl": "https://nvsjrfzzessvynnuurcg.supabase.co",
       "supabaseAnonKey": "sb_publishable_hmdnizlu8wzE6EwOj2IJvw_0mc9qG7J",
-      "updateVersion": "v1.3.9",
-      "updateDescription": "Sticky monthly ledger dividers with stats, true gross outflow spend tracking, and safe category percentages",
+      "updateVersion": "v1.3.10",
+      "updateDescription": "Refined Net balance hero and smart dues breakdown without duplicate bank pill",
       "updateNotes": [
-        "Sticky monthly ledger dividers with stats, true gross outflow spend tracking, and safe category percentages"
+        "Refined Net balance hero and smart dues breakdown without duplicate bank pill"
       ],
-      "easUpdateMessage": "v1.3.9: Sticky monthly ledger dividers with stats, true gross outflow spend tracking, and safe category percentages"
+      "easUpdateMessage": "v1.3.10: Refined Net balance hero and smart dues breakdown without duplicate bank pill"
     },
     "owner": "tirtharaj_barma",
     "runtimeVersion": "1",
