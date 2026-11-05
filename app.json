@@ -2,7 +2,7 @@
   "expo": {
     "name": "Cashveil",
     "slug": "subscription",
-    "version": "1.3.10",
+    "version": "1.3.11",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "cashveil",
@@ -85,12 +85,12 @@
       },
       "supabaseUrl": "https://nvsjrfzzessvynnuurcg.supabase.co",
       "supabaseAnonKey": "sb_publishable_hmdnizlu8wzE6EwOj2IJvw_0mc9qG7J",
-      "updateVersion": "v1.3.10",
-      "updateDescription": "Refined Net balance hero and smart dues breakdown without duplicate bank pill",
+      "updateVersion": "v1.3.11",
+      "updateDescription": "Fix credit card debt accounting to include live card spend in Net Balance and show Bank with Credit Due",
       "updateNotes": [
-        "Refined Net balance hero and smart dues breakdown without duplicate bank pill"
+        "Fix credit card debt accounting to include live card spend in Net Balance and show Bank with Credit Due"
       ],
-      "easUpdateMessage": "v1.3.10: Refined Net balance hero and smart dues breakdown without duplicate bank pill"
+      "easUpdateMessage": "v1.3.11: Fix credit card debt accounting to include live card spend in Net Balance and show Bank with Credit Due"
     },
     "owner": "tirtharaj_barma",
     "runtimeVersion": "1",

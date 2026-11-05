@@ -2,8 +2,8 @@
  * Application Version and Release Configuration
  * Auto-synced with EAS Updates & Local Builds
  */
-export const CURRENT_RELEASE_VERSION = "v1.3.10";
-export const RELEASE_DESCRIPTION = "Refined Net balance hero and smart dues breakdown without duplicate bank pill";
+export const CURRENT_RELEASE_VERSION = "v1.3.11";
+export const RELEASE_DESCRIPTION = "Fix credit card debt accounting to include live card spend in Net Balance and show Bank with Credit Due";
 export const APP_BINARY_VERSION = "v1.0.0 (Build 1)";
 export const ADMIN_NAME = "Tirtharaj";
 export const AUTHOR_CREDIT = "Built with ❤️ by Tirtharaj";
@@ -18,6 +18,16 @@ export interface ReleaseHistoryItem {
 }
 
 export const INITIAL_RELEASE_HISTORY: ReleaseHistoryItem[] = [
+  {
+    version: "v1.3.11",
+    date: "Nov 5, 2026",
+    title: "Fix credit card debt accounting to include live card spend in Net Balance and show Bank with Credit Due",
+    notes: [
+          "Fix credit card debt accounting to include live card spend in Net Balance and show Bank with Credit Due"
+    ],
+    type: "ota",
+    isNativeBuild: false,
+  },
   {
     version: "v1.3.10",
     date: "Nov 5, 2026",

@@ -1659,11 +1659,14 @@ export const useExpenseStore = create<ExpenseState>()(
 
     if (isLive) {
       const bankCash = accounts
-        .filter((a) => a.type !== 'credit' && !a.isArchived)
-        .reduce((sum, a) => sum + (a.balance || 0), 0);
+        .filter((a) => !a.isArchived)
+        .reduce((sum, a) => {
+          if (a.type !== 'credit') return sum + (a.balance || 0);
+          return sum + (a.balance && a.balance > 0 ? a.balance : 0);
+        }, 0);
       const cardDues = accounts
         .filter((a) => a.type === 'credit' && !a.isArchived)
-        .reduce((sum, a) => sum + Math.max(0, (a.dueAmount || 0) - (a.unbilledDue || 0)), 0);
+        .reduce((sum, a) => sum + Math.max(0, a.dueAmount || 0), 0);
       return { bankCash: roundMoney(bankCash), cardDues: roundMoney(cardDues) };
     }
 
@@ -1723,9 +1726,8 @@ export const useExpenseStore = create<ExpenseState>()(
         const rawDue = startingOpening + expSum - incSum;
         const posBal = rawDue < 0 ? Math.abs(rawDue) : 0;
         const dueAmt = rawDue > 0 ? rawDue : 0;
-        const billedDue = dueAmt - Math.min(pastUnbilled, dueAmt);
         bankCash += posBal;
-        cardDues += billedDue;
+        cardDues += dueAmt;
       } else {
         const finalBal = startingOpening + incSum - expSum;
         bankCash += finalBal;

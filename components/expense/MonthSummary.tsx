@@ -496,7 +496,7 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
                           <AppText style={styles.accountChipVal}>{formatAmount(bankCash)}</AppText>
                         </View>
                         <View style={[styles.accountChip, styles.accountChipDue]}>
-                          <AppText style={styles.accountChipDueLabel}>CC Due </AppText>
+                          <AppText style={styles.accountChipDueLabel}>Credit Due </AppText>
                           <AppText style={styles.accountChipDueVal}>-{formatAmount(cardDues)}</AppText>
                         </View>
                       </>
