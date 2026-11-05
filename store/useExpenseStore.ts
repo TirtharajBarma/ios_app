@@ -1818,16 +1818,7 @@ export const useExpenseStore = create<ExpenseState>()(
         return sum + netShare;
       }, 0);
 
-    // Refunds offset monthly living expenses
-    const refundsThisMonth = transactions
-      .filter(
-        (t) =>
-          t.categoryId === 'cat_refund' &&
-          isInMonth(t.date, year, month)
-      )
-      .reduce((sum, t) => sum + t.amount, 0);
-
-    return roundMoney(Math.max(0, grossSpent - refundsThisMonth));
+    return roundMoney(grossSpent);
   },
 
   getNetBalance: (monthKey) => {
@@ -1978,7 +1969,7 @@ export const useExpenseStore = create<ExpenseState>()(
         return sum + netShare;
       }, 0);
 
-    return userCats.map((cat) => {
+    const catTotals = userCats.map((cat) => {
       let catSpent = transactions
         .filter(
           (t) =>
@@ -1998,7 +1989,14 @@ export const useExpenseStore = create<ExpenseState>()(
         catSpent += orphanSpent;
       }
 
-      const percentage = totalSpent > 0 ? Number(((catSpent / totalSpent) * 100).toFixed(1)) : 0;
+      return { cat, catSpent };
+    });
+
+    const sumCategories = catTotals.reduce((sum, c) => sum + c.catSpent, 0);
+    const denominator = sumCategories > 0 ? sumCategories : totalSpent;
+
+    return catTotals.map(({ cat, catSpent }) => {
+      const percentage = denominator > 0 ? Math.min(100, Number(((catSpent / denominator) * 100).toFixed(1))) : 0;
       return {
         category: cat,
         amount: catSpent,

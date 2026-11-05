@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { View, StyleSheet, TouchableOpacity, Animated, LayoutAnimation, Platform, UIManager, PanResponder, Easing } from 'react-native';
 import { Zap, ArrowLeftRight, ChevronLeft, ChevronRight } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
@@ -86,9 +86,9 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
   const hasRunArcEntrance = useRef(false);
 
   // Derive Effective Budget (fallback to sum of category budgets if monthlyBudget === 0)
-  const totalAllocatedCategoryBudget = Object.values(categoryBudgets || {}).reduce(
-    (sum, val) => sum + (val > 0 ? val : 0),
-    0
+  const totalAllocatedCategoryBudget = useMemo(
+    () => Object.values(categoryBudgets || {}).reduce((sum, val) => sum + (val > 0 ? val : 0), 0),
+    [categoryBudgets]
   );
   const effectiveBudget = monthlyBudget > 0 ? monthlyBudget : totalAllocatedCategoryBudget;
 
@@ -135,13 +135,31 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
     setSelectedMonth(monthKeyOf(d));
   };
 
-  // Synchronized historical balances: both big total and chips use the exact same calculation
-  const { bankCash, cardDues } = getHistoricalAccountBreakdown(selectedMonth);
-  const totalBalance = getTotalBalance(selectedMonth);
-  const totalSpent = getTotalSpent(selectedMonth);
-  const remainingBudget = getRemainingBudget(selectedMonth);
-  const breakdown = getCategoryBreakdown(selectedMonth);
-  const bufferAnalysis = getBudgetBufferAnalysis(selectedMonth);
+  // Synchronized historical balances: memoized so category selection/switches do not loop
+  const { bankCash, cardDues } = useMemo(
+    () => getHistoricalAccountBreakdown(selectedMonth),
+    [getHistoricalAccountBreakdown, selectedMonth, accounts, transactions]
+  );
+  const totalBalance = useMemo(
+    () => getTotalBalance(selectedMonth),
+    [getTotalBalance, selectedMonth, accounts, transactions]
+  );
+  const totalSpent = useMemo(
+    () => getTotalSpent(selectedMonth),
+    [getTotalSpent, selectedMonth, transactions]
+  );
+  const remainingBudget = useMemo(
+    () => getRemainingBudget(selectedMonth),
+    [getRemainingBudget, selectedMonth, transactions, monthlyBudget, categoryBudgets]
+  );
+  const breakdown = useMemo(
+    () => getCategoryBreakdown(selectedMonth),
+    [getCategoryBreakdown, selectedMonth, transactions]
+  );
+  const bufferAnalysis = useMemo(
+    () => getBudgetBufferAnalysis(selectedMonth),
+    [getBudgetBufferAnalysis, selectedMonth, transactions, accounts, categoryBudgets, monthlyBudget]
+  );
   const isBufferActive = isBudgetMode && effectiveBudget > 0 && remainingBudget < 0 && bufferAnalysis.status === 'buffer';
   const isBudgetDeficit = isBudgetMode && effectiveBudget > 0 && remainingBudget < 0 && bufferAnalysis.status === 'deficit';
 

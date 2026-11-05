@@ -80,10 +80,16 @@ export const MoneyFlowCard: React.FC = () => {
 
   const { year, month } = useMemo(() => monthKeyToYearMonth(selectedMonth), [selectedMonth]);
 
-  const totalIncome = getTotalIncome(selectedMonth);
-  const otherIncome = getOtherIncome ? getOtherIncome(selectedMonth) : 0;
-  const totalSpent = getTotalSpent(selectedMonth);
-  const bufferAnalysis = getBudgetBufferAnalysis(selectedMonth);
+  const totalIncome = useMemo(() => getTotalIncome(selectedMonth), [getTotalIncome, selectedMonth, transactions]);
+  const otherIncome = useMemo(
+    () => (getOtherIncome ? getOtherIncome(selectedMonth) : 0),
+    [getOtherIncome, selectedMonth, transactions]
+  );
+  const totalSpent = useMemo(() => getTotalSpent(selectedMonth), [getTotalSpent, selectedMonth, transactions]);
+  const bufferAnalysis = useMemo(
+    () => getBudgetBufferAnalysis(selectedMonth),
+    [getBudgetBufferAnalysis, selectedMonth, transactions, accounts, categoryBudgets, monthlyBudget]
+  );
 
   const priorMonthUnallocatedSalary = useMemo(() => {
     if (totalIncome > 0) return null;

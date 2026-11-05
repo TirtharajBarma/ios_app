@@ -80,6 +80,7 @@ export const NativeLiquidMenu: React.FC<NativeLiquidMenuProps> = ({
 
   // Flatten actions & subactions for the Android / fallback modal list
   const options = useMemo<LiquidDropdownOption<string>[]>(() => {
+    if (Platform.OS === 'ios') return [];
     const list: LiquidDropdownOption<string>[] = [];
     visibleActions.forEach((action) => {
       if (action.subactions && action.subactions.length > 0) {
@@ -112,6 +113,7 @@ export const NativeLiquidMenu: React.FC<NativeLiquidMenuProps> = ({
   }, [visibleActions]);
 
   const selectedId = useMemo(() => {
+    if (Platform.OS === 'ios') return undefined;
     for (const action of visibleActions) {
       if (action.state === 'on') return action.id;
       if (action.subactions) {

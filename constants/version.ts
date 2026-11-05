@@ -2,8 +2,8 @@
  * Application Version and Release Configuration
  * Auto-synced with EAS Updates & Local Builds
  */
-export const CURRENT_RELEASE_VERSION = "v1.3.7";
-export const RELEASE_DESCRIPTION = "Optimize iOS cold start, virtualize ledger list, throttle rolling animations & batch SQLite audit logs";
+export const CURRENT_RELEASE_VERSION = "v1.3.9";
+export const RELEASE_DESCRIPTION = "Sticky monthly ledger dividers with stats, true gross outflow spend tracking, and safe category percentages";
 export const APP_BINARY_VERSION = "v1.0.0 (Build 1)";
 export const ADMIN_NAME = "Tirtharaj";
 export const AUTHOR_CREDIT = "Built with ❤️ by Tirtharaj";
@@ -18,6 +18,26 @@ export interface ReleaseHistoryItem {
 }
 
 export const INITIAL_RELEASE_HISTORY: ReleaseHistoryItem[] = [
+  {
+    version: "v1.3.9",
+    date: "Nov 5, 2026",
+    title: "Sticky monthly ledger dividers with stats, true gross outflow spend tracking, and safe category percentages",
+    notes: [
+          "Sticky monthly ledger dividers with stats, true gross outflow spend tracking, and safe category percentages"
+    ],
+    type: "ota",
+    isNativeBuild: false,
+  },
+  {
+    version: "v1.3.8",
+    date: "Nov 4, 2026",
+    title: "Memoize Home dashboard analytics, throttle donut chart sweep & optimize menu passes",
+    notes: [
+          "Memoize Home dashboard analytics, throttle donut chart sweep & optimize menu passes"
+    ],
+    type: "ota",
+    isNativeBuild: false,
+  },
   {
     version: "v1.3.7",
     date: "Nov 4, 2026",

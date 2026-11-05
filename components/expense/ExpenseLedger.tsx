@@ -70,6 +70,23 @@ export interface LedgerGroupItem {
   folderTotal?: number;
 }
 
+export interface LedgerMonthStats {
+  monthKey: string;
+  monthHeading: string;
+  txnCount: number;
+  totalSpent: number;
+  totalSalary: number;
+}
+
+export interface LedgerDateGroup {
+  dateKey: string;
+  dateHeading: string;
+  monthKey: string;
+  isFirstInMonth: boolean;
+  monthStats: LedgerMonthStats | null;
+  items: LedgerGroupItem[];
+}
+
 const ROTATING_SEARCH_PLACEHOLDERS = [
   '"How much did I spend at Amazon in Decemb..."',
   '"Uber trips last weekend"',
@@ -81,6 +98,26 @@ const ROTATING_SEARCH_PLACEHOLDERS = [
 
 // Module-level cache to avoid repeated expensive Intl / toLocaleDateString passes
 const DATE_HEADING_CACHE = new Map<string, string>();
+const MONTH_HEADING_CACHE = new Map<string, string>();
+
+function formatCachedMonthHeading(monthKey: string): string {
+  const cached = MONTH_HEADING_CACHE.get(monthKey);
+  if (cached) return cached;
+  const parts = monthKey.split('-').map(Number);
+  const dateObj =
+    parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])
+      ? new Date(parts[0], parts[1] - 1, 1)
+      : new Date();
+
+  const heading = dateObj
+    .toLocaleDateString('en-US', {
+      month: 'long',
+      year: 'numeric',
+    })
+    .toUpperCase();
+  MONTH_HEADING_CACHE.set(monthKey, heading);
+  return heading;
+}
 
 function formatCachedDateHeading(dateKey: string, rawDate: string): string {
   const cached = DATE_HEADING_CACHE.get(dateKey);
@@ -439,14 +476,40 @@ export const ExpenseLedger: React.FC = () => {
     return [...filteredTxs].sort(compareTransactions);
   }, [filteredTxs]);
 
-  // Group All Transactions by Date and Folder with Guaranteed Descending Date Order
-  const dateGroups = useMemo(() => {
+  // Group All Transactions by Date and Folder with Guaranteed Descending Date Order & Month Banners
+  const dateGroups: LedgerDateGroup[] = useMemo(() => {
     const groupsMap = new Map<string, { dateHeading: string; items: LedgerGroupItem[] }>();
+    const monthStatsMap = new Map<string, LedgerMonthStats>();
 
     sortedFilteredTxs.forEach((tx) => {
       const rawDate = tx.date || '';
       const dateKey = rawDate.slice(0, 10);
+      const monthKey = rawDate.slice(0, 7) || 'other';
       const dateHeading = formatCachedDateHeading(dateKey, rawDate);
+
+      // Accumulate monthly stats
+      if (!monthStatsMap.has(monthKey)) {
+        monthStatsMap.set(monthKey, {
+          monthKey,
+          monthHeading: formatCachedMonthHeading(monthKey),
+          txnCount: 0,
+          totalSpent: 0,
+          totalSalary: 0,
+        });
+      }
+      const mStat = monthStatsMap.get(monthKey)!;
+      mStat.txnCount += 1;
+
+      if (tx.type === 'expense') {
+        const share = tx.split ? tx.split.yourShare : tx.amount;
+        mStat.totalSpent += share;
+      } else if (tx.type === 'debt_lend') {
+        mStat.totalSpent += tx.amount;
+      } else if (tx.type === 'income') {
+        if (tx.categoryId === 'cat_salary' || (!tx.categoryId && tx.note?.toLowerCase().includes('salary'))) {
+          mStat.totalSalary += tx.amount;
+        }
+      }
 
       if (!groupsMap.has(dateKey)) {
         groupsMap.set(dateKey, { dateHeading, items: [] });
@@ -465,7 +528,7 @@ export const ExpenseLedger: React.FC = () => {
 
         if (existing && existing.folderTxs) {
           existing.folderTxs.push(tx);
-          existing.folderTotal = (existing.folderTotal || 0) + (tx.type === 'expense' ? (tx.split ? tx.split.yourShare : tx.amount) : 0); // your share, as everywhere else
+          existing.folderTotal = (existing.folderTotal || 0) + (tx.type === 'expense' ? (tx.split ? tx.split.yourShare : tx.amount) : 0);
         } else {
           currentGroup.items.push({
             type: 'folder',
@@ -485,13 +548,23 @@ export const ExpenseLedger: React.FC = () => {
     });
 
     // Return as array sorted strictly by ISO date descending (newest at top)
-    return Array.from(groupsMap.entries())
-      .sort((a, b) => b[0].localeCompare(a[0]))
-      .map(([dateKey, val]) => ({
+    const sortedEntries = Array.from(groupsMap.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+
+    let prevMonth = '';
+    return sortedEntries.map(([dateKey, val]) => {
+      const monthKey = dateKey.slice(0, 7) || 'other';
+      const isFirstInMonth = monthKey !== prevMonth;
+      prevMonth = monthKey;
+
+      return {
         dateKey,
         dateHeading: val.dateHeading,
+        monthKey,
+        isFirstInMonth,
+        monthStats: isFirstInMonth ? monthStatsMap.get(monthKey) || null : null,
         items: val.items,
-      }));
+      };
+    });
   }, [sortedFilteredTxs, eventFolders]);
 
   const renderTransactionItem = (tx: ExpenseTransaction, isLast: boolean) => {
@@ -1301,8 +1374,36 @@ export const ExpenseLedger: React.FC = () => {
   };
 
   const renderDateGroupItem = useCallback(
-    ({ item }: { item: { dateKey: string; dateHeading: string; items: LedgerGroupItem[] } }) => (
+    ({ item }: { item: LedgerDateGroup }) => (
       <View key={item.dateKey} style={styles.dateGroupContainer}>
+        {/* Month Banner at top of each month */}
+        {item.isFirstInMonth && item.monthStats && (
+          <View style={styles.monthHeaderCard}>
+            <View style={styles.monthHeaderLeft}>
+              <AppText style={styles.monthHeaderTitle}>{item.monthStats.monthHeading}</AppText>
+              <AppText style={styles.monthHeaderSubtitle}>
+                {item.monthStats.txnCount} transaction{item.monthStats.txnCount !== 1 ? 's' : ''}
+              </AppText>
+            </View>
+            <View style={styles.monthHeaderRight}>
+              <View style={styles.monthStatPillSpent}>
+                <AppText style={styles.monthStatLabelSpent}>Spent</AppText>
+                <AppText style={styles.monthStatValueSpent}>
+                  {sym}{item.monthStats.totalSpent.toLocaleString('en-IN')}
+                </AppText>
+              </View>
+              {item.monthStats.totalSalary > 0 && (
+                <View style={styles.monthStatPillIncome}>
+                  <AppText style={styles.monthStatLabelIncome}>Salary</AppText>
+                  <AppText style={styles.monthStatValueIncome}>
+                    {sym}{item.monthStats.totalSalary.toLocaleString('en-IN')}
+                  </AppText>
+                </View>
+              )}
+            </View>
+          </View>
+        )}
+
         {/* Apple Dark Floating Date Header Pill */}
         <View style={styles.dateHeaderPillWrapper}>
           <View style={styles.dateHeaderPill}>
@@ -1331,7 +1432,7 @@ export const ExpenseLedger: React.FC = () => {
         </View>
       </View>
     ),
-    [renderFolderItem, renderTransactionItem]
+    [renderFolderItem, renderTransactionItem, sym]
   );
 
   const renderEmptyList = useMemo(
@@ -2245,6 +2346,93 @@ const styles = StyleSheet.create({
   clearAccountFilterBtnText: {
     color: '#FF9D66',
     fontSize: 11,
+    fontWeight: '700',
+  },
+
+  // ── Month Banner Header (Option A) ──
+  monthHeaderCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#161922',
+    borderRadius: 16,
+    marginHorizontal: 16,
+    marginTop: 14,
+    marginBottom: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  monthHeaderLeft: {
+    flex: 1,
+    gap: 2,
+  },
+  monthHeaderTitle: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    lineHeight: 17,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+  },
+  monthHeaderSubtitle: {
+    color: '#7E8392',
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '600',
+  },
+  monthHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  monthStatPillSpent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(244, 139, 139, 0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(244, 139, 139, 0.2)',
+  },
+  monthStatLabelSpent: {
+    color: '#A2A5B0',
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+  monthStatValueSpent: {
+    color: '#F48B8B',
+    fontSize: 12,
+    lineHeight: 15,
+    fontWeight: '700',
+  },
+  monthStatPillIncome: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(169, 223, 191, 0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(169, 223, 191, 0.2)',
+  },
+  monthStatLabelIncome: {
+    color: '#A2A5B0',
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+  monthStatValueIncome: {
+    color: '#A9DFBF',
+    fontSize: 12,
+    lineHeight: 15,
     fontWeight: '700',
   },
 

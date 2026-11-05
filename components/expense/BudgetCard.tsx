@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -70,8 +70,14 @@ export const BudgetCard: React.FC = () => {
   useEffect(() => {
     // Initial chart sweep draw animation, once per mount.
     chartProgress.setValue(0);
+    let lastSweepTime = 0;
     const listenerId = chartProgress.addListener(({ value }) => {
-      setSweepProgress(value);
+      const now = Date.now();
+      // Cap React render loop to ~30 fps (33ms) so entrance animations don't drop frames
+      if (now - lastSweepTime >= 33 || value >= 0.99) {
+        lastSweepTime = now;
+        setSweepProgress(value);
+      }
     });
 
     Animated.timing(chartProgress, {
@@ -111,14 +117,14 @@ export const BudgetCard: React.FC = () => {
 
   // Derive Effective Budget: if monthlyBudget > 0, use it.
   // If monthlyBudget === 0 but user configured category budgets, use their sum!
-  const totalAllocatedCategoryBudget = Object.values(categoryBudgets || {}).reduce(
-    (sum, val) => sum + (val > 0 ? val : 0),
-    0
+  const totalAllocatedCategoryBudget = useMemo(
+    () => Object.values(categoryBudgets || {}).reduce((sum, val) => sum + (val > 0 ? val : 0), 0),
+    [categoryBudgets]
   );
   const effectiveBudget = monthlyBudget > 0 ? monthlyBudget : totalAllocatedCategoryBudget;
 
-  const totalSpent = getTotalSpent();
-  const breakdown = getCategoryBreakdown();
+  const totalSpent = useMemo(() => getTotalSpent(), [getTotalSpent, selectedMonth, transactions]);
+  const breakdown = useMemo(() => getCategoryBreakdown(), [getCategoryBreakdown, selectedMonth, transactions, categories]);
 
   // Scaled donut chart dimensions to match reference proportions
   const chartSize = 296;
@@ -132,41 +138,50 @@ export const BudgetCard: React.FC = () => {
   const innerStrokeWidth = 4;
   const innerCircumference = 2 * Math.PI * innerRadius;
 
-  // Active categories: either have spending > 0 OR have an active budget > 0 configured
-  const activeBreakdown = breakdown
-    .filter((item) => {
-      const catBudget = categoryBudgets[item.category.id] || 0;
-      return item.amount > 0 || catBudget > 0;
-    })
-    .sort((a, b) => {
-      if (b.amount !== a.amount) return b.amount - a.amount;
-      const bBudget = categoryBudgets[b.category.id] || 0;
-      const aBudget = categoryBudgets[a.category.id] || 0;
-      return bBudget - aBudget;
-    });
-  const totalCategoriesSpent = activeBreakdown.reduce((sum, item) => sum + item.amount, 0);
+  // Active categories & segments memoized so tapping segments does not trigger re-calculations
+  const { activeBreakdown, totalCategoriesSpent, segments } = useMemo(() => {
+    const active = breakdown
+      .filter((item) => {
+        const catBudget = categoryBudgets[item.category.id] || 0;
+        return item.amount > 0 || catBudget > 0;
+      })
+      .sort((a, b) => {
+        if (b.amount !== a.amount) return b.amount - a.amount;
+        const bBudget = categoryBudgets[b.category.id] || 0;
+        const aBudget = categoryBudgets[a.category.id] || 0;
+        return bBudget - aBudget;
+      });
+    const total = active.reduce((sum, item) => sum + item.amount, 0);
 
-  // Selected category info
-  const selectedCategoryItem = selectedCatId
-    ? activeBreakdown.find((item) => item.category.id === selectedCatId) || null
-    : null;
+    let cumulativeOffset = 0;
+    const segs = active
+      .filter((item) => item.amount > 0)
+      .map((item) => {
+        const percentage = total > 0 ? item.amount / total : 0;
+        const strokeDashlength = percentage * circumference;
+        const offset = cumulativeOffset;
+        cumulativeOffset += strokeDashlength;
+        return {
+          ...item,
+          strokeDashlength,
+          offset,
+          percentage,
+        };
+      });
 
-  // Calculate arc offsets for category segments (only for categories with actual spending > 0)
-  let cumulativeOffset = 0;
-  const segments = activeBreakdown
-    .filter((item) => item.amount > 0)
-    .map((item) => {
-      const percentage = totalCategoriesSpent > 0 ? item.amount / totalCategoriesSpent : 0;
-      const strokeDashlength = percentage * circumference;
-      const offset = cumulativeOffset;
-      cumulativeOffset += strokeDashlength;
-      return {
-        ...item,
-        strokeDashlength,
-        offset,
-        percentage,
-      };
-    });
+    return {
+      activeBreakdown: active,
+      totalCategoriesSpent: total,
+      segments: segs,
+    };
+  }, [breakdown, categoryBudgets, circumference]);
+
+  // Selected category info (memoized)
+  const selectedCategoryItem = useMemo(() => {
+    return selectedCatId
+      ? activeBreakdown.find((item) => item.category.id === selectedCatId) || null
+      : null;
+  }, [selectedCatId, activeBreakdown]);
 
   // Accurate Polar Angle Touch Handler
   const handleChartTouch = (evt: GestureResponderEvent) => {
