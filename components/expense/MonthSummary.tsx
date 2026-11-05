@@ -30,6 +30,20 @@ const customSpringLayout = {
   },
 };
 
+const formatChipAmount = (amount: number, symbol: string = '₹'): string => {
+  if (!amount || isNaN(amount)) return `${symbol}0`;
+  const abs = Math.abs(amount);
+  const sign = amount < 0 ? '-' : '';
+  const strip = (v: string) => (v.endsWith('.0') ? v.slice(0, -2) : v);
+  if (abs >= 10000000) {
+    return `${sign}${symbol}${strip((abs / 10000000).toFixed(1))}Cr`;
+  }
+  if (abs >= 100000) {
+    return `${sign}${symbol}${strip((abs / 100000).toFixed(1))}L`;
+  }
+  return `${sign}${symbol}${Math.round(abs).toLocaleString('en-IN')}`;
+};
+
 interface MonthSummaryProps {
   onCategorySelect?: (categoryId: string) => void;
 }
@@ -469,21 +483,23 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
                   <View style={styles.accountChipsRow}>
                     <View style={styles.accountChip}>
                       <AppText style={styles.accountChipLabel}>Budget </AppText>
-                      <AppText style={styles.accountChipVal}>
-                        {effectiveBudget > 0 ? formatAmount(effectiveBudget) : 'No limit'}
+                      <AppText style={styles.accountChipVal} numberOfLines={1}>
+                        {effectiveBudget > 0 ? formatChipAmount(effectiveBudget, sym) : 'No limit'}
                       </AppText>
                     </View>
                     {isBufferActive ? (
                       <View style={[styles.accountChip, styles.accountChipBuffer]}>
                         <AppText style={styles.accountChipBufferLabel}>Buffer </AppText>
-                        <AppText style={styles.accountChipBufferVal}>
-                          {formatAmount(bufferAnalysis.bufferLimit)}
+                        <AppText style={styles.accountChipBufferVal} numberOfLines={1}>
+                          {formatChipAmount(bufferAnalysis.bufferLimit, sym)}
                         </AppText>
                       </View>
                     ) : (
                       <View style={styles.accountChip}>
                         <AppText style={styles.accountChipLabel}>Spent </AppText>
-                        <AppText style={styles.accountChipVal}>{formatAmount(totalSpent)}</AppText>
+                        <AppText style={styles.accountChipVal} numberOfLines={1}>
+                          {formatChipAmount(totalSpent, sym)}
+                        </AppText>
                       </View>
                     )}
                   </View>
@@ -493,23 +509,29 @@ export const MonthSummary: React.FC<MonthSummaryProps> = ({ onCategorySelect }) 
                       <>
                         <View style={styles.accountChip}>
                           <AppText style={styles.accountChipLabel}>Bank </AppText>
-                          <AppText style={styles.accountChipVal}>{formatAmount(bankCash)}</AppText>
+                          <AppText style={styles.accountChipVal} numberOfLines={1}>
+                            {formatChipAmount(bankCash, sym)}
+                          </AppText>
                         </View>
                         <View style={[styles.accountChip, styles.accountChipDue]}>
-                          <AppText style={styles.accountChipDueLabel}>Credit Due </AppText>
-                          <AppText style={styles.accountChipDueVal}>-{formatAmount(cardDues)}</AppText>
+                          <AppText style={styles.accountChipDueLabel}>Due </AppText>
+                          <AppText style={styles.accountChipDueVal} numberOfLines={1}>
+                            -{formatChipAmount(cardDues, sym)}
+                          </AppText>
                         </View>
                       </>
                     ) : (
                       <>
                         <View style={[styles.accountChip, styles.accountChipClear]}>
                           <Check size={11} color={expenseColors.accentGreen} strokeWidth={2.8} style={styles.chipCheckIcon} />
-                          <AppText style={styles.accountChipClearText}>All Dues Clear</AppText>
+                          <AppText style={styles.accountChipClearText} numberOfLines={1}>All Dues Clear</AppText>
                         </View>
                         {totalSavedInVaults > 0 && (
                           <View style={styles.accountChip}>
                             <AppText style={styles.accountChipLabel}>Vaults </AppText>
-                            <AppText style={styles.accountChipVal}>{formatAmount(totalSavedInVaults)}</AppText>
+                            <AppText style={styles.accountChipVal} numberOfLines={1}>
+                              {formatChipAmount(totalSavedInVaults, sym)}
+                            </AppText>
                           </View>
                         )}
                       </>
@@ -780,25 +802,27 @@ const styles = StyleSheet.create({
   accountChipsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    flexWrap: 'wrap',
+    gap: 6,
+    flexWrap: 'nowrap',
+    maxWidth: '100%',
   },
   accountChip: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 14,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 12,
+    flexShrink: 0,
   },
   accountChipLabel: {
     color: '#8E95A5',
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: '500',
   },
   accountChipVal: {
     color: '#FFFFFF',
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: '700',
   },
   accountChipDue: {
@@ -806,12 +830,12 @@ const styles = StyleSheet.create({
   },
   accountChipDueLabel: {
     color: '#F48B8B',
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: '500',
   },
   accountChipDueVal: {
     color: '#F48B8B',
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: '700',
   },
   accountChipClear: {
@@ -821,7 +845,7 @@ const styles = StyleSheet.create({
   },
   accountChipClearText: {
     color: expenseColors.accentGreen,
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: '700',
     letterSpacing: 0.2,
   },
