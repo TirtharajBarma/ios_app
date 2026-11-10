@@ -2,7 +2,7 @@
   "expo": {
     "name": "Cashveil",
     "slug": "subscription",
-    "version": "1.3.18",
+    "version": "1.3.19",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "cashveil",
@@ -86,12 +86,12 @@
       "googleIosClientId": "690943757954-rgckkbj3qq3ok09s4lke2h0godpf2kot.apps.googleusercontent.com",
       "supabaseUrl": "https://nvsjrfzzessvynnuurcg.supabase.co",
       "supabaseAnonKey": "sb_publishable_hmdnizlu8wzE6EwOj2IJvw_0mc9qG7J",
-      "updateVersion": "v1.3.18",
-      "updateDescription": "Embed Google Client ID in build config and EAS preview environment",
+      "updateVersion": "v1.3.19",
+      "updateDescription": "Universal bank matching, HTML email decoding, unique message IDs, and DD-MM-YYYY dates",
       "updateNotes": [
-        "Embed Google Client ID in build config and EAS preview environment"
+        "Universal bank matching, HTML email decoding, unique message IDs, and DD-MM-YYYY dates"
       ],
-      "easUpdateMessage": "v1.3.18: Embed Google Client ID in build config and EAS preview environment"
+      "easUpdateMessage": "v1.3.19: Universal bank matching, HTML email decoding, unique message IDs, and DD-MM-YYYY dates"
     },
     "owner": "tirtharaj_barma",
     "runtimeVersion": "1",

@@ -211,16 +211,20 @@ export function parseFinancialText(
     merchant = 'ATM Cash Withdrawal';
   } else {
     const merchantRegexes = [
+      // "paid to STARBUCKS", "sent to RAMESH", "payment to JOHN", "payment for JOHN"
+      /(?:paid\s+to|transfer(?:red)?\s+to|sent\s+to|payment\s+to|payment\s+for)\s+([A-Za-z0-9\s&'.-]{2,30}?)(?:\s+(?:on|via|ref|upi|bal|available|at|\.|\band\b|using|from)|$)/i,
+      // "paid Rs. 10 to STARBUCKS", "sent INR 500 to RAMESH", "debited towards AKHIL"
+      new RegExp(`(?:paid|sent|transferred|debited)\\s+(?:${CURRENCY_REGEX_PART}\\s*[0-9,.]+\\s+)?(?:to|towards)\\s+([A-Za-z0-9\\s&'.-]{2,30}?)(?:\\s+(?:on|via|ref|upi|bal|available|at|\\.|\\band\\b|using|from)|$)`, 'i'),
+      // "spent at STARBUCKS", "purchase at STORE", "shopping at STORE"
+      /(?:spent\s+at|purchase\s+at|shopping\s+at)\s+([A-Za-z0-9\s&'.-]{2,30}?)(?:\s+(?:on|via|ref|upi|bal|available|\.|\band\b|using|from)|$)/i,
       // "to VPA swiggy@icici", "to user@upi"
       /(?:vpa|upi\s+id)\s+([A-Za-z0-9._-]+@[A-Za-z0-9]+)/i,
       // "by UPI/Swiggy" or "towards UPI/swiggy@icici" or "UPI/P2M/123/Swiggy"
       /(?:towards|by|via)\s+upi\/(?:[A-Za-z0-9_]+\/)?([A-Za-z0-9\s&'.-]{2,25})/i,
       // "at STARBUCKS", "for AMAZON", "merchant ZOMATO"
-      /(?:at|for|merchant)\s+([A-Za-z0-9\s&'.-]{2,30}?)(?:\s+(?:on|via|ref|upi|bal|available|\.|\band\b)|$)/i,
-      // "paid to STARBUCKS", "transferred to JOHN", "sent to RAMESH"
-      /(?:paid\s+to|transfer(?:red)?\s+to|sent\s+to)\s+([A-Za-z0-9\s&'.-]{2,30}?)(?:\s+(?:on|via|ref|upi|bal|available|at|\.|\band\b)|$)/i,
+      /(?:at|for|merchant)\s+([A-Za-z0-9\s&'.-]{2,30}?)(?:\s+(?:on|via|ref|upi|bal|available|\.|\band\b|using|from)|$)/i,
       // "to STARBUCKS"
-      /\bto\s+([A-Za-z0-9\s&'.-]{2,30}?)(?:\s+(?:on|via|ref|upi|bal|available|at|\.|\band\b)|$)/i,
+      /\bto\s+([A-Za-z0-9\s&'.-]{2,30}?)(?:\s+(?:on|via|ref|upi|bal|available|at|\.|\band\b|using|from)|$)/i,
       // "info: POS 1234 STARBUCKS"
       /(?:info[:\s]+)([A-Za-z0-9\s&'.-]{2,30})/i,
     ];

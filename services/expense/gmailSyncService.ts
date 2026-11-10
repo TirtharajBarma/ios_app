@@ -157,6 +157,7 @@ function decodeBase64Url(data: string): string {
 
 /**
  * Extracts plain text content from a Gmail API message payload.
+ * Supports both text/plain and text/html bodies, stripping HTML markup cleanly.
  */
 function extractMessageBody(payload: any): string {
   if (!payload) return '';
@@ -168,7 +169,7 @@ function extractMessageBody(payload: any): string {
 
   if (Array.isArray(payload.parts)) {
     for (const part of payload.parts) {
-      if (part.mimeType === 'text/plain' && part.body?.data) {
+      if ((part.mimeType === 'text/plain' || part.mimeType === 'text/html') && part.body?.data) {
         bodyText += decodeBase64Url(part.body.data) + ' ';
       } else if (part.parts) {
         bodyText += extractMessageBody(part) + ' ';
@@ -176,7 +177,16 @@ function extractMessageBody(payload: any): string {
     }
   }
 
-  return bodyText.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  return bodyText
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&quot;/gi, '"')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 /**
@@ -267,13 +277,16 @@ export async function syncGmailTransactions(): Promise<GmailSyncResult> {
         const msgData = await msgRes.json();
         const snippet = msgData.snippet || '';
         const body = extractMessageBody(msgData.payload);
-        const fullContent = `${snippet} ${body}`.trim();
 
-        // Extract sender and date headers
+        // Extract sender, subject, and date headers
         const headers: Array<{ name: string; value: string }> = msgData.payload?.headers || [];
         const fromHeader = headers.find((h) => h.name.toLowerCase() === 'from')?.value || 'Bank Email';
+        const subjectHeader = headers.find((h) => h.name.toLowerCase() === 'subject')?.value || '';
         const dateHeader = headers.find((h) => h.name.toLowerCase() === 'date')?.value;
         const receivedTimestamp = dateHeader ? new Date(dateHeader).getTime() : Number(msgData.internalDate) || Date.now();
+
+        // Include subject header as high-priority context for merchant and amount extraction
+        const fullContent = `${subjectHeader}. ${snippet} ${body}`.trim();
 
         // Parse with local financial parser
         const pendingTx = createPendingTransactionFromText(
@@ -284,25 +297,29 @@ export async function syncGmailTransactions(): Promise<GmailSyncResult> {
         );
 
         if (pendingTx) {
-          const expenseState = useExpenseStore.getState();
-          // Check if user already manually entered this or if a split/debt covers it
-          const existingMatch = findMatchingExistingTransaction(pendingTx, expenseState.transactions);
-          if (existingMatch) {
-            console.log(`[GmailSync] Skipped duplicate of existing transaction ${existingMatch.id}`);
-            processedIds.add(msg.id);
-            continue;
+          // Use unique Gmail message ID so same-amount transactions on the same day never collide
+          if (msg.id) {
+            pendingTx.id = `gmail_${msg.id}`;
           }
 
+          const expenseState = useExpenseStore.getState();
+          const existingMatch = findMatchingExistingTransaction(pendingTx, expenseState.transactions);
+
           if (autoTrackAutoApprove) {
-            // Intelligently detects account from email content without forcing a single default account
-            await autoApproveTransaction(pendingTx, null);
+            if (existingMatch) {
+              console.log(`[GmailSync] Skipped auto-approving duplicate of existing transaction ${existingMatch.id}`);
+            } else {
+              // Intelligently detects account from email content without forcing a single default account
+              await autoApproveTransaction(pendingTx, null);
+              syncedCount++;
+            }
           } else {
             // Pre-resolve suggested account from email text so review screen shows the exact card/bank
             const matchedAcc = resolvePendingAccount(pendingTx, null, expenseState.accounts);
             pendingTx.suggestedAccountId = matchedAcc?.id;
             await addPendingTransaction(pendingTx);
+            syncedCount++;
           }
-          syncedCount++;
         }
 
         // Mark this message ID as processed

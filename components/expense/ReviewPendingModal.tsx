@@ -43,6 +43,16 @@ interface ReviewPendingModalProps {
   onClose: () => void;
 }
 
+function formatToDDMMYYYY(dateStr?: string): string {
+  if (!dateStr) return '';
+  const parts = dateStr.slice(0, 10).split('-');
+  if (parts.length === 3 && parts[0].length === 4) {
+    const [y, m, d] = parts;
+    return `${d}-${m}-${y}`;
+  }
+  return dateStr;
+}
+
 export const ReviewPendingModal: React.FC<ReviewPendingModalProps> = ({
   visible,
   onClose,
@@ -345,7 +355,7 @@ export const ReviewPendingModal: React.FC<ReviewPendingModalProps> = ({
                       </AppText>
                     </View>
                     <AppText variant="caption2" color="rgba(255,255,255,0.4)">
-                      {tx.date}
+                      {formatToDDMMYYYY(tx.date)}
                     </AppText>
                   </View>
 
@@ -376,7 +386,7 @@ export const ReviewPendingModal: React.FC<ReviewPendingModalProps> = ({
                     <View style={styles.duplicateWarningBox}>
                       <AlertTriangle size={13} color="#FF9F0A" />
                       <AppText variant="caption2" color="#FF9F0A" weight="600" style={{ flex: 1 }}>
-                        Likely already recorded ({potentialMatch.merchant || potentialMatch.note || 'Expense'} · {currencySymbol}{potentialMatch.amount.toFixed(2)} on {potentialMatch.date})
+                        Likely already recorded ({potentialMatch.merchant || potentialMatch.note || 'Expense'} · {currencySymbol}{potentialMatch.amount.toFixed(2)} on {formatToDDMMYYYY(potentialMatch.date)})
                       </AppText>
                     </View>
                   ) : null}

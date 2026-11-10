@@ -2,8 +2,8 @@
  * Application Version and Release Configuration
  * Auto-synced with EAS Updates & Local Builds
  */
-export const CURRENT_RELEASE_VERSION = "v1.3.18";
-export const RELEASE_DESCRIPTION = "Embed Google Client ID in build config and EAS preview environment";
+export const CURRENT_RELEASE_VERSION = "v1.3.19";
+export const RELEASE_DESCRIPTION = "Universal bank matching, HTML email decoding, unique message IDs, and DD-MM-YYYY dates";
 export const APP_BINARY_VERSION = "v1.0.0 (Build 1)";
 export const ADMIN_NAME = "Tirtharaj";
 export const AUTHOR_CREDIT = "Built with ❤️ by Tirtharaj";
@@ -18,6 +18,16 @@ export interface ReleaseHistoryItem {
 }
 
 export const INITIAL_RELEASE_HISTORY: ReleaseHistoryItem[] = [
+  {
+    version: "v1.3.19",
+    date: "Nov 11, 2026",
+    title: "Universal bank matching, HTML email decoding, unique message IDs, and DD-MM-YYYY dates",
+    notes: [
+          "Universal bank matching, HTML email decoding, unique message IDs, and DD-MM-YYYY dates"
+    ],
+    type: "ota",
+    isNativeBuild: false,
+  },
   {
     version: "v1.3.18",
     date: "Nov 11, 2026",

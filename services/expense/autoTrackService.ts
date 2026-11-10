@@ -135,11 +135,18 @@ export async function drainPendingNativeTransactions(): Promise<number> {
 
 /** Known bank/wallet brand keywords */
 const BANK_BRAND_KEYWORDS: Record<string, string[]> = {
-  hdfc: ['hdfc', 'hdfcbank'],
-  icici: ['icici', 'icicibank'],
-  sbi: ['sbi', 'state bank', 'onlinesbi'],
-  axis: ['axis', 'axisbank'],
-  kotak: ['kotak'],
+  slice: ['slice', 'slicebank', 'sliceit', 'slice.bank.in'],
+  hdfc: ['hdfc', 'hdfcbank', 'hdfcbank.net'],
+  icici: ['icici', 'icicibank', 'icicibank.com', 'imobile'],
+  sbi: ['sbi', 'state bank', 'onlinesbi', 'sbi.co.in', 'sbicard'],
+  axis: ['axis', 'axisbank', 'axisbank.com', 'neo axis', 'myzone axis', 'myzone'],
+  kotak: ['kotak', 'kotakbank', '811'],
+  onecard: ['onecard', 'one card', 'fpl', 'onecard.co'],
+  jupiter: ['jupiter', 'jupiter.money'],
+  fi: ['fi money', 'epifi', 'fi.money'],
+  uni: ['uni card', 'uni.club'],
+  cred: ['cred', 'cred.club'],
+  scapia: ['scapia', 'scapia.cards'],
   amazon: ['amazon pay', 'amazon', 'amzn'],
   paytm: ['paytm'],
   phonepe: ['phonepe'],
@@ -154,7 +161,18 @@ const BANK_BRAND_KEYWORDS: Record<string, string[]> = {
   citi: ['citi', 'citibank'],
   amex: ['amex', 'american express'],
   federal: ['federal bank'],
-  cred: ['cred'],
+  au: ['au small', 'aubank'],
+  bandhan: ['bandhan'],
+  ubii: ['union bank'],
+  boi: ['bank of india'],
+  central: ['central bank'],
+  hsbc: ['hsbc'],
+  scb: ['standard chartered', 'stanbic', 'scb'],
+  chase: ['chase'],
+  bofa: ['bank of america', 'bofa'],
+  wells: ['wells fargo'],
+  revolut: ['revolut'],
+  monzo: ['monzo'],
 };
 
 /**
@@ -180,26 +198,37 @@ export function findMatchingExistingTransaction(
     if (dayDiff > 2.5) return false;
 
     // 3. Merchant / Payee / Note matching
-    const tText = `${t.merchant || ''} ${t.note || ''}`.toLowerCase().trim();
-    const pText = `${pending.merchant || ''} ${pending.sender || ''}`.toLowerCase().trim();
+    const tMerchant = (t.merchant || '').toLowerCase().trim();
+    const pMerchant = (pending.merchant || '').toLowerCase().trim();
+    const tNote = (t.note || '').toLowerCase().trim();
 
-    // If both have merchant names, check for string overlap
-    if (t.merchant && pending.merchant) {
-      const tm = t.merchant.toLowerCase().replace(/[^a-z0-9]/g, '');
-      const pm = pending.merchant.toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (tm.length >= 3 && pm.length >= 3 && (tm.includes(pm) || pm.includes(tm))) {
-        return true;
+    // If both have merchant names:
+    if (tMerchant && pMerchant) {
+      const tm = tMerchant.replace(/[^a-z0-9]/g, '');
+      const pm = pMerchant.replace(/[^a-z0-9]/g, '');
+      if (tm.length >= 3 && pm.length >= 3) {
+        if (tm.includes(pm) || pm.includes(tm)) {
+          return true; // Real merchant match
+        }
+        // Both have distinct non-matching merchants (e.g. 'cigarettes' vs 'akhilmallik')
+        // So this is a different expense, not a duplicate!
+        return false;
       }
     }
 
-    // If merchant appears in user's notes or vice versa
-    if (pending.merchant && pending.merchant.length >= 3 && tText.includes(pending.merchant.toLowerCase())) {
+    // If pending merchant appears in user's notes or vice versa
+    if (pMerchant && pMerchant.length >= 3 && tNote.includes(pMerchant)) {
+      return true;
+    }
+    if (tMerchant && tMerchant.length >= 3 && (pending.rawText || '').toLowerCase().includes(tMerchant)) {
       return true;
     }
 
-    // Exact same date + same amount -> high probability duplicate (manual entry or split)
-    if (t.date === pending.date) {
-      return true;
+    // Only if pending merchant is unknown or missing, and exact same date + same amount
+    if (!pMerchant || pMerchant === 'unknown merchant') {
+      if (t.date === pending.date) {
+        return true;
+      }
     }
 
     return false;
@@ -233,10 +262,60 @@ export function resolvePendingAccount(
     if (digitMatch) return digitMatch;
   }
 
-  // 3. Bank / Wallet brand keyword match
-  const isCreditCardContext = /\b(credit\s*card|card\s*ending|card\s*no|card\s*\*\*|card\s*xx)\b/i.test(rawCorpus);
-  const isSavingsContext = /\b(a\/c|savings|salary|current\s*a\/c|debited\s*from\s*a\/c)\b/i.test(rawCorpus);
+  const isCreditCardContext = /\b(credit\s*card|card\s*ending|card\s*no|card\s*\*\*|card\s*xx|spent\s+on\s+card|swiped)\b/i.test(rawCorpus);
+  const isSavingsContext = /\b(a\/c|savings|salary|current\s*a\/c|debited\s*from\s*a\/c|account\s*ending)\b/i.test(rawCorpus);
 
+  // 3. Dynamic Name & Domain Matching:
+  // Check if any user account name or keywords match the sender or email body
+  let bestAccount: ExpenseAccount | null = null;
+  let highestScore = 0;
+
+  for (const acc of accounts) {
+    let score = 0;
+    const aNameLower = acc.name.toLowerCase().trim();
+
+    // Exact name in corpus (e.g. "slice" in "slice <noreply@slice.bank.in>")
+    if (aNameLower.length >= 3 && rawCorpus.includes(aNameLower)) {
+      score += 50;
+    }
+
+    // Individual words in account name (e.g. "Slice", "Axis", "SBI", "ICICI", "Amazon", "Paytm")
+    const words = aNameLower.split(/[\s_-]+/).filter((w) => w.length >= 3);
+    for (const word of words) {
+      if (['bank', 'card', 'account', 'pay', 'wallet'].includes(word)) continue;
+      if (rawCorpus.includes(word)) {
+        score += 30;
+      }
+    }
+
+    // Check sender email specifically (e.g. noreply@slice.bank.in -> contains "slice")
+    const senderClean = (pending.sender || '').toLowerCase();
+    for (const word of words) {
+      if (['bank', 'card', 'account', 'pay', 'wallet'].includes(word)) continue;
+      if (senderClean.includes(word)) {
+        score += 40;
+      }
+    }
+
+    // Context bonus
+    if (isCreditCardContext && (acc.type === 'credit' || /credit|card/i.test(acc.name))) {
+      score += 10;
+    }
+    if (isSavingsContext && (acc.type === 'savings' || /savings|salary|current/i.test(acc.name))) {
+      score += 10;
+    }
+
+    if (score > highestScore) {
+      highestScore = score;
+      bestAccount = acc;
+    }
+  }
+
+  if (bestAccount && highestScore >= 30) {
+    return bestAccount;
+  }
+
+  // 4. Known Bank Brands Dictionary matching
   let candidateBankKey: string | null = null;
   for (const [brandKey, keywords] of Object.entries(BANK_BRAND_KEYWORDS)) {
     if (keywords.some((kw) => rawCorpus.includes(kw))) {
@@ -247,7 +326,6 @@ export function resolvePendingAccount(
 
   if (candidateBankKey) {
     const bankKeywords = BANK_BRAND_KEYWORDS[candidateBankKey];
-    // Find all user accounts matching this bank brand
     const brandMatchingAccounts = accounts.filter((a) => {
       const aName = a.name.toLowerCase();
       return bankKeywords.some((kw) => aName.includes(kw));
@@ -258,7 +336,6 @@ export function resolvePendingAccount(
     }
 
     if (brandMatchingAccounts.length > 1) {
-      // Differentiate between Credit Card vs Savings account
       if (isCreditCardContext) {
         const cardAcc = brandMatchingAccounts.find(
           (a) => a.type === 'credit' || /credit|card/i.test(a.name)
@@ -273,16 +350,6 @@ export function resolvePendingAccount(
       }
       return brandMatchingAccounts[0];
     }
-  }
-
-  // 4. Wallet match (e.g. "Amazon Pay", "Paytm")
-  if (/\b(amazon\s*pay|amazon\s*balance)\b/i.test(rawCorpus)) {
-    const amz = accounts.find((a) => /amazon/i.test(a.name));
-    if (amz) return amz;
-  }
-  if (/\b(paytm|paytm\s*wallet)\b/i.test(rawCorpus)) {
-    const ptm = accounts.find((a) => /paytm/i.test(a.name));
-    if (ptm) return ptm;
   }
 
   // 5. Fallback to user's configured default account or primary account
