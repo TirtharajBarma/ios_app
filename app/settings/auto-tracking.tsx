@@ -28,6 +28,7 @@ import {
 import * as Haptics from 'expo-haptics';
 import * as WebBrowser from 'expo-web-browser';
 import * as Google from 'expo-auth-session/providers/google';
+import Constants from 'expo-constants';
 
 import { AppText, NativeLiquidMenu } from '@/components/ui';
 import type { MenuAction } from '@/components/ui';
@@ -72,8 +73,14 @@ export default function AutoTrackingScreen() {
   const [gmailSession, setGmailSession] = useState<GmailSession | null>(null);
   const [isGmailSyncing, setIsGmailSyncing] = useState<boolean>(false);
 
-  const googleIosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || '';
-  const googleWebClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '';
+  const googleIosClientId =
+    process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ||
+    Constants.expoConfig?.extra?.googleIosClientId ||
+    '690943757954-rgckkbj3qq3ok09s4lke2h0godpf2kot.apps.googleusercontent.com';
+  const googleWebClientId =
+    process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ||
+    Constants.expoConfig?.extra?.googleWebClientId ||
+    '';
 
   const redirectUri = useMemo(() => {
     if (Platform.OS === 'ios' && googleIosClientId) {

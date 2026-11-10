@@ -2,7 +2,7 @@
   "expo": {
     "name": "Cashveil",
     "slug": "subscription",
-    "version": "1.3.17",
+    "version": "1.3.18",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "cashveil",
@@ -83,14 +83,15 @@
       "eas": {
         "projectId": "382b12ce-7c53-4d52-9dd2-8206e0bdea03"
       },
+      "googleIosClientId": "690943757954-rgckkbj3qq3ok09s4lke2h0godpf2kot.apps.googleusercontent.com",
       "supabaseUrl": "https://nvsjrfzzessvynnuurcg.supabase.co",
       "supabaseAnonKey": "sb_publishable_hmdnizlu8wzE6EwOj2IJvw_0mc9qG7J",
-      "updateVersion": "v1.3.17",
-      "updateDescription": "Side-by-side account & category chips with New and Already Logged review tabs",
+      "updateVersion": "v1.3.18",
+      "updateDescription": "Embed Google Client ID in build config and EAS preview environment",
       "updateNotes": [
-        "Side-by-side account & category chips with New and Already Logged review tabs"
+        "Embed Google Client ID in build config and EAS preview environment"
       ],
-      "easUpdateMessage": "v1.3.17: Side-by-side account & category chips with New and Already Logged review tabs"
+      "easUpdateMessage": "v1.3.18: Embed Google Client ID in build config and EAS preview environment"
     },
     "owner": "tirtharaj_barma",
     "runtimeVersion": "1",

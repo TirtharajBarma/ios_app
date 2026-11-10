@@ -1,3 +1,4 @@
+import Constants from 'expo-constants';
 import AsyncStorage from '@/utils/storage';
 import { useSettingsStore } from '@/store/useSettingsStore';
 import { useExpenseStore } from '@/store/useExpenseStore';
@@ -73,8 +74,9 @@ export async function refreshGmailAccessToken(session: GmailSession): Promise<st
   if (!session.refreshToken) return null;
   const clientId =
     process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ||
+    Constants.expoConfig?.extra?.googleIosClientId ||
     process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ||
-    '';
+    '690943757954-rgckkbj3qq3ok09s4lke2h0godpf2kot.apps.googleusercontent.com';
 
   try {
     const bodyParams: Record<string, string> = {
