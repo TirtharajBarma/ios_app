@@ -302,7 +302,7 @@ export function generateTransactionHash(
 export function createPendingTransactionFromText(
   rawText: string,
   sender: string = 'SMS',
-  source: 'sms' | 'notification' | 'manual_test' = 'notification',
+  source: 'sms' | 'notification' | 'manual_test' | 'email' = 'notification',
   receivedAt: number = Date.now()
 ): PendingTransaction | null {
   const parsed = parseFinancialText(rawText, sender, receivedAt);

@@ -108,7 +108,7 @@ export interface QuickExpensePreset {
 
 export interface PendingTransaction {
   id: string;
-  source: 'sms' | 'notification' | 'manual_test';
+  source: 'sms' | 'notification' | 'manual_test' | 'email';
   sender: string;
   rawText: string;
   amount: number;

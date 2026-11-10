@@ -64,6 +64,7 @@ import {
   Repeat,
   RefreshCw,
   Bell,
+  Mail,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import * as Sharing from 'expo-sharing';
@@ -209,7 +210,7 @@ export const ExpenseSettings: React.FC = () => {
   const { convertAllCurrencies } = useSubscriptionStore();
   const updateInfo = useAppUpdateManager();
 
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
 
   // Grid width measurement to ensure exactly 3 columns with tight spacing
   const [gridMeasuredWidth, setGridMeasuredWidth] = useState(0);
@@ -882,35 +883,39 @@ export const ExpenseSettings: React.FC = () => {
             </>
           )}
 
-          {/* Auto Tracking (Android only) */}
-          {Platform.OS === 'android' && (
-            <>
-              <View style={styles.groupedRowDivider} />
-              <TouchableOpacity
-                style={styles.groupedRowItem}
-                activeOpacity={0.7}
-                onPress={() => {
-                  Haptics.selectionAsync();
-                  router.push('/settings/auto-tracking');
-                }}
-              >
-                <View style={styles.iconRowLeft}>
-                  <View style={styles.orangeIconCircle}>
-                    <Smartphone size={16} color={expenseColors.accentPeach} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <AppText style={styles.groupedRowTitle}>AUTO TRACKING</AppText>
-                    <AppText style={styles.settingSubValue} numberOfLines={1}>
-                      {autoTrackSmsEnabled
-                        ? 'Active · Logging bank alerts'
-                        : 'Read SMS & bank notifications'}
-                    </AppText>
-                  </View>
-                </View>
-                <ChevronRight size={18} color={expenseColors.textSubtle} />
-              </TouchableOpacity>
-            </>
-          )}
+          {/* Auto Tracking */}
+          <View style={styles.groupedRowDivider} />
+          <TouchableOpacity
+            style={styles.groupedRowItem}
+            activeOpacity={0.7}
+            onPress={() => {
+              Haptics.selectionAsync();
+              router.push('/settings/auto-tracking');
+            }}
+          >
+            <View style={styles.iconRowLeft}>
+              <View style={styles.orangeIconCircle}>
+                {Platform.OS === 'ios' ? (
+                  <Mail size={16} color={expenseColors.accentPeach} />
+                ) : (
+                  <Smartphone size={16} color={expenseColors.accentPeach} />
+                )}
+              </View>
+              <View style={{ flex: 1 }}>
+                <AppText style={styles.groupedRowTitle}>
+                  {Platform.OS === 'ios' ? 'BANK & GMAIL SYNC' : 'AUTO TRACKING'}
+                </AppText>
+                <AppText style={styles.settingSubValue} numberOfLines={1}>
+                  {Platform.OS === 'ios'
+                    ? 'Automatic bank alert email sync'
+                    : autoTrackSmsEnabled
+                    ? 'Active · Logging bank alerts'
+                    : 'Read SMS & bank notifications'}
+                </AppText>
+              </View>
+            </View>
+            <ChevronRight size={18} color={expenseColors.textSubtle} />
+          </TouchableOpacity>
 
           <View style={styles.groupedRowDivider} />
 
@@ -988,7 +993,7 @@ export const ExpenseSettings: React.FC = () => {
           <View style={styles.groupedRowDivider} />
 
           {/* App Feature Tour Row */}
-          <TouchableOpacity
+          {/* <TouchableOpacity
             style={styles.groupedRowItem}
             activeOpacity={0.7}
             onPress={() => {
@@ -1010,7 +1015,7 @@ export const ExpenseSettings: React.FC = () => {
             <ChevronRight size={18} color={expenseColors.textSubtle} />
           </TouchableOpacity>
 
-          <View style={styles.groupedRowDivider} />
+          <View style={styles.groupedRowDivider} /> */}
 
           {/* App Version Row */}
           <View style={styles.groupedRowItemStatic}>

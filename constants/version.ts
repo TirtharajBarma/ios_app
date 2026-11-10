@@ -2,8 +2,8 @@
  * Application Version and Release Configuration
  * Auto-synced with EAS Updates & Local Builds
  */
-export const CURRENT_RELEASE_VERSION = "v1.3.15";
-export const RELEASE_DESCRIPTION = "Restore stable release with Expo 58";
+export const CURRENT_RELEASE_VERSION = "v1.3.17";
+export const RELEASE_DESCRIPTION = "Side-by-side account & category chips with New and Already Logged review tabs";
 export const APP_BINARY_VERSION = "v1.0.0 (Build 1)";
 export const ADMIN_NAME = "Tirtharaj";
 export const AUTHOR_CREDIT = "Built with ❤️ by Tirtharaj";
@@ -18,6 +18,26 @@ export interface ReleaseHistoryItem {
 }
 
 export const INITIAL_RELEASE_HISTORY: ReleaseHistoryItem[] = [
+  {
+    version: "v1.3.17",
+    date: "Nov 10, 2026",
+    title: "Side-by-side account & category chips with New and Already Logged review tabs",
+    notes: [
+          "Side-by-side account & category chips with New and Already Logged review tabs"
+    ],
+    type: "ota",
+    isNativeBuild: false,
+  },
+  {
+    version: "v1.3.16",
+    date: "Nov 10, 2026",
+    title: "Smart Gmail bank sync with intelligent account and duplicate detection",
+    notes: [
+          "Smart Gmail bank sync with intelligent account and duplicate detection"
+    ],
+    type: "ota",
+    isNativeBuild: false,
+  },
   {
     version: "v1.3.15",
     date: "Nov 8, 2026",

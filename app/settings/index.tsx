@@ -23,6 +23,7 @@ import {
   Lock,
   Database,
   Smartphone,
+  Mail,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { colors, spacing, radius, getCurrencySymbol, AUTHOR_CREDIT } from "@/constants";
@@ -94,8 +95,10 @@ export default function SettingsIndex() {
 
   const currencySymbol = getCurrencySymbol(currencyCode);
   const updateBadge = isUpdatePending ? "Ready" : isUpdateAvailable ? "Update" : undefined;
-  const autoTrackBadge = Platform.OS === "android"
-    ? (pendingTransactions?.length > 0 ? `${pendingTransactions.length}` : autoTrackSmsEnabled ? "Active" : undefined)
+  const autoTrackBadge = pendingTransactions?.length > 0
+    ? `${pendingTransactions.length}`
+    : autoTrackSmsEnabled
+    ? "Active"
     : undefined;
 
   return (
@@ -185,18 +188,14 @@ export default function SettingsIndex() {
                 />
               </>
             )}
-            {Platform.OS === 'android' && (
-              <>
-                <Divider />
-                <Row
-                  iconBg="#FF9500"
-                  icon={<Smartphone size={18} color="#fff" />}
-                  label="Auto Tracking"
-                  badge={autoTrackBadge}
-                  onPress={() => router.push("/settings/auto-tracking")}
-                />
-              </>
-            )}
+            <Divider />
+            <Row
+              iconBg="#FF9500"
+              icon={Platform.OS === 'ios' ? <Mail size={18} color="#fff" /> : <Smartphone size={18} color="#fff" />}
+              label={Platform.OS === 'ios' ? "Bank & Gmail Tracking" : "Auto Tracking"}
+              badge={autoTrackBadge}
+              onPress={() => router.push("/settings/auto-tracking")}
+            />
             <Divider />
             <Row
               iconBg="#8E8E93"

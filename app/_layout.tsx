@@ -16,6 +16,7 @@ import { useExpenseStore, monthKeyOf } from "@/store/useExpenseStore";
 import { isSupabaseConfigured, fetchShareGroups, updateMyName } from "@/api/supabase";
 import { initSharedRealtimeSync } from "@/utils/sync";
 import { drainPendingQuickAdds, syncShortcutsParameters } from "@/services/expense/quickAddNative";
+import { syncGmailTransactions } from "@/services/expense/gmailSyncService";
 import { checkAndAutoApplyUpdates } from "@/services/updates/updateManager";
 import { trackDeviceTelemetry } from "@/services/telemetry/deviceTracker";
 import { colors, radius } from "@/constants";
@@ -140,6 +141,7 @@ export default function RootLayout() {
         // A cold start after an App Intent run has no AppState transition, so
         // drain the native outbox here too.
         drainQuickAdds();
+        syncGmailTransactions().catch(() => {});
 
         // Non-blocking background check for OTA updates and 2-day auto-apply
         checkAndAutoApplyUpdates().catch(() => {});
@@ -223,6 +225,7 @@ export default function RootLayout() {
 
         triggerSharedSync();
         drainQuickAdds();
+        syncGmailTransactions().catch(() => {});
         if (!useExpenseStore.getState().selectedMonth) {
           useExpenseStore.getState().setSelectedMonth(monthKeyOf());
         }

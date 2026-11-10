@@ -12,8 +12,8 @@ echo "🚀 Building Release Archive for iOS locally with Xcode..."
 rm -rf build/cashveil.xcarchive build/Payload build/cashveil.ipa cashveil.ipa
 mkdir -p build
 
-xcodebuild -workspace ios/subscription.xcworkspace \
-  -scheme subscription \
+xcodebuild -workspace ios/Cashveil.xcworkspace \
+  -scheme Cashveil \
   -configuration Release \
   -destination 'generic/platform=iOS' \
   -archivePath build/cashveil.xcarchive \

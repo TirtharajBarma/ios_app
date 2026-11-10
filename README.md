@@ -114,8 +114,8 @@ If you modify native configuration (e.g., `app.json`, icons, bundle identifier, 
 npx expo prebuild --clean
 ```
 After the clean pre‑build, verify Xcode signing:
-1. Open `ios/subscription.xcworkspace` in Xcode.
-2. Select the **subscription** target → **Signing & Capabilities**.
+1. Open `ios/Cashveil.xcworkspace` in Xcode.
+2. Select the **Cashveil** target → **Signing & Capabilities**.
 3. Enable **Automatically manage signing**.
 4. Choose your Apple‑ID team.
 5. Ensure the bundle identifier matches `com.tirtharajbarma.subscription`.
