@@ -66,15 +66,26 @@ export const ReviewPendingModal: React.FC<ReviewPendingModalProps> = ({
   const [selectedCategories, setSelectedCategories] = useState<Record<string, string>>({});
 
   // Partition pending transactions into unlogged (new) and already logged (matched)
-  const newItems = useMemo(
-    () => pendingTransactions.filter((tx) => !findMatchingExistingTransaction(tx, transactions)),
-    [pendingTransactions, transactions]
-  );
+  // using 1-to-1 matching so each manual ledger entry matches at most 1 pending item
+  const { newItems, matchedItems, matchMap } = useMemo(() => {
+    const matched: PendingTransaction[] = [];
+    const unlogged: PendingTransaction[] = [];
+    const map: Record<string, ExpenseTransaction> = {};
+    const claimedTxIds = new Set<string>();
 
-  const matchedItems = useMemo(
-    () => pendingTransactions.filter((tx) => !!findMatchingExistingTransaction(tx, transactions)),
-    [pendingTransactions, transactions]
-  );
+    for (const pending of pendingTransactions) {
+      const match = findMatchingExistingTransaction(pending, transactions, claimedTxIds);
+      if (match) {
+        claimedTxIds.add(match.id);
+        matched.push(pending);
+        map[pending.id] = match;
+      } else {
+        unlogged.push(pending);
+      }
+    }
+
+    return { newItems: unlogged, matchedItems: matched, matchMap: map };
+  }, [pendingTransactions, transactions]);
 
   // If there are no new items but matched items exist when modal opens, default to matched tab
   useEffect(() => {
@@ -325,7 +336,7 @@ export const ReviewPendingModal: React.FC<ReviewPendingModalProps> = ({
                 categories,
                 selectedCategories[tx.id] || tx.suggestedCategoryId
               );
-              const potentialMatch = findMatchingExistingTransaction(tx, transactions);
+              const potentialMatch = matchMap[tx.id] || findMatchingExistingTransaction(tx, transactions);
 
               const accountMenuActions: MenuAction[] = accounts.map((a) => ({
                 id: a.id,

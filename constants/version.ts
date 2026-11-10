@@ -2,8 +2,8 @@
  * Application Version and Release Configuration
  * Auto-synced with EAS Updates & Local Builds
  */
-export const CURRENT_RELEASE_VERSION = "v1.3.20";
-export const RELEASE_DESCRIPTION = "Fix ledger spending alignment, receipt table merchant parsing, DD-MM-YYYY dates, and resync swallowed transactions";
+export const CURRENT_RELEASE_VERSION = "v1.3.21";
+export const RELEASE_DESCRIPTION = "Fix 1-to-1 duplicate matching so manual entries match bank alerts";
 export const APP_BINARY_VERSION = "v1.0.0 (Build 1)";
 export const ADMIN_NAME = "Tirtharaj";
 export const AUTHOR_CREDIT = "Built with ❤️ by Tirtharaj";
@@ -18,6 +18,16 @@ export interface ReleaseHistoryItem {
 }
 
 export const INITIAL_RELEASE_HISTORY: ReleaseHistoryItem[] = [
+  {
+    version: "v1.3.21",
+    date: "Nov 11, 2026",
+    title: "Fix 1-to-1 duplicate matching so manual entries match bank alerts",
+    notes: [
+          "Fix 1-to-1 duplicate matching so manual entries match bank alerts"
+    ],
+    type: "ota",
+    isNativeBuild: false,
+  },
   {
     version: "v1.3.20",
     date: "Nov 11, 2026",

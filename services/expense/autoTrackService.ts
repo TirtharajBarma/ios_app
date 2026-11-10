@@ -181,13 +181,17 @@ const BANK_BRAND_KEYWORDS: Record<string, string[]> = {
  */
 export function findMatchingExistingTransaction(
   pending: PendingTransaction,
-  transactions: ExpenseTransaction[]
+  transactions: ExpenseTransaction[],
+  claimedIds?: Set<string>
 ): ExpenseTransaction | undefined {
   if (!pending.amount || !pending.date) return undefined;
 
   const pendingDateObj = new Date(pending.date);
 
   return transactions.find((t) => {
+    // 0. Skip already claimed transactions (for 1-to-1 matching in review list)
+    if (claimedIds && claimedIds.has(t.id)) return false;
+
     // 1. Amount must match
     const amountMatches = Math.abs(t.amount - pending.amount) < 0.01;
     if (!amountMatches) return false;
@@ -197,24 +201,24 @@ export function findMatchingExistingTransaction(
     const dayDiff = Math.abs((pendingDateObj.getTime() - txDateObj.getTime()) / (1000 * 60 * 60 * 24));
     if (dayDiff > 2.5) return false;
 
-    // 3. Merchant / Payee / Note / Borrower matching
+    // 3. Exact same date + same amount -> High confidence duplicate (user manually logged it at checkout)
+    if (t.date === pending.date) {
+      return true;
+    }
+
+    // 4. Date within ±2 days: check merchant / note / borrower word overlap
     const tMerchant = (t.merchant || '').toLowerCase().trim();
     const pMerchant = (pending.merchant || '').toLowerCase().trim();
     const tNote = (t.note || '').toLowerCase().trim();
     const tBorrower = (t.borrowerOrLender || '').toLowerCase().trim();
     const tCombined = `${tMerchant} ${tNote} ${tBorrower}`.trim();
 
-    // If both have merchant names:
+    // If both have merchant names, check string overlap
     if (tMerchant && pMerchant) {
       const tm = tMerchant.replace(/[^a-z0-9]/g, '');
       const pm = pMerchant.replace(/[^a-z0-9]/g, '');
-      if (tm.length >= 3 && pm.length >= 3) {
-        if (tm.includes(pm) || pm.includes(tm)) {
-          return true; // Real merchant match
-        }
-        // Both have distinct non-matching merchants (e.g. 'cigarettes' vs 'akhilmallik')
-        // So this is a different expense, not a duplicate!
-        return false;
+      if (tm.length >= 3 && pm.length >= 3 && (tm.includes(pm) || pm.includes(tm))) {
+        return true;
       }
     }
 
@@ -234,11 +238,9 @@ export function findMatchingExistingTransaction(
       return true;
     }
 
-    // Only if pending merchant is unknown or missing, and exact same date + same amount
-    if (!pMerchant || pMerchant === 'unknown merchant' || pMerchant.includes('transaction of')) {
-      if (t.date === pending.date) {
-        return true;
-      }
+    // Delayed alert within 1.5 days with same amount
+    if (dayDiff <= 1.5) {
+      return true;
     }
 
     return false;
