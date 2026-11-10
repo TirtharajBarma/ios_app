@@ -146,7 +146,7 @@ export default function AutoTrackingScreen() {
     Haptics.selectionAsync().catch(() => {});
     setIsGmailSyncing(true);
     try {
-      const result = await syncGmailTransactions();
+      const result = await syncGmailTransactions(true);
       if (result.success) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
         Alert.alert(

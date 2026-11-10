@@ -197,10 +197,12 @@ export function findMatchingExistingTransaction(
     const dayDiff = Math.abs((pendingDateObj.getTime() - txDateObj.getTime()) / (1000 * 60 * 60 * 24));
     if (dayDiff > 2.5) return false;
 
-    // 3. Merchant / Payee / Note matching
+    // 3. Merchant / Payee / Note / Borrower matching
     const tMerchant = (t.merchant || '').toLowerCase().trim();
     const pMerchant = (pending.merchant || '').toLowerCase().trim();
     const tNote = (t.note || '').toLowerCase().trim();
+    const tBorrower = (t.borrowerOrLender || '').toLowerCase().trim();
+    const tCombined = `${tMerchant} ${tNote} ${tBorrower}`.trim();
 
     // If both have merchant names:
     if (tMerchant && pMerchant) {
@@ -216,16 +218,24 @@ export function findMatchingExistingTransaction(
       }
     }
 
-    // If pending merchant appears in user's notes or vice versa
-    if (pMerchant && pMerchant.length >= 3 && tNote.includes(pMerchant)) {
+    // Match borrower, payee, or notes (e.g. "Hotstar (Baba)" vs "HOTSTAR")
+    if (pMerchant && pMerchant.length >= 3) {
+      const pWords = pMerchant.split(/[^a-z0-9]+/).filter((w) => w.length >= 3);
+      if (pWords.some((w) => tCombined.includes(w))) {
+        return true;
+      }
+    }
+
+    // Check if user note appears in raw email text or vice versa
+    if (tMerchant && tMerchant.length >= 3 && (pending.rawText || '').toLowerCase().includes(tMerchant)) {
       return true;
     }
-    if (tMerchant && tMerchant.length >= 3 && (pending.rawText || '').toLowerCase().includes(tMerchant)) {
+    if (tBorrower && tBorrower.length >= 3 && (pending.rawText || '').toLowerCase().includes(tBorrower)) {
       return true;
     }
 
     // Only if pending merchant is unknown or missing, and exact same date + same amount
-    if (!pMerchant || pMerchant === 'unknown merchant') {
+    if (!pMerchant || pMerchant === 'unknown merchant' || pMerchant.includes('transaction of')) {
       if (t.date === pending.date) {
         return true;
       }

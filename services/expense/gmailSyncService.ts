@@ -7,7 +7,7 @@ import { autoApproveTransaction, findMatchingExistingTransaction, resolvePending
 import { PendingTransaction } from '@/types/expense';
 
 const GMAIL_SESSION_KEY = '@cashveil_gmail_session_v1';
-const PROCESSED_IDS_KEY = '@cashveil_gmail_processed_ids_v1';
+const PROCESSED_IDS_KEY = '@cashveil_gmail_processed_ids_v2';
 
 export interface GmailSession {
   accessToken: string;
@@ -192,7 +192,7 @@ function extractMessageBody(payload: any): string {
 /**
  * Queries Gmail for recent bank transaction alerts and logs or stages them.
  */
-export async function syncGmailTransactions(): Promise<GmailSyncResult> {
+export async function syncGmailTransactions(forceFresh: boolean = false): Promise<GmailSyncResult> {
   let session = await getGmailSession();
   if (!session || !session.accessToken) {
     return { success: false, syncedCount: 0, error: 'Gmail is not connected' };
@@ -206,14 +206,43 @@ export async function syncGmailTransactions(): Promise<GmailSyncResult> {
     }
   }
 
-  const { autoTrackAutoApprove, autoTrackDefaultAccountId, addPendingTransaction } =
-    useSettingsStore.getState();
+  const {
+    autoTrackAutoApprove,
+    autoTrackDefaultAccountId,
+    addPendingTransaction,
+    pendingTransactions,
+    dismissPendingTransaction,
+  } = useSettingsStore.getState();
   const { accounts } = useExpenseStore.getState();
 
   try {
     // 1. Load previously processed message IDs to prevent duplicate work
     const rawProcessed = await AsyncStorage.getItem(PROCESSED_IDS_KEY);
     const processedIds: Set<string> = new Set(rawProcessed ? JSON.parse(rawProcessed) : []);
+
+    // If fresh sync requested or unparsed/broken items exist, clean them up and re-process recent emails
+    const hasBrokenPending = (pendingTransactions || []).some(
+      (tx) =>
+        tx.source === 'email' &&
+        (tx.merchant === 'Unknown Merchant' ||
+          !tx.merchant ||
+          tx.merchant.toLowerCase().includes('transaction of'))
+    );
+
+    if (forceFresh || hasBrokenPending) {
+      for (const item of pendingTransactions || []) {
+        if (
+          item.source === 'email' &&
+          (item.merchant === 'Unknown Merchant' ||
+            !item.merchant ||
+            item.merchant.toLowerCase().includes('transaction of'))
+        ) {
+          await dismissPendingTransaction(item.id);
+        }
+      }
+      processedIds.clear();
+      await AsyncStorage.removeItem(PROCESSED_IDS_KEY);
+    }
 
     // 2. Search Gmail for bank transaction keywords
     const query = encodeURIComponent('debited OR spent OR credited OR "transaction alert" OR "paid to"');

@@ -2,8 +2,8 @@
  * Application Version and Release Configuration
  * Auto-synced with EAS Updates & Local Builds
  */
-export const CURRENT_RELEASE_VERSION = "v1.3.19";
-export const RELEASE_DESCRIPTION = "Universal bank matching, HTML email decoding, unique message IDs, and DD-MM-YYYY dates";
+export const CURRENT_RELEASE_VERSION = "v1.3.20";
+export const RELEASE_DESCRIPTION = "Fix ledger spending alignment, receipt table merchant parsing, DD-MM-YYYY dates, and resync swallowed transactions";
 export const APP_BINARY_VERSION = "v1.0.0 (Build 1)";
 export const ADMIN_NAME = "Tirtharaj";
 export const AUTHOR_CREDIT = "Built with ❤️ by Tirtharaj";
@@ -18,6 +18,16 @@ export interface ReleaseHistoryItem {
 }
 
 export const INITIAL_RELEASE_HISTORY: ReleaseHistoryItem[] = [
+  {
+    version: "v1.3.20",
+    date: "Nov 11, 2026",
+    title: "Fix ledger spending alignment, receipt table merchant parsing, DD-MM-YYYY dates, and resync swallowed transactions",
+    notes: [
+          "Fix ledger spending alignment, receipt table merchant parsing, DD-MM-YYYY dates, and resync swallowed transactions"
+    ],
+    type: "ota",
+    isNativeBuild: false,
+  },
   {
     version: "v1.3.19",
     date: "Nov 11, 2026",

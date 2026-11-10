@@ -211,20 +211,20 @@ export function parseFinancialText(
     merchant = 'ATM Cash Withdrawal';
   } else {
     const merchantRegexes = [
-      // "paid to STARBUCKS", "sent to RAMESH", "payment to JOHN", "payment for JOHN"
-      /(?:paid\s+to|transfer(?:red)?\s+to|sent\s+to|payment\s+to|payment\s+for)\s+([A-Za-z0-9\s&'.-]{2,30}?)(?:\s+(?:on|via|ref|upi|bal|available|at|\.|\band\b|using|from)|$)/i,
-      // "paid Rs. 10 to STARBUCKS", "sent INR 500 to RAMESH", "debited towards AKHIL"
-      new RegExp(`(?:paid|sent|transferred|debited)\\s+(?:${CURRENCY_REGEX_PART}\\s*[0-9,.]+\\s+)?(?:to|towards)\\s+([A-Za-z0-9\\s&'.-]{2,30}?)(?:\\s+(?:on|via|ref|upi|bal|available|at|\\.|\\band\\b|using|from)|$)`, 'i'),
-      // "spent at STARBUCKS", "purchase at STORE", "shopping at STORE"
-      /(?:spent\s+at|purchase\s+at|shopping\s+at)\s+([A-Za-z0-9\s&'.-]{2,30}?)(?:\s+(?:on|via|ref|upi|bal|available|\.|\band\b|using|from)|$)/i,
+      // Standard bank/receipt tables: "To Akhil Mallik RRN...", "Payee: John", "Merchant: Amazon"
+      /(?:^|\s)(?:To|Payee|Merchant)[:\s]+([A-Za-z0-9\s&'.-]{2,30}?)(?=[.,;]|\s+(?:on|via|ref|rrn|date|upi|bal|available|at|\band\b|using|from|info|successful)|$)/i,
+      // "at STARBUCKS", "spent at STARBUCKS", "purchase at STORE", "shopping at STORE"
+      /(?:at|spent\s+at|purchase\s+at|shopping\s+at)\s+([A-Za-z0-9\s&'.-]{2,30}?)(?=[.,;]|\s+(?:on|via|ref|rrn|date|upi|bal|available|at|\band\b|using|from|info|successful)|$)/i,
+      // "paid Rs. 10 to STARBUCKS", "sent INR 500 to RAMESH", "debited towards AKHIL", "payment of Rs 14 to STORE"
+      /(?:paid|sent|transferred|debited|payment(?:\s+of)?)\s+(?:(?:INR|Rs\.?|₹|USD|$|EUR|€|GBP|£)\s*[0-9,.]+\s+)?(?:to|towards)\s+([A-Za-z0-9\s&'.-]{2,30}?)(?=[.,;]|\s+(?:on|via|ref|rrn|date|upi|bal|available|at|\band\b|using|from|info|successful)|$)/i,
+      // "paid to STARBUCKS", "sent to RAMESH", "payment to JOHN"
+      /(?:paid\s+to|transfer(?:red)?\s+to|sent\s+to|payment\s+to)\s+([A-Za-z0-9\s&'.-]{2,30}?)(?=[.,;]|\s+(?:on|via|ref|rrn|date|upi|bal|available|at|\band\b|using|from|info|successful)|$)/i,
       // "to VPA swiggy@icici", "to user@upi"
       /(?:vpa|upi\s+id)\s+([A-Za-z0-9._-]+@[A-Za-z0-9]+)/i,
       // "by UPI/Swiggy" or "towards UPI/swiggy@icici" or "UPI/P2M/123/Swiggy"
       /(?:towards|by|via)\s+upi\/(?:[A-Za-z0-9_]+\/)?([A-Za-z0-9\s&'.-]{2,25})/i,
-      // "at STARBUCKS", "for AMAZON", "merchant ZOMATO"
-      /(?:at|for|merchant)\s+([A-Za-z0-9\s&'.-]{2,30}?)(?:\s+(?:on|via|ref|upi|bal|available|\.|\band\b|using|from)|$)/i,
       // "to STARBUCKS"
-      /\bto\s+([A-Za-z0-9\s&'.-]{2,30}?)(?:\s+(?:on|via|ref|upi|bal|available|at|\.|\band\b|using|from)|$)/i,
+      /\bto\s+([A-Za-z0-9\s&'.-]{2,30}?)(?=[.,;]|\s+(?:on|via|ref|rrn|date|upi|bal|available|at|\band\b|using|from|info|successful)|$)/i,
       // "info: POS 1234 STARBUCKS"
       /(?:info[:\s]+)([A-Za-z0-9\s&'.-]{2,30})/i,
     ];
@@ -240,6 +240,10 @@ export function parseFinancialText(
         if (upiWrapped) candidate = upiWrapped[1].trim();
         // Disqualify if candidate looks like a currency amount (e.g. "Rs 250.00", "INR 500")
         if (new RegExp(`^${CURRENCY_REGEX_PART}\\s*[0-9]+`, 'i').test(candidate) || /^[0-9,.]+$/.test(candidate)) {
+          continue;
+        }
+        // Disqualify phrases describing the transaction rather than the payee/merchant
+        if (/(?:transaction|alert|statement|notification|inr|rs|ending|card|payment|debited|credited)/i.test(candidate)) {
           continue;
         }
         // Disqualify generic bank/system words

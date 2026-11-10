@@ -503,8 +503,6 @@ export const ExpenseLedger: React.FC = () => {
       if (tx.type === 'expense') {
         const share = tx.split ? tx.split.yourShare : tx.amount;
         mStat.totalSpent += share;
-      } else if (tx.type === 'debt_lend') {
-        mStat.totalSpent += tx.amount;
       } else if (tx.type === 'income') {
         if (tx.categoryId === 'cat_salary' || (!tx.categoryId && tx.note?.toLowerCase().includes('salary'))) {
           mStat.totalSalary += tx.amount;

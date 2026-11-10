@@ -186,7 +186,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
   addPendingTransaction: async (tx) => {
     const current = get().pendingTransactions || [];
-    if (current.some((item) => item.id === tx.id)) return;
+    const existingIndex = current.findIndex((item) => item.id === tx.id);
+    if (existingIndex >= 0) {
+      const updated = [...current];
+      updated[existingIndex] = tx;
+      set({ pendingTransactions: updated });
+      await save({ pendingTransactions: updated });
+      return;
+    }
     // Only filter out immediate duplicate broadcasts (e.g. identical SMS duplicates)
     // Never drop distinct emails or transactions with different merchants
     const isNearDuplicate =
