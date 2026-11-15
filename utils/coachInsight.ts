@@ -2,7 +2,17 @@ import { forecastMonthEnd, safeToSpendToday } from './coach';
 import { getSubscriptionActivePrice, toLocalDateString } from './date';
 import { convertCurrency } from './currency';
 
-export type CoachInsightType = 'bill' | 'over' | 'buffer' | 'category' | 'forecast' | 'recap' | 'safe';
+export type CoachInsightType =
+  | 'bill'
+  | 'over'
+  | 'buffer'
+  | 'category'
+  | 'forecast'
+  | 'recap'
+  | 'safe'
+  | 'win'
+  | 'streak'
+  | 'pace';
 
 export interface CoachInsightAction {
   type: 'pay_bill' | 'open_goals' | 'filter_category';
@@ -17,6 +27,15 @@ export interface CoachInsight {
   title: string;
   sub: string;
   action?: CoachInsightAction;
+}
+
+export interface CategoryPacingItem {
+  id: string;
+  name: string;
+  spentThisMonth: number;
+  spentLastMonthSameDays: number;
+  spentLastMonthFull: number;
+  percentageChange?: number;
 }
 
 export interface CoachInput {
@@ -48,6 +67,12 @@ export interface CoachInput {
     categories: number;
     breakdown: Array<{ name: string; amount: number }>;
   };
+  categoryPacing?: CategoryPacingItem[];
+  streaks?: {
+    noSpendStreak: number;
+    underBudgetStreak: number;
+  };
+  selectedCategoryId?: string | null;
   format: (n: number) => string;
 }
 
@@ -247,6 +272,47 @@ export function getAllCoachInsights(i: CoachInput): CoachInsight[] {
   const daysRemaining = daysInMonth - day + 1; // includes today
   const candidates: { p: number; insight: CoachInsight }[] = [];
 
+  // 0. Selected Arc Category (highest priority when user taps a category circle in the Arc)
+  if (i.selectedCategoryId && i.categoryPacing) {
+    const selected = i.categoryPacing.find((c) => c.id === i.selectedCategoryId);
+    if (selected && (selected.spentThisMonth > 0 || selected.spentLastMonthSameDays > 0)) {
+      const thisAmt = selected.spentThisMonth;
+      const lastAmt = selected.spentLastMonthSameDays;
+      const hasDrop = lastAmt > 0 && thisAmt < lastAmt;
+      const hasIncrease = lastAmt > 0 && thisAmt > lastAmt;
+      const pct = selected.percentageChange ? Math.abs(selected.percentageChange) : 0;
+
+      let title = `${selected.name}: ${i.format(thisAmt)} spent`;
+      let sub = `Day ${day} spending across this category.`;
+      let type: CoachInsightType = 'category';
+
+      if (hasDrop && pct > 0) {
+        title = `${selected.name} is down ${pct}% vs last month`;
+        sub = `${i.format(thisAmt)} spent so far vs ${i.format(lastAmt)} by day ${day} last month.`;
+        type = 'win';
+      } else if (hasIncrease && pct > 0) {
+        title = `${selected.name} is up ${pct}% vs last month`;
+        sub = `${i.format(thisAmt)} spent so far vs ${i.format(lastAmt)} by day ${day} last month.`;
+        type = 'category';
+      } else if (lastAmt === 0 && thisAmt > 0) {
+        title = `${selected.name}: ${i.format(thisAmt)} this month`;
+        sub = `Fresh category spend with no baseline in this period last month.`;
+        type = 'category';
+      }
+
+      candidates.push({
+        p: 0,
+        insight: {
+          id: `selected:${selected.id}:${today}`,
+          type,
+          title,
+          sub,
+          action: { type: 'filter_category', categoryId: selected.id },
+        },
+      });
+    }
+  }
+
   // A bill due within 3 days that the accounts may not cover
   const soon = i.bills.filter((b) => b.billed > 0 && b.dueInDays >= 0 && b.dueInDays <= 3).sort((a, b) => a.dueInDays - b.dueInDays)[0];
   if (soon && i.liquid < soon.billed) {
@@ -361,13 +427,38 @@ export function getAllCoachInsights(i: CoachInput): CoachInsight[] {
       // Only show safe allowance card when NOT already displaying the over-pace forecast warning,
       // avoiding duplicate and contradictory advice in the deck.
       if (safe && day >= 3 && !isOverPaceWarning) {
+        const hour = i.now.getHours();
+        let safeTitle = safe.leftToday > 0 ? `${i.format(safe.leftToday)} safe to spend today` : "Today's allowance is used";
+        let safeSub = safe.leftToday > 0 ? 'That keeps you on budget for the rest of the month.' : 'Anything more comes out of tomorrow.';
+
+        if (safe.leftToday > 0) {
+          if (hour < 12) {
+            safeTitle = `${i.format(safe.leftToday)} safe allowance today`;
+            safeSub = `Starting the morning on track. Keeping under preserves your monthly budget.`;
+          } else if (hour >= 18) {
+            if (i.spentToday === 0) {
+              safeTitle = `Zero spent today · ${i.format(safe.leftToday)} intact`;
+              safeSub = `Full daily allowance preserved and rolling into tomorrow.`;
+            } else if (i.spentToday <= (safe.perDay || 0)) {
+              safeTitle = `Inside daily target (${i.format(i.spentToday)} spent)`;
+              safeSub = `Stayed within pace. ${i.format(safe.leftToday)} allowance remains available.`;
+            } else {
+              safeTitle = `Daily target reached (${i.format(i.spentToday)} spent)`;
+              safeSub = `About ${i.format(Math.max(0, safe.perDay))} a day from tomorrow keeps you on budget.`;
+            }
+          } else {
+            safeTitle = `${i.format(safe.leftToday)} safe to spend today`;
+            safeSub = `About ${i.format(safe.perDay)} a day keeps you on budget for ${daysRemaining} days.`;
+          }
+        }
+
         candidates.push({
           p: 8,
           insight: {
             id: `safe:${today}`,
             type: 'safe',
-            title: safe.leftToday > 0 ? `${i.format(safe.leftToday)} safe to spend today` : "Today's allowance is used",
-            sub: safe.leftToday > 0 ? 'That keeps you on budget for the rest of the month.' : 'Anything more comes out of tomorrow.',
+            title: safeTitle,
+            sub: safeSub,
           },
         });
       }
@@ -394,6 +485,80 @@ export function getAllCoachInsights(i: CoachInput): CoachInsight[] {
         action: { type: 'filter_category', categoryId: hot.id },
       },
     });
+  }
+
+  // Habit Win (Category where spend dropped significantly vs last month)
+  if (i.categoryPacing && i.categoryPacing.length > 0) {
+    const wins = i.categoryPacing
+      .filter((c) => {
+        if (!c.percentageChange) return false;
+        const savings = c.spentLastMonthSameDays - c.spentThisMonth;
+        return c.percentageChange <= -10 && savings >= 100 && c.spentLastMonthSameDays >= 300;
+      })
+      .sort((a, b) => {
+        const savingsA = a.spentLastMonthSameDays - a.spentThisMonth;
+        const savingsB = b.spentLastMonthSameDays - b.spentThisMonth;
+        return savingsB - savingsA;
+      });
+
+    const bestWin = wins[0];
+    if (bestWin && (!i.selectedCategoryId || i.selectedCategoryId !== bestWin.id)) {
+      const savings = bestWin.spentLastMonthSameDays - bestWin.spentThisMonth;
+      candidates.push({
+        p: 4,
+        insight: {
+          id: `win:${bestWin.id}:${today}`,
+          type: 'win',
+          title: `${bestWin.name} spend is down ${Math.abs(bestWin.percentageChange || 0)}%`,
+          sub: `Saved about ${i.format(savings)} compared to your pace at this time last month.`,
+          action: { type: 'filter_category', categoryId: bestWin.id },
+        },
+      });
+    }
+  }
+
+  // Streaks & Discipline Momentum
+  if (i.streaks) {
+    if (i.streaks.noSpendStreak >= 2) {
+      candidates.push({
+        p: 5,
+        insight: {
+          id: `streak:nospend:${today}`,
+          type: 'streak',
+          title: `${i.streaks.noSpendStreak}-day zero-spend streak 🎯`,
+          sub: `No discretionary expenses logged over the last ${i.streaks.noSpendStreak} days.`,
+        },
+      });
+    } else if (i.streaks.underBudgetStreak >= 3) {
+      candidates.push({
+        p: 5,
+        insight: {
+          id: `streak:underbudget:${today}`,
+          type: 'streak',
+          title: `${i.streaks.underBudgetStreak}-day streak inside daily budget 🔥`,
+          sub: `Your daily spending rhythm is consistent and disciplined.`,
+        },
+      });
+    }
+  }
+
+  // Mid-Month Pacing Radar (Ahead of schedule)
+  if (i.budget > 0 && day >= 8 && day <= daysInMonth - 3 && i.spentToDate < i.budget) {
+    const pctMonthElapsed = day / daysInMonth;
+    const pctBudgetSpent = i.spentToDate / i.budget;
+    if (pctBudgetSpent < pctMonthElapsed * 0.85) {
+      const daysAhead = Math.max(1, Math.round((pctMonthElapsed - pctBudgetSpent) * daysInMonth));
+      const remainingPct = Math.round((1 - pctBudgetSpent) * 100);
+      candidates.push({
+        p: 6,
+        insight: {
+          id: `pace:ahead:${today}`,
+          type: 'pace',
+          title: `Pacing ${daysAhead} day${daysAhead === 1 ? '' : 's'} ahead of budget ⚡`,
+          sub: `Day ${day} with ${i.format(i.budget - i.spentToDate)} remaining (${remainingPct}% of budget intact).`,
+        },
+      });
+    }
   }
 
   // Month start: how last month went (Days 1–4 of the new month)

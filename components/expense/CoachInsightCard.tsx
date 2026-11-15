@@ -17,12 +17,15 @@ import { ExpenseAccount } from '@/types/expense';
 
 const TONE: Record<CoachInsightType, string> = {
   bill: '#FF8A8A',
-  over: '#FF9D66',
+  over: '#FF8A8A',
   buffer: '#FBBF24',
   category: '#FF9D66',
   forecast: '#FFC46B',
   recap: '#9DC6EB',
-  safe: '#F48B8B',
+  safe: '#68D391',
+  win: '#68D391',
+  streak: '#FBBF24',
+  pace: '#60A5FA',
 };
 
 const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -31,6 +34,7 @@ export interface CoachInsightCardProps {
   onPayBill?: (cardAccount: ExpenseAccount) => void;
   onOpenGoals?: () => void;
   onFilterCategory?: (categoryId: string) => void;
+  selectedCategoryId?: string | null;
 }
 
 /**
@@ -42,6 +46,7 @@ export const CoachInsightCard: React.FC<CoachInsightCardProps> = ({
   onPayBill,
   onOpenGoals,
   onFilterCategory,
+  selectedCategoryId,
 }) => {
   const { transactions, accounts, categories, monthlyBudget, categoryBudgets, selectedMonth, formatAmount, getTotalSpent, currencyCode, getBudgetBufferAnalysis } =
     useExpenseStore(
@@ -122,17 +127,50 @@ export const CoachInsightCard: React.FC<CoachInsightCardProps> = ({
     const prevPrefix = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`;
     const catSpentThisMonth: Record<string, number> = {};
     const catSpentLastMonth: Record<string, number> = {};
+    const catSpentLastMonthSameDays: Record<string, number> = {};
+    const curDay = now.getDate();
+
     for (const t of transactions) {
       if (t.type !== 'expense' || t.categoryId === 'cat_debt_repayment') continue;
-      const k = String(t.date).slice(0, 7);
+      const dStr = String(t.date);
+      const k = dStr.slice(0, 7);
       const share = t.split ? t.split.yourShare : t.amount;
-      if (k === monthPrefix) catSpentThisMonth[t.categoryId] = (catSpentThisMonth[t.categoryId] || 0) + share;
-      else if (k === prevPrefix) catSpentLastMonth[t.categoryId] = (catSpentLastMonth[t.categoryId] || 0) + share;
+      const tDay = parseInt(dStr.slice(8, 10), 10) || 1;
+
+      if (k === monthPrefix) {
+        catSpentThisMonth[t.categoryId] = (catSpentThisMonth[t.categoryId] || 0) + share;
+      } else if (k === prevPrefix) {
+        catSpentLastMonth[t.categoryId] = (catSpentLastMonth[t.categoryId] || 0) + share;
+        if (tDay <= curDay) {
+          catSpentLastMonthSameDays[t.categoryId] = (catSpentLastMonthSameDays[t.categoryId] || 0) + share;
+        }
+      }
     }
     const nameOf = (id: string) => categories.find((c) => c.id === id)?.name || 'Other';
     const categoriesWithBudget = Object.entries(categoryBudgets || {})
       .filter(([, b]) => b > 0)
       .map(([id, budget]) => ({ id, name: nameOf(id), spent: catSpentThisMonth[id] || 0, budget }));
+
+    const categoryPacing = categories
+      .filter((c) => (catSpentThisMonth[c.id] || 0) > 0 || (catSpentLastMonthSameDays[c.id] || 0) > 0)
+      .map((cat) => {
+        const thisAmt = catSpentThisMonth[cat.id] || 0;
+        const lastAmt = catSpentLastMonthSameDays[cat.id] || 0;
+        const fullAmt = catSpentLastMonth[cat.id] || 0;
+        let pct: number | undefined;
+        if (lastAmt > 0) {
+          pct = Math.round(((thisAmt - lastAmt) / lastAmt) * 100);
+        }
+        return {
+          id: cat.id,
+          name: cat.name,
+          spentThisMonth: thisAmt,
+          spentLastMonthSameDays: lastAmt,
+          spentLastMonthFull: fullAmt,
+          percentageChange: pct,
+        };
+      });
+
     const lastTotal = Object.values(catSpentLastMonth).reduce((a, b) => a + b, 0);
     const topLast = Object.entries(catSpentLastMonth).sort((a, b) => b[1] - a[1])[0];
     const prevAnalysis = getBudgetBufferAnalysis(prevKey);
@@ -171,6 +209,35 @@ export const CoachInsightCard: React.FC<CoachInsightCardProps> = ({
     });
     const upcomingFixed = fixedCommitments.total;
 
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const dailyLimit = budget > 0 && daysInMonth > 0 ? Math.round(budget / daysInMonth) : 0;
+    let noSpendStreak = 0;
+    let underBudgetStreak = 0;
+
+    for (let back = 1; back <= 14; back++) {
+      const d = new Date(todayMidnight);
+      d.setDate(d.getDate() - back);
+      const spend = perDay[dayKey(d)] || 0;
+      if (spend === 0) {
+        noSpendStreak++;
+      } else {
+        break;
+      }
+    }
+
+    if (dailyLimit > 0) {
+      for (let back = 1; back <= 14; back++) {
+        const d = new Date(todayMidnight);
+        d.setDate(d.getDate() - back);
+        const spend = perDay[dayKey(d)] || 0;
+        if (spend <= dailyLimit) {
+          underBudgetStreak++;
+        } else {
+          break;
+        }
+      }
+    }
+
     const bills = accounts
       .filter((a) => a.type === 'credit' && !a.isArchived && a.dueDay)
       .map((a) => {
@@ -205,9 +272,15 @@ export const CoachInsightCard: React.FC<CoachInsightCardProps> = ({
       liquid,
       categories: categoriesWithBudget,
       lastMonth,
+      categoryPacing,
+      streaks: {
+        noSpendStreak,
+        underBudgetStreak,
+      },
+      selectedCategoryId,
       format: coachFormat,
     });
-  }, [transactions, accounts, categories, monthlyBudget, categoryBudgets, selectedMonth, subscriptions, formatAmount, getTotalSpent, currencyCode, getBudgetBufferAnalysis]);
+  }, [transactions, accounts, categories, monthlyBudget, categoryBudgets, selectedMonth, subscriptions, formatAmount, getTotalSpent, currencyCode, getBudgetBufferAnalysis, selectedCategoryId]);
 
   // Filter out any dismissed insights (Waterfall: next insight surfaces automatically)
   const activeInsights = useMemo(() => {
@@ -215,10 +288,17 @@ export const CoachInsightCard: React.FC<CoachInsightCardProps> = ({
     return allInsights.filter((ins) => !dismissed.includes(ins.id));
   }, [allInsights, dismissed]);
 
+  // Jump to selected category insight immediately when tapped in the Arc
+  useEffect(() => {
+    if (selectedCategoryId) {
+      setActiveIdx(0);
+    }
+  }, [selectedCategoryId]);
+
   // Keep active index in bounds
   const safeIdx = Math.min(activeIdx, Math.max(0, activeInsights.length - 1));
   const currentInsight = activeInsights[safeIdx] || null;
-  const shownId = currentInsight ? currentInsight.id : justDismissed ? 'undo-state' : null;
+  const shownId = currentInsight ? `${currentInsight.id}:${selectedCategoryId || ''}` : justDismissed ? 'undo-state' : null;
 
   // Gentle fade when insight changes
   useEffect(() => {
@@ -319,10 +399,10 @@ export const CoachInsightCard: React.FC<CoachInsightCardProps> = ({
       >
         <View style={[styles.dot, { backgroundColor: TONE[currentInsight.type] }]} />
         <View style={styles.textCol}>
-          <AppText style={styles.title} numberOfLines={2}>
+          <AppText style={styles.title} numberOfLines={1} ellipsizeMode="tail">
             {currentInsight.title}
           </AppText>
-          <AppText style={styles.sub} numberOfLines={2}>
+          <AppText style={styles.sub} numberOfLines={2} ellipsizeMode="tail">
             {currentInsight.sub}
           </AppText>
         </View>
@@ -386,6 +466,7 @@ const styles = StyleSheet.create({
   },
   cardContent: {
     flex: 1,
+    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
@@ -394,9 +475,11 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
+    flexShrink: 0,
   },
   textCol: {
     flex: 1,
+    minWidth: 0,
   },
   title: {
     color: '#FFFFFF',
@@ -412,12 +495,14 @@ const styles = StyleSheet.create({
   },
   actionPill: {
     marginRight: 2,
+    flexShrink: 0,
   },
   actionsRight: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     marginLeft: 8,
+    flexShrink: 0,
   },
   badgeBtn: {
     backgroundColor: 'rgba(255, 255, 255, 0.07)',

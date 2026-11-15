@@ -36,7 +36,7 @@ import { ExpenseAccount } from '@/types/expense';
 export const ExpenseDashboard: React.FC = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<React.ElementRef<typeof ScrollView>>(null);
   const {
     transactions,
     accounts,
@@ -64,6 +64,7 @@ export const ExpenseDashboard: React.FC = () => {
   const [accountsModalTab, setAccountsModalTab] = useState<'accounts' | 'goals'>('accounts');
   const [selectedAccountForEdit, setSelectedAccountForEdit] = useState<ExpenseAccount | null>(null);
   const [showEditAccountModal, setShowEditAccountModal] = useState<boolean>(false);
+  const [selectedArcCatId, setSelectedArcCatId] = useState<string | null>(null);
 
   // Standard HIG tap active tab to scroll to top
   useScrollToTop(scrollRef);
@@ -176,8 +177,9 @@ export const ExpenseDashboard: React.FC = () => {
     router.push(`/account/${acc.id}`);
   };
 
-  const handleCategorySelect = (_catId: string) => {
-    // Tapping category in arc inspects category spend only, does not open Add Transaction modal
+  const handleCategorySelect = (catId: string) => {
+    // Tapping category in arc inspects category spend in the coach card (toggle off if clicked again)
+    setSelectedArcCatId((prev) => (prev === catId ? null : catId));
   };
 
   const handleCoachCategoryFilter = (catId: string) => {
@@ -190,7 +192,7 @@ export const ExpenseDashboard: React.FC = () => {
 
   return (
     <View style={styles.screenContainer}>
-      <StatusBar barStyle="light-content" backgroundColor="#101114" translucent />
+      <StatusBar barStyle="light-content" />
 
       {/* Top Safe Area Background Fill */}
       <View style={{ height: insets.top, backgroundColor: '#101114', zIndex: 10 }} />
@@ -232,6 +234,7 @@ export const ExpenseDashboard: React.FC = () => {
         {/* The one quiet coach line; renders nothing unless there is something worth saying */}
         {transactions.length > 0 && (
           <CoachInsightCard
+            selectedCategoryId={selectedArcCatId}
             onPayBill={handlePayBill}
             onOpenGoals={handleOpenGoals}
             onFilterCategory={handleCoachCategoryFilter}
