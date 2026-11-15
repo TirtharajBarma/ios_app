@@ -139,6 +139,27 @@ function formatCachedDateHeading(dateKey: string, rawDate: string): string {
   return heading;
 }
 
+// Apple HIG Native Smooth Spring Physics for Search Transitions
+const triggerSpringAnimation = () => {
+  LayoutAnimation.configureNext({
+    duration: 260,
+    create: {
+      type: LayoutAnimation.Types.spring,
+      property: LayoutAnimation.Properties.opacity,
+      springDamping: 0.82,
+    },
+    update: {
+      type: LayoutAnimation.Types.spring,
+      springDamping: 0.82,
+    },
+    delete: {
+      type: LayoutAnimation.Types.spring,
+      property: LayoutAnimation.Properties.opacity,
+      springDamping: 0.82,
+    },
+  });
+};
+
 export const ExpenseLedger: React.FC = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -197,8 +218,10 @@ export const ExpenseLedger: React.FC = () => {
   const pendingTransactions = useSettingsStore((s) => s.pendingTransactions);
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const [isSearchFocused, setIsSearchFocused] = useState(false);
-  const searchInputRef = useRef<TextInput>(null);
-  const accountFilterScrollRef = useRef<ScrollView>(null);
+  const [isAiCardExpanded, setIsAiCardExpanded] = useState(false);
+  const isSearchActive = Boolean(smartSearchQuery.trim().length > 0);
+  const searchInputRef = useRef<any>(null);
+  const accountFilterScrollRef = useRef<any>(null);
 
   const sym = currencySymbol || '₹';
 
@@ -268,7 +291,7 @@ export const ExpenseLedger: React.FC = () => {
 
   const handleToggleSelectMode = () => {
     Haptics.selectionAsync().catch(() => {});
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    triggerSpringAnimation();
     if (isSelectMode) {
       clearSelectedTransactions();
       setIsSelectMode(false);
@@ -1566,12 +1589,14 @@ export const ExpenseLedger: React.FC = () => {
             },
           ]}
         >
-          <View style={styles.smartSearchHeadingRow}>
-            <View style={styles.headingTitleLeft}>
-              <Sparkles size={14} color={expenseColors.accentPeach} />
-              <AppText style={styles.smartSearchHeading}>SMART SEARCH</AppText>
+          {!isSearchActive && (
+            <View style={styles.smartSearchHeadingRow}>
+              <View style={styles.headingTitleLeft}>
+                <Sparkles size={14} color={expenseColors.accentPeach} />
+                <AppText style={styles.smartSearchHeading}>SMART SEARCH</AppText>
+              </View>
             </View>
-          </View>
+          )}
 
           {/* Search Input Box */}
           <View style={[styles.inputContainer, isSearchFocused && styles.inputContainerFocused]}>
@@ -1587,6 +1612,9 @@ export const ExpenseLedger: React.FC = () => {
               onChangeText={(text) => {
                 if (text.length === 1 && smartSearchQuery.length === 0) {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                  triggerSpringAnimation();
+                } else if (text.length === 0 && smartSearchQuery.length > 0) {
+                  triggerSpringAnimation();
                 }
                 setSmartSearchQuery(text);
               }}
@@ -1602,7 +1630,9 @@ export const ExpenseLedger: React.FC = () => {
               <TouchableOpacity
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                  triggerSpringAnimation();
                   setSmartSearchQuery('');
+                  setIsAiCardExpanded(false);
                 }}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 style={styles.clearBtn}
@@ -1631,163 +1661,225 @@ export const ExpenseLedger: React.FC = () => {
           </View>
         </Animated.View>
 
-        {/* On-Device AI Insight Card */}
-        {aiResult && (
-          <View style={styles.aiInsightCard}>
-            <View style={styles.aiInsightTopRow}>
-              <View style={styles.aiInsightBadge}>
-                <Sparkles size={13} color="#EBB29A" />
-                <AppText style={styles.aiInsightBadgeText}>AI INSIGHT</AppText>
+        {/* On-Device AI Insight (Ultra-Compact 38px Frosted Glass Pill in Search Focus Mode) */}
+        {aiResult && isSearchActive && (
+          <View style={styles.aiResultWrapper}>
+            <TouchableOpacity
+              style={[
+                styles.aiCompactPill,
+                isAiCardExpanded && styles.aiCompactPillExpanded,
+              ]}
+              activeOpacity={0.8}
+              onPress={() => {
+                Haptics.selectionAsync().catch(() => {});
+                triggerSpringAnimation();
+                setIsAiCardExpanded((prev) => !prev);
+              }}
+            >
+              <View style={styles.aiCompactLeft}>
+                <View style={styles.aiSparkleIconBox}>
+                  <Sparkles size={11} color="#EBB29A" />
+                </View>
+                <AppText style={styles.aiCompactSummaryText} numberOfLines={1}>
+                  {aiResult.metrics.find((m) => m.label === 'NET DUE' || m.label === 'NET PAYABLE') ? (
+                    `${aiResult.detectedCriteria.friendName ? `${aiResult.detectedCriteria.friendName} • ` : ''}${aiResult.metrics.find((m) => m.label === 'NET DUE' || m.label === 'NET PAYABLE')?.sublabel} (${aiResult.metrics.find((m) => m.label === 'NET DUE' || m.label === 'NET PAYABLE')?.value})`
+                  ) : (
+                    <>
+                      {aiResult.matchedTransactions.length} {aiResult.matchedTransactions.length === 1 ? 'match' : 'matches'}
+                      {aiResult.metrics.find((m) => m.label === 'TOTAL') ? ` • Total ${aiResult.metrics.find((m) => m.label === 'TOTAL')?.value}` : ''}
+                      {aiResult.metrics.find((m) => m.label === 'AVG') ? ` • Avg ${aiResult.metrics.find((m) => m.label === 'AVG')?.value}` : ''}
+                    </>
+                  )}
+                </AppText>
               </View>
-              <AppText style={styles.aiEngineSubtext}>{deviceAiInfo.chip}</AppText>
-            </View>
+              <View style={styles.aiCompactRight}>
+                <AppText style={styles.aiCompactDetailsBtnText}>
+                  {isAiCardExpanded ? 'Less' : 'Details'}
+                </AppText>
+                <ChevronDown
+                  size={12}
+                  color="#EBB29A"
+                  style={{
+                    transform: [{ rotate: isAiCardExpanded ? '180deg' : '0deg' }],
+                  }}
+                />
+              </View>
+            </TouchableOpacity>
 
-            <AppText style={styles.aiAnswerText}>{aiResult.naturalLanguageAnswer}</AppText>
-
-            {aiResult.metrics.length > 0 && (
-              <View style={styles.aiMetricsRow}>
-                {aiResult.metrics.map((m) => (
-                  <View key={m.label} style={styles.metricPill}>
-                    <AppText style={styles.metricLabel}>{m.label}</AppText>
-                    <AppText style={styles.metricValue}>{m.value}</AppText>
+            {/* Expanded Detailed Breakdown (Shown when user taps 'Details') */}
+            {isAiCardExpanded && (
+              <View style={styles.aiExpandedDetailCard}>
+                <View style={styles.aiInsightTopRow}>
+                  <View style={styles.aiInsightBadge}>
+                    <Sparkles size={11} color="#EBB29A" />
+                    <AppText style={styles.aiInsightBadgeText}>AI INSIGHT</AppText>
                   </View>
-                ))}
+                  <AppText style={styles.aiEngineSubtext}>{deviceAiInfo.chip}</AppText>
+                </View>
+
+                {/* Detected Criteria Tags */}
+                {aiResult.detectedCriteria.filterTags && aiResult.detectedCriteria.filterTags.length > 0 && (
+                  <View style={styles.detectedTagsRow}>
+                    {aiResult.detectedCriteria.filterTags.map((tag) => (
+                      <View key={tag.id} style={styles.detectedTagPill}>
+                        <AppText style={styles.detectedTagText}>{tag.label}</AppText>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                <AppText style={styles.aiAnswerText}>{aiResult.naturalLanguageAnswer}</AppText>
+
+                {aiResult.metrics.length > 0 && (
+                  <View style={styles.aiMetricsRow}>
+                    {aiResult.metrics.map((m) => (
+                      <View key={m.label} style={styles.metricPill}>
+                        <AppText style={styles.metricLabel}>{m.label}</AppText>
+                        <AppText style={styles.metricValue}>{m.value}</AppText>
+                      </View>
+                    ))}
+                  </View>
+                )}
               </View>
             )}
           </View>
         )}
 
-        {/* Account Filters Row (All, HDFC, Slice, Cash...) */}
-        <Animated.View
-          style={{
-            opacity: animFilters,
-            transform: [
-              {
-                translateY: animFilters.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [14, 0],
-                }),
-              },
-            ],
-          }}
-        >
-          <ScrollView
-            ref={accountFilterScrollRef}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            contentContainerStyle={styles.filterScrollContainer}
-            style={styles.filterScrollView}
+        {/* Account Filters Row (All, HDFC, Slice, Cash...) - Only in Browse Mode */}
+        {!isSearchActive && (
+          <Animated.View
+            style={{
+              opacity: animFilters,
+              transform: [
+                {
+                  translateY: animFilters.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [14, 0],
+                  }),
+                },
+              ],
+            }}
           >
-            {accountFilterList.map((filterName) => {
-              const isActive = activeAccountFilter.toLowerCase() === filterName.toLowerCase();
-              const count = accountTxCounts[filterName] ?? 0;
-              const displayText = filterName === 'All'
-                ? `All (${transactions.length})`
-                : `${filterName} (${count})`;
+            <ScrollView
+              ref={accountFilterScrollRef}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={styles.filterScrollContainer}
+              style={styles.filterScrollView}
+            >
+              {accountFilterList.map((filterName) => {
+                const isActive = activeAccountFilter.toLowerCase() === filterName.toLowerCase();
+                const count = accountTxCounts[filterName] ?? 0;
+                const displayText = filterName === 'All'
+                  ? `All (${transactions.length})`
+                  : `${filterName} (${count})`;
 
-              return (
+                return (
+                  <TouchableOpacity
+                    key={filterName}
+                    style={[
+                      styles.filterPill,
+                      isActive ? styles.filterPillActive : styles.filterPillInactive,
+                    ]}
+                    activeOpacity={0.7}
+                    onPress={() => {
+                      Keyboard.dismiss();
+                      setIsSearchFocused(false);
+                      Haptics.selectionAsync().catch(() => {});
+                      triggerSpringAnimation();
+                      if (isActive && filterName !== 'All') {
+                        setActiveAccountFilter('All');
+                      } else {
+                        setActiveAccountFilter(filterName);
+                      }
+                    }}
+                  >
+                    <AppText
+                      style={[
+                        styles.filterPillText,
+                        isActive ? styles.filterTextActive : styles.filterTextInactive,
+                      ]}
+                    >
+                      {displayText}
+                    </AppText>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </Animated.View>
+        )}
+
+        {/* Compact Category Filter Dropdown & Pending Dues Shortcut - Only in Browse Mode */}
+        {!isSearchActive && (
+          <View style={styles.categoryFilterRow}>
+            <View style={styles.categoryFilterLeftGroup}>
+              <NativeLiquidMenu
+                title="Filter by Category"
+                actions={categoryFilterDropdownActions}
+                onSelect={(catId) => {
+                  Haptics.selectionAsync().catch(() => {});
+                  triggerSpringAnimation();
+                  setSelectedCategoryFilter(catId);
+                }}
+                style={{ alignSelf: 'flex-start' }}
+              >
+                <View style={[styles.categoryFilterTrigger, selectedCategoryFilter !== 'All' && styles.categoryFilterTriggerActive]}>
+                  <View style={styles.categoryFilterTriggerLeft}>
+                    <Tag size={13} color={selectedCategoryFilter !== 'All' ? expenseColors.accentPeach : '#8E919D'} />
+                    <AppText
+                      style={[
+                        styles.categoryFilterTriggerText,
+                        selectedCategoryFilter !== 'All' && styles.categoryFilterTriggerTextActive,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {selectedCategoryFilter === 'All'
+                        ? 'All Categories'
+                        : getCategoryObj(selectedCategoryFilter)?.name || 'Category'}
+                    </AppText>
+                  </View>
+                  <ChevronDown size={13} color={selectedCategoryFilter !== 'All' ? expenseColors.accentPeach : '#8E919D'} />
+                </View>
+              </NativeLiquidMenu>
+
+              {selectedCategoryFilter !== 'All' && (
                 <TouchableOpacity
-                  key={filterName}
-                  style={[
-                    styles.filterPill,
-                    isActive ? styles.filterPillActive : styles.filterPillInactive,
-                  ]}
+                  style={styles.clearCategoryPill}
                   activeOpacity={0.7}
                   onPress={() => {
-                    Keyboard.dismiss();
-                    setIsSearchFocused(false);
                     Haptics.selectionAsync().catch(() => {});
-                    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                    if (isActive && filterName !== 'All') {
-                      setActiveAccountFilter('All');
-                    } else {
-                      setActiveAccountFilter(filterName);
-                    }
+                    triggerSpringAnimation();
+                    setSelectedCategoryFilter('All');
                   }}
                 >
-                  <AppText
-                    style={[
-                      styles.filterPillText,
-                      isActive ? styles.filterTextActive : styles.filterTextInactive,
-                    ]}
-                  >
-                    {displayText}
-                  </AppText>
+                  <AppText style={styles.clearCategoryPillText}>Reset</AppText>
+                  <X size={11} color="#FF9D66" />
                 </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </Animated.View>
+              )}
+            </View>
 
-        {/* Compact Category Filter Dropdown & Pending Dues Shortcut */}
-        <View style={styles.categoryFilterRow}>
-          <View style={styles.categoryFilterLeftGroup}>
-            <NativeLiquidMenu
-              title="Filter by Category"
-              actions={categoryFilterDropdownActions}
-              onSelect={(catId) => {
-                Haptics.selectionAsync().catch(() => {});
-                LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                setSelectedCategoryFilter(catId);
-              }}
-              style={{ alignSelf: 'flex-start' }}
-            >
-              <View style={[styles.categoryFilterTrigger, selectedCategoryFilter !== 'All' && styles.categoryFilterTriggerActive]}>
-                <View style={styles.categoryFilterTriggerLeft}>
-                  <Tag size={13} color={selectedCategoryFilter !== 'All' ? expenseColors.accentPeach : '#8E919D'} />
-                  <AppText
-                    style={[
-                      styles.categoryFilterTriggerText,
-                      selectedCategoryFilter !== 'All' && styles.categoryFilterTriggerTextActive,
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {selectedCategoryFilter === 'All'
-                      ? 'All Categories'
-                      : getCategoryObj(selectedCategoryFilter)?.name || 'Category'}
-                  </AppText>
-                </View>
-                <ChevronDown size={13} color={selectedCategoryFilter !== 'All' ? expenseColors.accentPeach : '#8E919D'} />
-              </View>
-            </NativeLiquidMenu>
-
-            {selectedCategoryFilter !== 'All' && (
+            {/* Pending Dues / Debts Compact Shortcut Button on Right */}
+            {hasPendingDebts && !isSelectMode && (
               <TouchableOpacity
-                style={styles.clearCategoryPill}
-                activeOpacity={0.7}
+                style={styles.pendingDebtShortcutBtn}
+                activeOpacity={0.75}
                 onPress={() => {
-                  Haptics.selectionAsync().catch(() => {});
-                  LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                  setSelectedCategoryFilter('All');
+                  Keyboard.dismiss();
+                  setIsSearchFocused(false);
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                  router.push('/receivables');
                 }}
               >
-                <AppText style={styles.clearCategoryPillText}>Reset</AppText>
-                <X size={11} color="#FF9D66" />
+                <HandCoins size={12} color={expenseColors.accentPeach} />
+                <AppText style={styles.pendingDebtShortcutText}>
+                  {pendingLentList.length + pendingBorrowList.length} Due
+                </AppText>
+                <ChevronRight size={11} color={expenseColors.accentPeach} />
               </TouchableOpacity>
             )}
           </View>
-
-          {/* Pending Dues / Debts Compact Shortcut Button on Right */}
-          {hasPendingDebts && !isSelectMode && (
-            <TouchableOpacity
-              style={styles.pendingDebtShortcutBtn}
-              activeOpacity={0.75}
-              onPress={() => {
-                Keyboard.dismiss();
-                setIsSearchFocused(false);
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-                router.push('/receivables');
-              }}
-            >
-              <HandCoins size={12} color={expenseColors.accentPeach} />
-              <AppText style={styles.pendingDebtShortcutText}>
-                {pendingLentList.length + pendingBorrowList.length} Due
-              </AppText>
-              <ChevronRight size={11} color={expenseColors.accentPeach} />
-            </TouchableOpacity>
-          )}
-        </View>
+        )}
 
         {/* Prominent Active Account Filter Banner */}
         {/* {activeAccountFilter !== 'All' && (
@@ -1803,7 +1895,7 @@ export const ExpenseLedger: React.FC = () => {
               activeOpacity={0.7}
               onPress={() => {
                 Haptics.selectionAsync().catch(() => {});
-                LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                triggerSpringAnimation();
                 setActiveAccountFilter('All');
               }}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -2114,6 +2206,107 @@ const styles = StyleSheet.create({
   },
   micBadge: {
     padding: 4,
+  },
+  presetsWrapper: {
+    marginBottom: 10,
+  },
+  presetsScrollContent: {
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  searchPresetPill: {
+    backgroundColor: '#1C1E28',
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  searchPresetText: {
+    color: '#D1D3DC',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  detectedTagsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 10,
+  },
+  detectedTagPill: {
+    backgroundColor: 'rgba(235, 178, 154, 0.16)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(235, 178, 154, 0.3)',
+  },
+  detectedTagText: {
+    color: '#FFD7C7',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  aiResultWrapper: {
+    marginHorizontal: 16,
+    marginBottom: 8,
+  },
+  aiCompactPill: {
+    backgroundColor: 'rgba(235, 178, 154, 0.09)',
+    borderWidth: 1,
+    borderColor: 'rgba(235, 178, 154, 0.28)',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  aiCompactPillExpanded: {
+    borderBottomLeftRadius: 6,
+    borderBottomRightRadius: 6,
+    borderColor: 'rgba(235, 178, 154, 0.4)',
+    backgroundColor: 'rgba(235, 178, 154, 0.14)',
+  },
+  aiCompactLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    flex: 1,
+    marginRight: 8,
+  },
+  aiSparkleIconBox: {
+    width: 20,
+    height: 20,
+    borderRadius: 6,
+    backgroundColor: 'rgba(235, 178, 154, 0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  aiCompactSummaryText: {
+    color: '#F4E5DF',
+    fontSize: 12,
+    fontWeight: '700',
+    flex: 1,
+  },
+  aiCompactRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  aiCompactDetailsBtnText: {
+    color: expenseColors.accentPeach,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  aiExpandedDetailCard: {
+    backgroundColor: 'rgba(235, 178, 154, 0.06)',
+    borderWidth: 1,
+    borderTopWidth: 0,
+    borderColor: 'rgba(235, 178, 154, 0.25)',
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 16,
+    padding: 14,
+    paddingTop: 10,
   },
   aiInsightCard: {
     backgroundColor: 'rgba(235, 178, 154, 0.08)',

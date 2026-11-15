@@ -197,11 +197,13 @@ interface VsCat {
   thisAmount: number;
   lastAmount: number;
   formatted: string;
+  lastFormatted: string;
   thisPercent: number;
   lastPercent: number;
   changeBadge: string;
   isNew: boolean;
   isIncrease: boolean;
+  isZero: boolean;
   color: string;
 }
 
@@ -536,7 +538,7 @@ export const ExpenseVisualizer: React.FC = () => {
     }
   };
 
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<React.ElementRef<typeof ScrollView>>(null);
 
   const { width: vizWidth } = useWindowDimensions();
   const { CARD_W, INNER_W, TILE_W, RLABEL_W, SVG_W } = useMemo(
@@ -620,7 +622,7 @@ export const ExpenseVisualizer: React.FC = () => {
   }, [monthList, selectedMonth]);
 
   // Native 120Hz Apple Liquid Paged Calendar Carousel
-  const calScrollRef = useRef<ScrollView>(null);
+  const calScrollRef = useRef<React.ElementRef<typeof ScrollView>>(null);
   const isUserScrolling = useRef(false);
 
   // Sync scroll position with selectedMonth when not actively dragging
@@ -1187,6 +1189,7 @@ export const ExpenseVisualizer: React.FC = () => {
         let changeBadge = 'NEW';
         let isNew = false;
         let isIncrease = false;
+        let isZero = false;
 
         if (lastAmt === 0 && thisAmt > 0) {
           if ((lastMonthFullMap[catId] || 0) === 0) {
@@ -1211,32 +1214,37 @@ export const ExpenseVisualizer: React.FC = () => {
             isIncrease = false;
           } else {
             changeBadge = '0%';
+            isZero = true;
             isIncrease = false;
           }
         }
 
         const formatted = formatCompactCurrency(thisAmt, sym);
+        const lastFormatted = formatCompactCurrency(lastAmt, sym);
+
+        // Per-row scale: normalized to the larger of the two values so every category
+        // utilizes the track clearly instead of being crushed by large rent/emi categories.
+        const rowMax = Math.max(thisAmt, lastAmt, 1);
+        const thisPercent = Math.min(Math.round((thisAmt / rowMax) * 100), 100);
+        const lastPercent = lastAmt > 0 ? Math.min(Math.round((lastAmt / rowMax) * 100), 100) : 0;
 
         activeList.push({
           id: cat.id,
           name: cat.name.toUpperCase(),
+          emoji: cat.emoji,
           thisAmount: thisAmt,
           lastAmount: lastAmt,
           formatted,
-          thisPercent: 0,
-          lastPercent: 0,
+          lastFormatted,
+          thisPercent,
+          lastPercent,
           changeBadge,
           isNew,
           isIncrease,
+          isZero,
           color: cat.color,
         });
       }
-    });
-
-    const maxVal = Math.max(...activeList.map(c => Math.max(c.thisAmount, c.lastAmount)), 1);
-    activeList.forEach(c => {
-      c.thisPercent = Math.min(Math.round((c.thisAmount / maxVal) * 100), 100);
-      c.lastPercent = Math.min(Math.round((c.lastAmount / maxVal) * 100), 100);
     });
 
     return activeList.sort((a, b) => b.thisAmount - a.thisAmount);
@@ -2463,15 +2471,18 @@ export const ExpenseVisualizer: React.FC = () => {
                           <AppText
                             style={[
                               st.vsDelta,
-                              cat.isNew ? st.vsDeltaNew : cat.isIncrease ? st.vsDeltaUp : st.vsDeltaDown,
+                              cat.isNew ? st.vsDeltaNew : cat.isIncrease ? st.vsDeltaUp : cat.isZero ? st.vsDeltaZero : st.vsDeltaDown,
                             ]}
                           >
-                            {cat.isNew ? 'New' : `${cat.isIncrease ? '↑' : '↓'} ${cat.changeBadge.replace(/^[+-]/, '')}`}
+                            {cat.isNew ? 'New' : cat.isZero ? '0%' : `${cat.isIncrease ? '↑' : '↓'} ${cat.changeBadge.replace(/^[+-]/, '')}`}
                           </AppText>
                         )}
                       </View>
                       <View style={st.vsRight}>
                         <AppText style={st.vsAmt}>{cat.formatted}</AppText>
+                        <AppText style={st.vsLastTxt}>
+                          {cat.isNew ? 'vs —' : `vs ${cat.lastFormatted}`}
+                        </AppText>
                       </View>
                     </View>
 
@@ -2496,7 +2507,10 @@ export const ExpenseVisualizer: React.FC = () => {
                           style={[
                             st.vsTick,
                             {
-                              left: `${Math.min(cat.lastPercent, 99)}%`,
+                              left: `${Math.min(cat.lastPercent, 100)}%`,
+                              transform: [{ translateX: cat.lastPercent >= 100 ? -2 : -1 }],
+                            },
+                            {
                               // The tick appears once its bar has mostly grown
                               opacity: barGrowAnim.interpolate({ inputRange: [0.6, 1], outputRange: [0, 1], extrapolate: 'clamp' }),
                             },
@@ -3326,13 +3340,20 @@ const st = StyleSheet.create({
   vsDeltaUp: { color: expenseColors.textMuted },
   vsDeltaDown: { color: expenseColors.textMuted },
   vsDeltaNew: { color: expenseColors.textMuted },
+  vsDeltaZero: { color: expenseColors.textMuted },
   vsTick: {
     position: 'absolute',
     top: -3,
     width: 2,
     height: 12,
     borderRadius: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.35,
+    shadowRadius: 1,
+    elevation: 2,
+    zIndex: 3,
   },
   vsQuiet: { color: expenseColors.textMuted, fontSize: 11, lineHeight: 16 },
   vsKey: { color: expenseColors.textMuted, fontSize: 10, lineHeight: 14, opacity: 0.7 },

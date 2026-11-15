@@ -2,8 +2,8 @@
  * Application Version and Release Configuration
  * Auto-synced with EAS Updates & Local Builds
  */
-export const CURRENT_RELEASE_VERSION = "v1.3.21";
-export const RELEASE_DESCRIPTION = "Fix 1-to-1 duplicate matching so manual entries match bank alerts";
+export const CURRENT_RELEASE_VERSION = "v1.3.22";
+export const RELEASE_DESCRIPTION = "Add Cigarettes, Drinks, Nightlife & lifestyle icons to Category & Icon Picker";
 export const APP_BINARY_VERSION = "v1.0.0 (Build 1)";
 export const ADMIN_NAME = "Tirtharaj";
 export const AUTHOR_CREDIT = "Built with ❤️ by Tirtharaj";
@@ -18,6 +18,17 @@ export interface ReleaseHistoryItem {
 }
 
 export const INITIAL_RELEASE_HISTORY: ReleaseHistoryItem[] = [
+  {
+    version: "v1.3.22",
+    date: "Nov 15, 2026",
+    title: "Add Cigarettes, Drinks, Nightlife & lifestyle icons to Category & Icon Picker",
+    notes: [
+      "Add Cigarette, Beer, Wine, Martini, PartyPopper & lifestyle icons to Category Settings and Icon Picker",
+      "Fix Vs Last Month category bar scaling, tick alignment, and neutral 0% badge"
+    ],
+    type: "ota",
+    isNativeBuild: false,
+  },
   {
     version: "v1.3.21",
     date: "Nov 11, 2026",

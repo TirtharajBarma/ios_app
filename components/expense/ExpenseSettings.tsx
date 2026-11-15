@@ -28,6 +28,7 @@ import {
   Star,
   ShoppingBag,
   Tv,
+  Film,
   Heart,
   Banknote,
   Car,
@@ -54,7 +55,6 @@ import {
   Smile,
   Briefcase,
   Laptop,
-  Flame,
   Coins,
   Activity,
   Wifi,
@@ -65,6 +65,27 @@ import {
   RefreshCw,
   Bell,
   Mail,
+  Cigarette,
+  Beer,
+  Wine,
+  Martini,
+  CupSoda,
+  Pizza,
+  PartyPopper,
+  Ticket,
+  ShoppingCart,
+  Shirt,
+  Scissors,
+  Fuel,
+  Bike,
+  Pill,
+  Dumbbell,
+  PawPrint,
+  GraduationCap,
+  Wallet,
+  Receipt,
+  Shapes,
+  Layers,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import * as Sharing from 'expo-sharing';
@@ -112,38 +133,71 @@ const customSpringLayout = {
   },
 };
 
-// Rich collection of icons for categories (30 icons = 5 full rows of 6)
+// Rich collection of icons for categories (48 icons = 8 full rows of 6)
 const AVAILABLE_ICONS = [
-  { name: 'ShoppingBag', component: ShoppingBag },
-  { name: 'Tv', component: Tv },
-  { name: 'Repeat', component: Repeat },
-  { name: 'Heart', component: Heart },
-  { name: 'Banknote', component: Banknote },
-  { name: 'Car', component: Car },
-  { name: 'Zap', component: Zap },
+  // Row 1: Food & Cafe
   { name: 'UtensilsCrossed', component: UtensilsCrossed },
-  { name: 'MoreHorizontal', component: MoreHorizontal },
-  { name: 'Coins', component: Coins },
-  { name: 'Star', component: Star },
-  { name: 'Home', component: Home },
-  { name: 'Plane', component: Plane },
-  { name: 'Gift', component: Gift },
+  { name: 'Pizza', component: Pizza },
   { name: 'Coffee', component: Coffee },
+  { name: 'CupSoda', component: CupSoda },
+  { name: 'Beer', component: Beer },
+  { name: 'Wine', component: Wine },
+
+  // Row 2: Drinks, Habits & Nightlife
+  { name: 'Martini', component: Martini },
+  { name: 'Cigarette', component: Cigarette },
+  { name: 'PartyPopper', component: PartyPopper },
+  { name: 'Sparkles', component: Sparkles },
+  { name: 'Smile', component: Smile },
+  { name: 'Ticket', component: Ticket },
+
+  // Row 3: Entertainment & Media
   { name: 'Gamepad2', component: Gamepad2 },
   { name: 'Music', component: Music },
+  { name: 'Film', component: Film },
+  { name: 'Tv', component: Tv },
   { name: 'BookOpen', component: BookOpen },
+  { name: 'Camera', component: Camera },
+
+  // Row 4: Shopping & Style
+  { name: 'ShoppingBag', component: ShoppingBag },
+  { name: 'ShoppingCart', component: ShoppingCart },
+  { name: 'Shirt', component: Shirt },
+  { name: 'Scissors', component: Scissors },
+  { name: 'Gift', component: Gift },
+  { name: 'Tag', component: Tag },
+
+  // Row 5: Commute & Living
+  { name: 'Car', component: Car },
+  { name: 'Fuel', component: Fuel },
+  { name: 'Bike', component: Bike },
+  { name: 'Plane', component: Plane },
+  { name: 'Home', component: Home },
+  { name: 'Wrench', component: Wrench },
+
+  // Row 6: Health & Essentials
+  { name: 'Heart', component: Heart },
+  { name: 'Pill', component: Pill },
+  { name: 'Dumbbell', component: Dumbbell },
+  { name: 'PawPrint', component: PawPrint },
+  { name: 'GraduationCap', component: GraduationCap },
+  { name: 'Smartphone', component: Smartphone },
+
+  // Row 7: Utilities & Finance
+  { name: 'Zap', component: Zap },
+  { name: 'Wifi', component: Wifi },
+  { name: 'Banknote', component: Banknote },
+  { name: 'Wallet', component: Wallet },
+  { name: 'Receipt', component: Receipt },
+  { name: 'Shapes', component: Shapes },
+
+  // Row 8: Work, Assets & Misc
+  { name: 'Layers', component: Layers },
+  { name: 'Star', component: Star },
   { name: 'Briefcase', component: Briefcase },
   { name: 'Laptop', component: Laptop },
-  { name: 'PiggyBank', component: PiggyBank },
-  { name: 'Flame', component: Flame },
   { name: 'Shield', component: Shield },
-  { name: 'Leaf', component: Leaf },
-  { name: 'Tag', component: Tag },
-  { name: 'Sparkles', component: Sparkles },
-  { name: 'Smartphone', component: Smartphone },
-  { name: 'Smile', component: Smile },
-  { name: 'Activity', component: Activity },
-  { name: 'Wifi', component: Wifi },
+  { name: 'Coins', component: Coins },
 ];
 
 // Rich warm pastel palette for custom categories (18 colors = 3 full rows of 6)

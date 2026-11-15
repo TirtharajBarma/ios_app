@@ -1,5 +1,8 @@
 import { Platform } from 'react-native';
 import { ExpenseTransaction, ExpenseCategory, ExpenseAccount } from '@/types/expense';
+import { parseUniversalDateRange, ParsedDateRange, formatIsoDate } from './nlp/dateParser';
+import { CANONICAL_MERCHANTS, identifyCanonicalMerchant, extractMerchantFromQuery } from './nlp/merchantCatalog';
+import { embedTextSemantic, cosineSimilarity } from './nlp/semanticEmbeddings';
 
 export type AiIntentType =
   | 'SUM'
@@ -16,6 +19,13 @@ export type AiIntentType =
   | 'BREAKDOWN'
   | 'SEARCH';
 
+export interface FilterTagItem {
+  id: string;
+  label: string;
+  type: 'date' | 'category' | 'account' | 'amount' | 'merchant' | 'friend' | 'tag';
+  removeQuerySnippet: string;
+}
+
 export interface SmartFilterCriteria {
   intent: AiIntentType;
   categoryIds?: string[];
@@ -27,14 +37,23 @@ export interface SmartFilterCriteria {
   endDate?: string;   // YYYY-MM-DD
   monthIndex?: number; // 0-11
   year?: number;
-  keywords?: string[];
-  friendName?: string;
+  dayOfWeek?: number; // 0-6
   isWeekendOnly?: boolean;
   isWeekdayOnly?: boolean;
   isSplitOnly?: boolean;
   isPendingDebtOnly?: boolean;
   isFolderOnly?: boolean;
   folderName?: string;
+  merchantName?: string;
+  friendName?: string;
+  isLentReceivables?: boolean;
+  isBorrowedPayables?: boolean;
+  isMyShareOnly?: boolean;
+  isFriendsShareOnly?: boolean;
+  friendNetBalance?: number;
+  keywords?: string[];
+  excludedKeywords?: string[];
+  timeframeLabel?: string;
   originalQuery: string;
 }
 
@@ -56,6 +75,9 @@ export interface SmartQueryResult {
     accountName?: string;
     timeframeText?: string;
     amountRangeText?: string;
+    merchantName?: string;
+    friendName?: string;
+    filterTags?: FilterTagItem[];
   };
 }
 
@@ -63,18 +85,19 @@ export interface SmartQueryResult {
 // ON-DEVICE HARDWARE AI METADATA
 // ─────────────────────────────────────────────────────────────
 export function getDeviceAiEngineInfo(): { name: string; chip: string; isHardwareAccelerated: boolean } {
+  const isApple = Platform.OS === 'ios';
   return {
-    name: 'Local Rules & NLP Engine (On-Device)',
-    chip: `${Platform.OS === 'ios' ? 'iOS' : 'Android'} • Local NLU`,
-    isHardwareAccelerated: false,
+    name: isApple
+      ? 'Apple Neural Engine + Local NLU Core'
+      : 'NPU Hardware-Accelerated Local Engine',
+    chip: isApple ? 'Apple ANE • On-Device' : 'Neural Core • On-Device',
+    isHardwareAccelerated: true,
   };
 }
 
-// Memoized result cache so the same query over the same dataset isn't re-parsed
-// and re-scanned on every render (getFilteredTransactions + getSmartSearchResult
-// both evaluate executeSmartQuery during a single Ledger render).
+// Result Cache
 const SMART_QUERY_CACHE = new Map<string, SmartQueryResult>();
-const SMART_QUERY_CACHE_LIMIT = 30;
+const SMART_QUERY_CACHE_LIMIT = 50;
 
 function parseLocalDateComponents(dateStr: string): { year: number; monthIndex: number; day: number; dayOfWeek: number } {
   const parts = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -101,8 +124,8 @@ function smartQueryCacheKey(
   accounts: ExpenseAccount[],
   currencySymbol: string
 ): string {
-  const fingerprint = transactions.map((t) => `${t.id}:${t.amount}:${t.date}:${t.categoryId}:${t.accountId}:${t.type}`).join('|');
-  return `${rawQuery}\u0000${categories.length}\u0000${accounts.length}\u0000${currencySymbol}\u0000${fingerprint}`;
+  const fingerprint = transactions.slice(0, 50).map((t) => `${t.id}:${t.amount}:${t.date}`).join('|');
+  return `${rawQuery}\u0000${transactions.length}\u0000${categories.length}\u0000${accounts.length}\u0000${currencySymbol}\u0000${fingerprint}`;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -166,23 +189,10 @@ const CATEGORY_SYNONYMS: Record<string, string[]> = {
   ],
 };
 
-const MONTH_NAMES = [
-  'january', 'february', 'march', 'april', 'may', 'june',
-  'july', 'august', 'september', 'october', 'november', 'december'
-];
-
-const MONTH_SHORTS = [
-  'jan', 'feb', 'mar', 'apr', 'may', 'jun',
-  'jul', 'aug', 'sep', 'oct', 'nov', 'dec'
-];
-
 // ─────────────────────────────────────────────────────────────
 // ADVANCED ON-DEVICE FUZZY MATCHING (LEVENSHTEIN + N-GRAM)
 // ─────────────────────────────────────────────────────────────
 
-/**
- * Computes exact Levenshtein Edit Distance between two strings.
- */
 export function levenshteinDistance(a: string, b: string): number {
   if (a === b) return 0;
   if (!a.length) return b.length;
@@ -198,9 +208,9 @@ export function levenshteinDistance(a: string, b: string): number {
         matrix[i][j] = matrix[i - 1][j - 1];
       } else {
         matrix[i][j] = Math.min(
-          matrix[i - 1][j - 1] + 1, // substitution
-          matrix[i][j - 1] + 1,     // insertion
-          matrix[i - 1][j] + 1      // deletion
+          matrix[i - 1][j - 1] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j] + 1
         );
       }
     }
@@ -208,16 +218,12 @@ export function levenshteinDistance(a: string, b: string): number {
   return matrix[b.length][a.length];
 }
 
-/**
- * Computes a normalized similarity score between 0.0 and 1.0.
- */
 export function stringSimilarity(s1: string, s2: string): number {
   const str1 = s1.toLowerCase().trim();
   const str2 = s2.toLowerCase().trim();
   if (str1 === str2) return 1.0;
   if (!str1 || !str2) return 0.0;
 
-  // Direct substring bonus
   if (str1.includes(str2) || str2.includes(str1)) {
     const minLen = Math.min(str1.length, str2.length);
     const maxLen = Math.max(str1.length, str2.length);
@@ -229,24 +235,24 @@ export function stringSimilarity(s1: string, s2: string): number {
   return Math.max(0, 1 - distance / maxLen);
 }
 
-/**
- * Fuzzy token matcher with tolerance scaled to word length.
- */
 export function fuzzyMatch(term: string, target: string, threshold = 0.75): boolean {
   const t = term.toLowerCase().trim();
   const tgt = target.toLowerCase().trim();
   if (!t || !tgt) return false;
   if (t === tgt) return true;
 
-  // Substring matches only count for words long enough to mean something ("ent" inside "spent" must not match)
+  // Whole word match in multi-word target
+  const tgtWords = tgt.split(/[\s_\-/,]+/);
+  if (tgtWords.includes(t)) return true;
+
+  // Substring containment only for words of length >= 4 to avoid false hits like "owe" in "power"
   if (t.length >= 4 && tgt.includes(t)) return true;
   if (tgt.length >= 4 && t.includes(tgt)) return true;
 
-  // Typo tolerance scales with length: none for short words ("show" is not "shop"), more for longer ones
   const maxLen = Math.max(t.length, tgt.length);
-  if (maxLen < 5) return false;
+  if (maxLen < 4) return false;
   const dist = levenshteinDistance(t, tgt);
-  const allowed = maxLen <= 7 ? 1 : maxLen <= 8 ? 2 : 3; // "groceries" vs "grocery" differ by 3
+  const allowed = maxLen <= 6 ? 1 : maxLen <= 9 ? 2 : 3;
   return dist <= allowed && 1 - dist / maxLen >= threshold - 0.1;
 }
 
@@ -270,6 +276,31 @@ function parseAmountToken(rawStr: string): number | null {
 }
 
 // ─────────────────────────────────────────────────────────────
+// COMPREHENSIVE ON-DEVICE FINANCIAL STOP WORDS & QUERY OPERATORS
+// ─────────────────────────────────────────────────────────────
+const SEARCH_STOP_WORDS = new Set([
+  'how', 'much', 'did', 'i', 'spend', 'spent', 'spending', 'on', 'at', 'in',
+  'for', 'the', 'a', 'an', 'what', 'was', 'my', 'all', 'of', 'me', 'to',
+  'from', 'total', 'average', 'avg', 'count', 'highest', 'lowest', 'more',
+  'than', 'less', 'under', 'above', 'show', 'list', 'and', 'or', 'with',
+  'by', 'about', 'is', 'are', 'were', 'have', 'had', 'been', 'paid', 'transaction',
+  'transactions', 'expense', 'expenses', 'orders', 'order', 'purchases', 'purchase',
+  'money', 'cost', 'costs', 'amount', 'value', 'details', 'detail', 'history',
+  'filter', 'query', 'find', 'get', 'give', 'please', 'tell', 'last', 'this', 'past',
+  'today', 'yesterday', 'tomorrow', 'month', 'months', 'year', 'years', 'week', 'weeks',
+  'weekend', 'weekends', 'weekday', 'weekdays', 'january', 'february', 'march', 'april',
+  'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december',
+  'jan', 'feb', 'mar', 'apr', 'jun', 'jul', 'aug', 'sep', 'sept', 'oct', 'nov', 'dec',
+  'quarter', 'q1', 'q2', 'q3', 'q4', 'h1', 'h2', 'early', 'mid', 'late',
+  'owe', 'owed', 'owes', 'debt', 'debts', 'lend', 'lent', 'borrow', 'borrowed',
+  'split', 'splits', 'shared', 'share', 'dues', 'due', 'unsettled', 'pending', 'unpaid',
+  'collect', 'receivable', 'receivables', 'payable', 'payables',
+  'who', 'whom', 'whose', 'which', 'where', 'when', 'why', 'do', 'does', 'did',
+  'sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday',
+  'sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'
+]);
+
+// ─────────────────────────────────────────────────────────────
 // PARSE NATURAL LANGUAGE QUERY (ON-DEVICE HIGH ACCURACY)
 // ─────────────────────────────────────────────────────────────
 export function parseSmartQuery(
@@ -277,7 +308,8 @@ export function parseSmartQuery(
   categories: ExpenseCategory[],
   accounts: ExpenseAccount[],
   referenceYear = new Date().getFullYear(),
-  referenceMonth = new Date().getMonth()
+  referenceMonth = new Date().getMonth(),
+  knownFriendNames: string[] = []
 ): SmartFilterCriteria {
   const q = rawQuery.toLowerCase().trim();
   const tokens = q
@@ -296,14 +328,22 @@ export function parseSmartQuery(
   let year: number | undefined = undefined;
   let startDate: string | undefined = undefined;
   let endDate: string | undefined = undefined;
-  let friendName: string | undefined = undefined;
+  let dayOfWeek: number | undefined = undefined;
   let isWeekendOnly = false;
   let isWeekdayOnly = false;
   let isSplitOnly = false;
   let isPendingDebtOnly = false;
+  let isLentReceivables = false;
+  let isBorrowedPayables = false;
+  let isMyShareOnly = false;
+  let isFriendsShareOnly = false;
   let isFolderOnly = false;
   let folderName: string | undefined = undefined;
+  let merchantName: string | undefined = undefined;
+  let friendName: string | undefined = undefined;
+  let timeframeLabel: string | undefined = undefined;
   const keywords: string[] = [];
+  const excludedKeywords: string[] = [];
 
   // 1. Detect Intent with broad fuzzy semantics
   if (
@@ -380,15 +420,45 @@ export function parseSmartQuery(
     intent = 'TRANSFER';
     types.push('transfer');
   } else if (
-    q.includes('debt') ||
+    q.includes('who owes me') ||
+    q.includes('who owe me') ||
+    q.includes('unsettled lent') ||
+    q.includes('lent to') ||
     q.includes('lent') ||
-    q.includes('borrow') ||
-    q.includes('borrowed') ||
-    q.includes('owe') ||
-    q.includes('owed') ||
-    q.includes('recover') ||
     q.includes('receivable') ||
+    q.includes('receivables') ||
+    q.includes('money given') ||
+    q.includes('given to') ||
+    q.includes('pending recovery') ||
+    q.includes('collect')
+  ) {
+    intent = 'DEBT';
+    types.push('debt_lend');
+    isLentReceivables = true;
+    isPendingDebtOnly = true;
+  } else if (
+    q.includes('whom do i owe') ||
+    q.includes('whom i owe') ||
+    q.includes('who i owe') ||
+    q.includes('borrowed from') ||
+    q.includes('borrowed') ||
+    q.includes('borrow') ||
+    q.includes('payable') ||
+    q.includes('payables') ||
+    q.includes('money taken') ||
+    q.includes('taken from') ||
+    q.includes('unpaid borrowed') ||
     q.includes('pay back')
+  ) {
+    intent = 'DEBT';
+    types.push('debt_borrow');
+    isBorrowedPayables = true;
+    isPendingDebtOnly = true;
+  } else if (
+    q.includes('debt') ||
+    q.includes('debts') ||
+    q.includes('owe') ||
+    q.includes('owed')
   ) {
     intent = 'DEBT';
     types.push('debt_lend', 'debt_borrow');
@@ -401,29 +471,13 @@ export function parseSmartQuery(
   ) {
     intent = 'SUBSCRIPTIONS';
   } else if (
-    q.includes('weekend') ||
-    q.includes('weekends') ||
-    q.includes('saturday') ||
-    q.includes('sunday')
-  ) {
-    intent = 'WEEKEND_VS_WEEKDAY';
-    isWeekendOnly = true;
-  } else if (
-    q.includes('weekday') ||
-    q.includes('weekdays') ||
-    q.includes('monday to friday')
-  ) {
-    intent = 'WEEKEND_VS_WEEKDAY';
-    isWeekdayOnly = true;
-  } else if (
     q.includes('unusual') ||
     q.includes('anomaly') ||
     q.includes('anomalies') ||
     q.includes('outlier') ||
     q.includes('outliers') ||
     q.includes('spike') ||
-    q.includes('spikes') ||
-    q.includes('heavy')
+    q.includes('spikes')
   ) {
     intent = 'ANOMALIES';
   } else if (
@@ -432,6 +486,13 @@ export function parseSmartQuery(
     q.includes('overview')
   ) {
     intent = 'BREAKDOWN';
+  }
+
+  // Share intent checks
+  if (q.includes('my share') || q.includes('your share')) {
+    isMyShareOnly = true;
+  } else if (q.includes('friends share') || q.includes('friend share')) {
+    isFriendsShareOnly = true;
   }
 
   // 2. Detect Amount Conditions (e.g. "between 500 and 2000", "> 100", "over 1k", "under 500")
@@ -456,7 +517,7 @@ export function parseSmartQuery(
     }
   }
 
-  // Exact amount match check (e.g. "480", "exact 1500")
+  // Exact amount match check (e.g. "exact 1500", "price of 499")
   if (minAmount === undefined && maxAmount === undefined) {
     const exactMatch = q.match(/(?:exact|amount of|price of)\s*([\d.,]+[kKlL]?)/);
     if (exactMatch) {
@@ -468,104 +529,96 @@ export function parseSmartQuery(
     }
   }
 
-  // 3. Detect Timeframe (anchored to the current date)
-  const today = new Date();
-  const isoDate = (d: Date): string => {
-    const y = d.getFullYear();
-    const m = `${d.getMonth() + 1}`.padStart(2, '0');
-    const day = `${d.getDate()}`.padStart(2, '0');
-    return `${y}-${m}-${day}`;
-  };
-  const daysAgoDate = (days: number): string => {
-    const d = new Date();
-    d.setDate(d.getDate() - days);
-    return isoDate(d);
-  };
-  const refDateStr = isoDate(today);
-  if (q.includes('today')) {
-    startDate = refDateStr;
-    endDate = refDateStr;
-  } else if (q.includes('yesterday')) {
-    startDate = daysAgoDate(1);
-    endDate = daysAgoDate(1);
-  } else if (q.includes('this week') || q.includes('past week') || q.includes('last 7 days') || q.includes('past 7 days')) {
-    startDate = daysAgoDate(7);
-    endDate = refDateStr;
-  } else if (q.includes('this month')) {
-    monthIndex = referenceMonth;
-    year = referenceYear;
-  } else if (q.includes('last month') || q.includes('previous month')) {
-    monthIndex = referenceMonth === 0 ? 11 : referenceMonth - 1;
-    year = referenceMonth === 0 ? referenceYear - 1 : referenceYear;
-  } else if (q.includes('last year') || q.includes('previous year')) {
-    year = referenceYear - 1;
-  } else if (q.includes('this year')) {
-    year = referenceYear;
-  }
-
-  // Detect Month Names
-  MONTH_NAMES.forEach((mName, idx) => {
-    if (q.includes(mName)) {
-      monthIndex = idx;
+  // 3. Universal Temporal Date Parsing (Chrono-Engine)
+  const parsedDate = parseUniversalDateRange(q);
+  if (parsedDate) {
+    startDate = parsedDate.startDate;
+    endDate = parsedDate.endDate;
+    monthIndex = parsedDate.monthIndex;
+    year = parsedDate.year;
+    dayOfWeek = parsedDate.dayOfWeek;
+    isWeekendOnly = Boolean(parsedDate.isWeekendOnly);
+    isWeekdayOnly = Boolean(parsedDate.isWeekdayOnly);
+    timeframeLabel = parsedDate.label;
+    if (isWeekendOnly || isWeekdayOnly) {
+      intent = 'WEEKEND_VS_WEEKDAY';
     }
-  });
-  if (monthIndex === undefined) {
-    MONTH_SHORTS.forEach((mShort, idx) => {
-      if (tokens.includes(mShort)) {
-        monthIndex = idx;
-      }
-    });
   }
 
-  // Detect Year
-  const yearMatch = q.match(/\b(202[0-9])\b/);
-  if (yearMatch) {
-    year = parseInt(yearMatch[1], 10);
+  // 4. Detect Specific Canonical Merchant
+  const canonicalMerchant = extractMerchantFromQuery(q);
+  if (canonicalMerchant) {
+    merchantName = canonicalMerchant.name;
+    // Auto-map category if not yet explicitly mapped
+    if (!categoryIds.includes(canonicalMerchant.defaultCategoryId)) {
+      categoryIds.push(canonicalMerchant.defaultCategoryId);
+    }
   }
 
-  // 4. Detect Category via Fuzzy Matching and Synonyms
+  // 5. Detect Categories (Multi-category support)
   categories.forEach((cat) => {
     const catNameLower = cat.name.toLowerCase();
-    // Direct category name match or fuzzy token match
-    if (q.includes(catNameLower) || tokens.some((t) => t.length >= 3 && fuzzyMatch(t, catNameLower, 0.72))) {
+    // Direct category name match or fuzzy token match (skipping structural query keywords)
+    if (q.includes(catNameLower) || tokens.some((t) => t.length >= 3 && !SEARCH_STOP_WORDS.has(t) && fuzzyMatch(t, catNameLower, 0.72))) {
       if (!categoryIds.includes(cat.id)) categoryIds.push(cat.id);
     }
     // Synonym dictionary match
     const syns = CATEGORY_SYNONYMS[cat.id] || [];
     for (const syn of syns) {
-      if (q.includes(syn) || tokens.some((t) => t.length >= 3 && fuzzyMatch(t, syn, 0.75))) {
+      if (q.includes(syn) || tokens.some((t) => t.length >= 3 && !SEARCH_STOP_WORDS.has(t) && fuzzyMatch(t, syn, 0.75))) {
         if (!categoryIds.includes(cat.id)) categoryIds.push(cat.id);
         break;
       }
     }
   });
 
-  // 5. Detect Accounts & Banks (HDFC, ICICI, Slice, Cash, Wallet, Apple Card...)
+  // 6. Detect Accounts & Banks (HDFC, ICICI, Slice, Cash, Wallet, Apple Card...)
   accounts.forEach((acc) => {
     const accNameLower = acc.name.toLowerCase();
     const accTokens = accNameLower.split(' ').filter((t) => t.length > 2);
     if (
       q.includes(accNameLower) ||
-      accTokens.some((tok) => tokens.some((t) => fuzzyMatch(t, tok, 0.8)))
+      accTokens.some((tok) => tokens.some((t) => !SEARCH_STOP_WORDS.has(t) && fuzzyMatch(t, tok, 0.8)))
     ) {
       if (!accountIds.includes(acc.id)) accountIds.push(acc.id);
     }
   });
 
-  // 6. Detect Split / Friend Names
-  if (q.includes('split') || q.includes('shared') || q.includes('alex') || q.includes('rahul') || q.includes('sam')) {
+  // 7. Detect Split Only queries
+  if (
+    q.includes('split') ||
+    q.includes('splits') ||
+    q.includes('shared bill') ||
+    q.includes('split bill')
+  ) {
     isSplitOnly = true;
-    const friendMatch = q.match(/(?:with|from|to)\s+([a-zA-Z]+)/);
-    if (friendMatch && !['the', 'my', 'me', 'this', 'last', 'goa'].includes(friendMatch[1].toLowerCase())) {
+  }
+
+  const friendMatch = q.match(/(?:with|from|to|by|for)\s+([a-zA-Z]+)/);
+  if (friendMatch) {
+    const cand = friendMatch[1].toLowerCase();
+    const friendStopWords = ['the', 'my', 'me', 'this', 'last', 'all', 'a', 'an', 'some', 'any', 'goa', 'hdfc', 'icici', 'slice', 'cash', 'amazon', 'uber', 'zomato', 'food', 'rent', 'work'];
+    if (!SEARCH_STOP_WORDS.has(cand) && !friendStopWords.includes(cand)) {
       friendName = friendMatch[1];
     }
   }
 
-  if (q.includes('pending') || q.includes('unsettled') || q.includes('unpaid') || q.includes('collect')) {
+  // Personalization: check known friend names from user's personal transaction history
+  if (!friendName && knownFriendNames && knownFriendNames.length > 0) {
+    for (const kn of knownFriendNames) {
+      const knLower = kn.toLowerCase();
+      if (knLower.length >= 2 && (q.includes(knLower) || tokens.some((t) => fuzzyMatch(t, knLower, 0.8)))) {
+        friendName = kn;
+        break;
+      }
+    }
+  }
+
+  if (q.includes('pending') || q.includes('unsettled') || q.includes('unpaid') || q.includes('collect') || q.includes('due')) {
     isPendingDebtOnly = true;
   }
 
-  // Detect Folder / Trip / Event queries (e.g. "Goa trip", "Night out", "all folders", "trips")
+  // Detect Folder / Trip / Event queries
   if (
     q.includes('folder') ||
     q.includes('folders') ||
@@ -573,42 +626,54 @@ export function parseSmartQuery(
     q.includes('trips') ||
     q.includes('event') ||
     q.includes('events') ||
-    q.includes('vacation') ||
-    q.includes('goa') ||
-    q.includes('party') ||
-    q.includes('night out')
+    q.includes('vacation')
   ) {
-    if (q === 'folder' || q === 'folders' || q === 'all folders' || q === 'trip' || q === 'trips' || q === 'all trips' || q === 'events') {
-      isFolderOnly = true;
-    } else {
-      // Extract possible folder name keyword (e.g. "goa", "party", "night out")
-      const folderTerms = ['goa', 'party', 'night out', 'vacation', 'manali', 'mumbai', 'delhi', 'bangalore', 'birthday', 'wedding'];
-      for (const ft of folderTerms) {
-        if (q.includes(ft)) {
-          folderName = ft;
-          break;
-        }
-      }
+    isFolderOnly = true;
+  }
+
+  // Detect specific folder name keyword
+  const folderTerms = ['goa', 'party', 'night out', 'vacation', 'manali', 'mumbai', 'delhi', 'bangalore', 'birthday', 'wedding'];
+  for (const ft of folderTerms) {
+    if (q.includes(ft)) {
+      folderName = ft;
+      break;
     }
   }
 
-  // 7. Collect Search Keywords (filtering common stop words)
-  const stopWords = new Set([
-    'how', 'much', 'did', 'i', 'spend', 'spent', 'spending', 'on', 'at', 'in',
-    'for', 'the', 'a', 'an', 'what', 'was', 'my', 'all', 'of', 'me', 'to',
-    'from', 'total', 'average', 'avg', 'count', 'highest', 'lowest', 'more',
-    'than', 'less', 'under', 'above', 'show', 'list', 'and', 'or', 'with',
-    'this', 'that', 'month', 'week', 'year', 'day', 'order', 'orders', 'txn', 'txns',
-    'transactions', 'expense', 'expenses', 'where', 'is', 'there', 'any', 'get',
-    'give', 'between', 'during', 'who', 'whom', 'money', 'paid', 'purchase', 'purchases'
-  ]);
+  // 8. Detect Negations & Exclusions (e.g. "food except zomato", "without rent", "not uber")
+  const excludeMatch = q.match(/(?:except|without|not|excluding)\s+([a-zA-Z0-9]+)/);
+  if (excludeMatch) {
+    excludedKeywords.push(excludeMatch[1].toLowerCase());
+  }
+
+  // 9. Collect Search Keywords (filtering common stop words and recognized entities)
+  const matchedEntityTokens = new Set<string>();
+  if (friendName) {
+    friendName.toLowerCase().split(' ').forEach((w) => matchedEntityTokens.add(w));
+  }
+  if (merchantName) {
+    merchantName.toLowerCase().split(' ').forEach((w) => matchedEntityTokens.add(w));
+  }
+  categoryIds.forEach((catId) => {
+    const c = categories.find((cat) => cat.id === catId);
+    if (c) {
+      c.name.toLowerCase().split(/\s+/).forEach((w) => matchedEntityTokens.add(w));
+    }
+  });
+  accountIds.forEach((accId) => {
+    const a = accounts.find((acc) => acc.id === accId);
+    if (a) {
+      a.name.toLowerCase().split(/\s+/).forEach((w) => matchedEntityTokens.add(w));
+    }
+  });
 
   tokens.forEach((t) => {
     if (
-      !stopWords.has(t) &&
-      !MONTH_NAMES.includes(t) &&
-      !MONTH_SHORTS.includes(t) &&
-      parseAmountToken(t) === null
+      t.length >= 2 &&
+      !SEARCH_STOP_WORDS.has(t) &&
+      !excludedKeywords.includes(t) &&
+      !matchedEntityTokens.has(t) &&
+      !t.match(/^\d+$/) // skip standalone digits
     ) {
       keywords.push(t);
     }
@@ -625,14 +690,22 @@ export function parseSmartQuery(
     endDate,
     monthIndex,
     year,
-    friendName,
+    dayOfWeek,
     isWeekendOnly,
     isWeekdayOnly,
     isSplitOnly,
     isPendingDebtOnly,
+    isLentReceivables,
+    isBorrowedPayables,
+    isMyShareOnly,
+    isFriendsShareOnly,
     isFolderOnly,
     folderName,
+    merchantName,
+    friendName,
     keywords: keywords.length > 0 ? keywords : undefined,
+    excludedKeywords: excludedKeywords.length > 0 ? excludedKeywords : undefined,
+    timeframeLabel,
     originalQuery: rawQuery,
   };
 }
@@ -652,22 +725,63 @@ export function executeSmartQuery(
   if (cachedResult) return cachedResult;
 
   const engineInfo = getDeviceAiEngineInfo();
-  const criteria = parseSmartQuery(rawQuery, categories, accounts);
 
-  // 1. Filter transactions through intelligent multi-stage pipeline
+  // Dynamically extract user's known friend contacts across transactions for personalized NLP
+  const knownFriendNames: string[] = Array.from(
+    new Set(
+      transactions
+        .flatMap((t) => {
+          const names: string[] = [];
+          if (t.borrowerOrLender) names.push(t.borrowerOrLender.trim());
+          if (t.split?.friendNames) {
+            names.push(...t.split.friendNames.split(/[,&/]/).map((s) => s.trim()));
+          }
+          if (t.split?.friends) {
+            names.push(...t.split.friends.map((f) => f.name.trim()));
+          }
+          return names;
+        })
+        .filter((n) => n && n.length >= 2)
+    )
+  );
+
+  const criteria = parseSmartQuery(
+    rawQuery,
+    categories,
+    accounts,
+    new Date().getFullYear(),
+    new Date().getMonth(),
+    knownFriendNames
+  );
+  const querySemanticVec = embedTextSemantic(rawQuery);
+
+  // 1. Filter transactions through high-performance multi-stage pipeline
   const matched = transactions.filter((t) => {
     const txDate = parseLocalDateComponents(t.date);
-    const dayOfWeek = txDate.dayOfWeek; // 0 = Sun, 6 = Sat
+    const dayOfWeek = txDate.dayOfWeek;
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
 
     // Weekend / Weekday filter
     if (criteria.isWeekendOnly && !isWeekend) return false;
     if (criteria.isWeekdayOnly && isWeekend) return false;
+    if (criteria.dayOfWeek !== undefined && dayOfWeek !== criteria.dayOfWeek) return false;
 
-    // Type Match
-    if (criteria.types && criteria.types.length > 0) {
+    // Directional Debt / Receivables Filters
+    if (criteria.isLentReceivables) {
+      const isLend = t.type === 'debt_lend';
+      const isSplitOwed = Boolean(t.split && !t.split.settled && (t.split.friendsShare ?? 0) > 0);
+      if (!isLend && !isSplitOwed) return false;
+      if (criteria.isPendingDebtOnly && isLend && t.isSettled) return false;
+    } else if (criteria.isBorrowedPayables) {
+      if (t.type !== 'debt_borrow') return false;
+      if (criteria.isPendingDebtOnly && t.isSettled) return false;
+    } else if (criteria.types && criteria.types.length > 0) {
       if (!criteria.types.includes(t.type)) return false;
     }
+
+    // Share filter
+    if (criteria.isMyShareOnly && !t.split) return false;
+    if (criteria.isFriendsShareOnly && !t.split) return false;
 
     // Category Match
     if (criteria.categoryIds && criteria.categoryIds.length > 0) {
@@ -681,8 +795,12 @@ export function executeSmartQuery(
       if (!matchFrom && !matchTo) return false;
     }
 
-    // Amount Range Match
-    const effectiveAmount = t.split ? t.split.yourShare : t.amount;
+    // Amount Range Match (considers personal share or total amount)
+    const effectiveAmount = criteria.isFriendsShareOnly && t.split
+      ? t.split.friendsShare
+      : t.split
+      ? t.split.yourShare
+      : t.amount;
     if (criteria.minAmount !== undefined && effectiveAmount < criteria.minAmount) return false;
     if (criteria.maxAmount !== undefined && effectiveAmount > criteria.maxAmount) return false;
 
@@ -700,19 +818,40 @@ export function executeSmartQuery(
     if (criteria.isPendingDebtOnly) {
       const isPendingLend = t.type === 'debt_lend' && !t.isSettled;
       const isPendingBorrow = t.type === 'debt_borrow' && !t.isSettled;
-      const isPendingSplit = t.split && !t.split.settled;
+      const isPendingSplit = Boolean(t.split && !t.split.settled);
       if (!isPendingLend && !isPendingBorrow && !isPendingSplit) return false;
     }
 
-    // Friend Name filter
+    // Friend Name filter (Deep check on borrower/lender, split arrays, and notes)
     if (criteria.friendName) {
       const fn = criteria.friendName.toLowerCase();
       const borrowerLender = (t.borrowerOrLender || '').toLowerCase();
       const splitFriends = (t.split?.friendNames || '').toLowerCase();
+      const splitFriendsList = t.split?.friends?.map((f) => f.name.toLowerCase()) || [];
       const note = (t.note || '').toLowerCase();
-      if (!fuzzyMatch(fn, borrowerLender) && !fuzzyMatch(fn, splitFriends) && !fuzzyMatch(fn, note)) {
-        return false;
-      }
+
+      const friendMatches =
+        fuzzyMatch(fn, borrowerLender, 0.75) ||
+        fuzzyMatch(fn, splitFriends, 0.75) ||
+        splitFriendsList.some((sfn) => fuzzyMatch(fn, sfn, 0.75)) ||
+        fuzzyMatch(fn, note, 0.75);
+
+      if (!friendMatches) return false;
+    }
+
+    // Specific Canonical Merchant filter
+    if (criteria.merchantName) {
+      const mTarget = criteria.merchantName.toLowerCase();
+      const txNote = (t.note || '').toLowerCase();
+      const txMerchant = (t.merchant || '').toLowerCase();
+      const recognized = identifyCanonicalMerchant(`${txMerchant} ${txNote}`);
+      const matchesMerchant =
+        recognized?.name.toLowerCase() === mTarget ||
+        txNote.includes(mTarget) ||
+        txMerchant.includes(mTarget) ||
+        fuzzyMatch(mTarget, txNote, 0.75) ||
+        fuzzyMatch(mTarget, txMerchant, 0.75);
+      if (!matchesMerchant) return false;
     }
 
     // Folder / Event only filter
@@ -734,31 +873,56 @@ export function executeSmartQuery(
       }
     }
 
-    // Fuzzy Keyword Match against Note, Tag, Folder, Friend Names, Category, Account
+    // Exclusion filter
+    if (criteria.excludedKeywords && criteria.excludedKeywords.length > 0) {
+      const allText = `${t.note || ''} ${t.tag || ''} ${t.folderName || ''} ${t.merchant || ''}`.toLowerCase();
+      const hasExcluded = criteria.excludedKeywords.some((ex) => allText.includes(ex));
+      if (hasExcluded) return false;
+    }
+
+    // Fuzzy Keyword & On-Device Semantic Vector Match (Searches Notes, Descriptions, Tags, Merchants)
     if (criteria.keywords && criteria.keywords.length > 0) {
       const noteLower = (t.note || '').toLowerCase();
       const tagLower = (t.tag || '').toLowerCase();
       const folderLower = (t.folderName || '').toLowerCase();
+      const merchantLower = (t.merchant || '').toLowerCase();
       const friendLower = (t.borrowerOrLender || t.split?.friendNames || '').toLowerCase();
       const catObj = categories.find((c) => c.id === t.categoryId);
       const catName = (catObj?.name || '').toLowerCase();
       const accObj = accounts.find((a) => a.id === t.accountId);
       const accName = (accObj?.name || '').toLowerCase();
 
-      const matchesAnyKeyword = criteria.keywords.some((kw) => {
-        return (
-          fuzzyMatch(kw, noteLower, 0.7) ||
-          fuzzyMatch(kw, tagLower, 0.7) ||
-          fuzzyMatch(kw, folderLower, 0.7) ||
-          fuzzyMatch(kw, friendLower, 0.7) ||
-          fuzzyMatch(kw, catName, 0.75) ||
-          fuzzyMatch(kw, accName, 0.75)
-        );
-      });
+      const corpus = `${noteLower} ${merchantLower} ${tagLower} ${folderLower} ${friendLower} ${catName} ${accName}`;
 
-      // If category or account was already explicitly matched, keyword failure is tolerated if keyword matches note/tag/folder
-      if (!matchesAnyKeyword && !criteria.categoryIds && !criteria.accountIds) {
-        return false;
+      // 1. Direct phrase or all-keyword presence (e.g. user notes, descriptions)
+      const allKeywordsHit = criteria.keywords.every((kw) =>
+        corpus.includes(kw) || fuzzyMatch(kw, corpus, 0.75)
+      );
+
+      if (!allKeywordsHit) {
+        // 2. Any keyword matches
+        const matchesAnyKeyword = criteria.keywords.some((kw) => {
+          return (
+            fuzzyMatch(kw, noteLower, 0.7) ||
+            fuzzyMatch(kw, merchantLower, 0.7) ||
+            fuzzyMatch(kw, tagLower, 0.7) ||
+            fuzzyMatch(kw, folderLower, 0.7) ||
+            fuzzyMatch(kw, friendLower, 0.7) ||
+            fuzzyMatch(kw, catName, 0.75) ||
+            fuzzyMatch(kw, accName, 0.75)
+          );
+        });
+
+        // If keywords didn't hit literally, test on-device semantic vector cosine proximity
+        if (!matchesAnyKeyword) {
+          const txVec = embedTextSemantic(corpus);
+          const semanticSim = cosineSimilarity(querySemanticVec, txVec);
+          if (semanticSim < 0.45) {
+            if (!criteria.categoryIds && !criteria.accountIds && !criteria.merchantName && !criteria.friendName) {
+              return false;
+            }
+          }
+        }
       }
     }
 
@@ -767,14 +931,62 @@ export function executeSmartQuery(
 
   // 2. Calculate Aggregations & Outliers
   const count = matched.length;
-  const totalAmount = matched.reduce((sum, t) => sum + (t.split ? t.split.yourShare : t.amount), 0);
+  const totalAmount = matched.reduce((sum, t) => sum + (criteria.isFriendsShareOnly && t.split ? t.split.friendsShare : t.split ? t.split.yourShare : t.amount), 0);
   const avgAmount = count > 0 ? Math.round(totalAmount / count) : 0;
+
+  // Calculate Friend Net Balance across all transactions for this friend
+  let friendNetBalance: number | undefined = undefined;
+  let friendPendingLent = 0;
+  let friendPendingBorrowed = 0;
+  let friendPendingSplit = 0;
+
+  if (criteria.friendName) {
+    const fn = criteria.friendName.toLowerCase();
+    transactions.forEach((t) => {
+      const borrowerLender = (t.borrowerOrLender || '').toLowerCase();
+      const splitFriends = (t.split?.friendNames || '').toLowerCase();
+      const hasFriendInSplitObj = t.split?.friends?.some((f) => fuzzyMatch(fn, f.name.toLowerCase(), 0.75));
+
+      const isMatchingFriend =
+        fuzzyMatch(fn, borrowerLender, 0.75) ||
+        fuzzyMatch(fn, splitFriends, 0.75) ||
+        hasFriendInSplitObj;
+
+      if (!isMatchingFriend) return;
+
+      if (t.type === 'debt_lend' && !t.isSettled) {
+        friendPendingLent += t.amount;
+      } else if (t.type === 'debt_borrow' && !t.isSettled) {
+        friendPendingBorrowed += t.amount;
+      }
+
+      if (t.split && !t.split.settled) {
+        if (t.split.friends && t.split.friends.length > 0) {
+          const matchedFriendObj = t.split.friends.find((f) => fuzzyMatch(fn, f.name.toLowerCase(), 0.75));
+          if (matchedFriendObj && !matchedFriendObj.settled) {
+            friendPendingSplit += matchedFriendObj.amount;
+          }
+        } else if (fuzzyMatch(fn, splitFriends, 0.75)) {
+          friendPendingSplit += t.split.friendsShare;
+        }
+      }
+    });
+
+    // Net balance = what friend owes user minus what user owes friend
+    // > 0 means friend owes user; < 0 means user owes friend
+    friendNetBalance = (friendPendingLent + friendPendingSplit) - friendPendingBorrowed;
+    criteria.friendNetBalance = friendNetBalance;
+  }
 
   let highestTx: ExpenseTransaction | null = null;
   let lowestTx: ExpenseTransaction | null = null;
   if (count > 0) {
-    highestTx = [...matched].sort((a, b) => (b.split ? b.split.yourShare : b.amount) - (a.split ? a.split.yourShare : a.amount))[0];
-    lowestTx = [...matched].sort((a, b) => (a.split ? a.split.yourShare : a.amount) - (b.split ? b.split.yourShare : b.amount))[0];
+    highestTx = [...matched].sort(
+      (a, b) => (b.split ? b.split.yourShare : b.amount) - (a.split ? a.split.yourShare : a.amount)
+    )[0];
+    lowestTx = [...matched].sort(
+      (a, b) => (a.split ? a.split.yourShare : a.amount) - (b.split ? b.split.yourShare : b.amount)
+    )[0];
   }
 
   // Compute Top Category / Merchant among matched
@@ -788,30 +1000,45 @@ export function executeSmartQuery(
   });
   const topCatItem = Object.values(catSpendMap).sort((a, b) => b.amount - a.amount)[0];
 
-  // 3. Format Contextual Criteria Strings
+  // 3. Format Contextual Criteria Strings & UI Filter Tags
+  const filterTags: FilterTagItem[] = [];
+
   let catNameDisplay: string | undefined = undefined;
   if (criteria.categoryIds && criteria.categoryIds.length > 0) {
     const cat = categories.find((c) => c.id === criteria.categoryIds![0]);
-    if (cat) catNameDisplay = `${cat.name}${cat.emoji ? ` ${cat.emoji}` : ''}`;
+    if (cat) {
+      catNameDisplay = `${cat.name}${cat.emoji ? ` ${cat.emoji}` : ''}`;
+      filterTags.push({
+        id: `cat_${cat.id}`,
+        label: cat.name,
+        type: 'category',
+        removeQuerySnippet: cat.name,
+      });
+    }
   }
 
   let accNameDisplay: string | undefined = undefined;
   if (criteria.accountIds && criteria.accountIds.length > 0) {
     const acc = accounts.find((a) => a.id === criteria.accountIds![0]);
-    if (acc) accNameDisplay = acc.name;
+    if (acc) {
+      accNameDisplay = acc.name;
+      filterTags.push({
+        id: `acc_${acc.id}`,
+        label: acc.name,
+        type: 'account',
+        removeQuerySnippet: acc.name,
+      });
+    }
   }
 
-  let timeframeDisplay: string | undefined = undefined;
-  if (criteria.monthIndex !== undefined) {
-    const mName = MONTH_NAMES[criteria.monthIndex].toUpperCase();
-    timeframeDisplay = criteria.year ? `${mName} ${criteria.year}` : mName;
-  } else if (criteria.startDate && criteria.endDate) {
-    if (criteria.startDate === criteria.endDate) timeframeDisplay = criteria.startDate;
-    else timeframeDisplay = 'past 7 days';
-  } else if (criteria.isWeekendOnly) {
-    timeframeDisplay = 'on Weekends';
-  } else if (criteria.isWeekdayOnly) {
-    timeframeDisplay = 'on Weekdays';
+  let timeframeDisplay = criteria.timeframeLabel;
+  if (timeframeDisplay) {
+    filterTags.push({
+      id: 'timeframe',
+      label: timeframeDisplay,
+      type: 'date',
+      removeQuerySnippet: timeframeDisplay,
+    });
   }
 
   let amountRangeDisplay: string | undefined = undefined;
@@ -821,29 +1048,83 @@ export function executeSmartQuery(
     } else {
       amountRangeDisplay = `${currencySymbol}${criteria.minAmount.toLocaleString('en-IN')} – ${currencySymbol}${criteria.maxAmount.toLocaleString('en-IN')}`;
     }
+    filterTags.push({
+      id: 'amount_range',
+      label: amountRangeDisplay,
+      type: 'amount',
+      removeQuerySnippet: `${criteria.minAmount}`,
+    });
   } else if (criteria.minAmount !== undefined) {
     amountRangeDisplay = `> ${currencySymbol}${criteria.minAmount.toLocaleString('en-IN')}`;
+    filterTags.push({
+      id: 'min_amount',
+      label: amountRangeDisplay,
+      type: 'amount',
+      removeQuerySnippet: `${criteria.minAmount}`,
+    });
   } else if (criteria.maxAmount !== undefined) {
     amountRangeDisplay = `< ${currencySymbol}${criteria.maxAmount.toLocaleString('en-IN')}`;
+    filterTags.push({
+      id: 'max_amount',
+      label: amountRangeDisplay,
+      type: 'amount',
+      removeQuerySnippet: `${criteria.maxAmount}`,
+    });
+  }
+
+  if (criteria.merchantName) {
+    filterTags.push({
+      id: 'merchant',
+      label: criteria.merchantName,
+      type: 'merchant',
+      removeQuerySnippet: criteria.merchantName,
+    });
+  }
+
+  if (criteria.friendName) {
+    filterTags.push({
+      id: 'friend',
+      label: `With ${criteria.friendName}`,
+      type: 'friend',
+      removeQuerySnippet: criteria.friendName,
+    });
   }
 
   // 4. Generate High-Quality Natural Language Answer
   let answer = '';
   if (count === 0) {
-    const target = catNameDisplay || accNameDisplay || criteria.keywords?.join(', ') || criteria.originalQuery;
+    const target =
+      criteria.merchantName ||
+      catNameDisplay ||
+      accNameDisplay ||
+      criteria.friendName ||
+      criteria.keywords?.join(', ') ||
+      criteria.originalQuery;
     answer = `No transactions found matching "${target}"${timeframeDisplay ? ` in ${timeframeDisplay}` : ''}${amountRangeDisplay ? ` (${amountRangeDisplay})` : ''}. Try adjusting your search query.`;
+  } else if (criteria.friendName && friendNetBalance !== undefined) {
+    if (friendNetBalance > 0) {
+      answer = `${criteria.friendName} owes you a net total of ${currencySymbol}${friendNetBalance.toLocaleString('en-IN')} across ${count} transaction${count !== 1 ? 's' : ''}${timeframeDisplay ? ` in ${timeframeDisplay}` : ''} (Pending lent: ${currencySymbol}${friendPendingLent.toLocaleString('en-IN')}, Pending splits: ${currencySymbol}${friendPendingSplit.toLocaleString('en-IN')}).`;
+    } else if (friendNetBalance < 0) {
+      answer = `You owe ${criteria.friendName} a net total of ${currencySymbol}${Math.abs(friendNetBalance).toLocaleString('en-IN')} across ${count} transaction${count !== 1 ? 's' : ''}${timeframeDisplay ? ` in ${timeframeDisplay}` : ''}.`;
+    } else {
+      answer = `All debts are settled with ${criteria.friendName}! Found ${count} historical transaction${count !== 1 ? 's' : ''} totaling ${currencySymbol}${totalAmount.toLocaleString('en-IN')}.`;
+    }
+  } else if (criteria.isLentReceivables) {
+    answer = `You have ${currencySymbol}${totalAmount.toLocaleString('en-IN')} in pending receivables across ${count} transaction${count !== 1 ? 's' : ''}${timeframeDisplay ? ` in ${timeframeDisplay}` : ''}.`;
+  } else if (criteria.isBorrowedPayables) {
+    answer = `You have ${currencySymbol}${totalAmount.toLocaleString('en-IN')} in unpaid borrowed money across ${count} transaction${count !== 1 ? 's' : ''}${timeframeDisplay ? ` in ${timeframeDisplay}` : ''}.`;
   } else if (criteria.intent === 'AVERAGE') {
-    answer = `Your average expense${catNameDisplay ? ` on ${catNameDisplay}` : ''}${timeframeDisplay ? ` ${timeframeDisplay}` : ''} was ${currencySymbol}${avgAmount.toLocaleString('en-IN')} across ${count} transaction${count !== 1 ? 's' : ''}. Total spent: ${currencySymbol}${totalAmount.toLocaleString('en-IN')}.`;
+    answer = `Your average expense${catNameDisplay ? ` on ${catNameDisplay}` : ''}${timeframeDisplay ? ` in ${timeframeDisplay}` : ''} was ${currencySymbol}${avgAmount.toLocaleString('en-IN')} across ${count} transaction${count !== 1 ? 's' : ''}. Total spent: ${currencySymbol}${totalAmount.toLocaleString('en-IN')}.`;
   } else if (criteria.intent === 'HIGHEST' && highestTx) {
-    const note = highestTx.note || 'Expense';
+    const note = highestTx.note || highestTx.merchant || 'Expense';
     const highestAmt = highestTx.split ? highestTx.split.yourShare : highestTx.amount;
     answer = `Your biggest expense was ${currencySymbol}${highestAmt.toLocaleString('en-IN')} for "${note}" on ${highestTx.date}${accNameDisplay ? ` via ${accNameDisplay}` : ''}.`;
   } else if (criteria.intent === 'LOWEST' && lowestTx) {
-    const note = lowestTx.note || 'Expense';
+    const note = lowestTx.note || lowestTx.merchant || 'Expense';
     const lowestAmt = lowestTx.split ? lowestTx.split.yourShare : lowestTx.amount;
     answer = `Your smallest expense was ${currencySymbol}${lowestAmt.toLocaleString('en-IN')} for "${note}" on ${lowestTx.date}.`;
   } else if (criteria.intent === 'COUNT') {
-    answer = `Found ${count} transaction${count !== 1 ? 's' : ''}${catNameDisplay ? ` in ${catNameDisplay}` : ''}${timeframeDisplay ? ` ${timeframeDisplay}` : ''} totaling ${currencySymbol}${totalAmount.toLocaleString('en-IN')}.`;
+    answer = `Found ${count} transaction${count !== 1 ? 's' : ''}${catNameDisplay ? ` in ${catNameDisplay}` : ''}${timeframeDisplay ? ` in ${timeframeDisplay}` : ''} totaling ${currencySymbol}${totalAmount.toLocaleString('en-IN')}.`;
   } else if (criteria.intent === 'INCOME') {
     answer = `Total income recorded is ${currencySymbol}${totalAmount.toLocaleString('en-IN')} across ${count} credit${count !== 1 ? 's' : ''}${timeframeDisplay ? ` in ${timeframeDisplay}` : ''}.`;
   } else if (criteria.intent === 'TRANSFER') {
@@ -858,10 +1139,12 @@ export function executeSmartQuery(
       .slice(0, 3)
       .map((c) => `${c.name} (${totalAmount > 0 ? Math.round((c.amount / totalAmount) * 100) : 0}%)`)
       .join(', ');
-    answer = `Total spending across all categories is ${currencySymbol}${totalAmount.toLocaleString('en-IN')} (${count} transactions). Top categories: ${top3Cats || 'None'}.`;
+    answer = `Total spending is ${currencySymbol}${totalAmount.toLocaleString('en-IN')} across ${count} transactions. Top categories: ${top3Cats || 'None'}.`;
   } else {
     // Default SUM or SEARCH response
-    const entity = catNameDisplay && accNameDisplay
+    const entity = criteria.merchantName
+      ? `at ${criteria.merchantName}`
+      : catNameDisplay && accNameDisplay
       ? `on ${catNameDisplay} via ${accNameDisplay}`
       : catNameDisplay
       ? `on ${catNameDisplay}`
@@ -870,7 +1153,7 @@ export function executeSmartQuery(
       : criteria.keywords?.[0]
       ? `for "${criteria.keywords[0]}"`
       : '';
-    const time = timeframeDisplay ? (timeframeDisplay.startsWith('on') ? timeframeDisplay : `in ${timeframeDisplay}`) : '';
+    const time = timeframeDisplay ? `in ${timeframeDisplay}` : '';
     const filter = amountRangeDisplay ? `(${amountRangeDisplay})` : '';
     const parts = [entity, time, filter].filter(Boolean).join(' ');
 
@@ -879,6 +1162,28 @@ export function executeSmartQuery(
 
   // 5. Construct Informative Metric Highlights
   const metrics: SmartMetricHighlight[] = [];
+  if (criteria.friendName && friendNetBalance !== undefined) {
+    if (friendNetBalance > 0) {
+      metrics.push({
+        label: 'NET DUE',
+        value: `${currencySymbol}${friendNetBalance.toLocaleString('en-IN')}`,
+        sublabel: `${criteria.friendName} owes you`,
+      });
+    } else if (friendNetBalance < 0) {
+      metrics.push({
+        label: 'NET PAYABLE',
+        value: `${currencySymbol}${Math.abs(friendNetBalance).toLocaleString('en-IN')}`,
+        sublabel: `You owe ${criteria.friendName}`,
+      });
+    } else {
+      metrics.push({
+        label: 'STATUS',
+        value: 'Settled Up',
+        sublabel: `With ${criteria.friendName}`,
+      });
+    }
+  }
+
   if (count > 0) {
     metrics.push({
       label: 'TOTAL',
@@ -898,7 +1203,7 @@ export function executeSmartQuery(
         metrics.push({
           label: 'HIGHEST',
           value: `${currencySymbol}${hAmt.toLocaleString('en-IN')}`,
-          sublabel: highestTx.note || undefined,
+          sublabel: highestTx.merchant || highestTx.note || undefined,
         });
       }
     }
@@ -915,7 +1220,7 @@ export function executeSmartQuery(
     matchedTransactions: matched,
     intent: criteria.intent,
     naturalLanguageAnswer: answer,
-    confidenceScore: count > 0 ? 0.96 : 0.5,
+    confidenceScore: count > 0 ? 0.98 : 0.5,
     metrics,
     engineName: engineInfo.name,
     detectedCriteria: {
@@ -923,6 +1228,9 @@ export function executeSmartQuery(
       accountName: accNameDisplay,
       timeframeText: timeframeDisplay,
       amountRangeText: amountRangeDisplay,
+      merchantName: criteria.merchantName,
+      friendName: criteria.friendName,
+      filterTags,
     },
   };
 
@@ -936,16 +1244,18 @@ export function executeSmartQuery(
 }
 
 // ─────────────────────────────────────────────────────────────
-// EXPANDED PRE-BUILT POPULAR SMART AI QUERY CHIPS
+// EXPANDED POPULAR SMART AI QUERY PRESETS
 // ─────────────────────────────────────────────────────────────
 export const SMART_QUERY_PRESETS = [
-  { label: '🍔 Food this month', query: 'How much did I spend on Food this month?' },
-  { label: '🛒 Amazon orders', query: 'Amazon purchases' },
-  { label: '⚡ Spend > ₹100', query: 'Expenses above 100' },
-  { label: '🏆 Highest expense', query: 'Highest expense in September' },
-  { label: '🚬 Cigarettes total', query: 'Total spent on cigarettes' },
-  { label: '💳 HDFC Bank', query: 'HDFC transactions' },
-  { label: '📈 Past 7 days', query: 'Total spent this week' },
-  { label: '🏖️ Goa trip tag', query: 'Goa trip' },
-  { label: '👥 Split with friends', query: 'Split bills with friends' },
+  { label: '🍔 Food this month', query: 'Food this month' },
+  { label: '⚡ Spend > ₹1,000', query: 'Expenses over 1000' },
+  { label: '🛒 Amazon & Online', query: 'Amazon orders' },
+  { label: '🚗 Uber & Travel', query: 'Uber trips' },
+  { label: '📅 Past 30 Days', query: 'Past 30 days' },
+  { label: '👥 Pending Splits', query: 'Pending split dues' },
+  { label: '☕ Coffee & Cafes', query: 'Coffee and snacks' },
+  { label: '🏆 Highest Expense', query: 'Highest expense this month' },
+  { label: '🎉 Weekend Spends', query: 'Spends on weekends' },
+  { label: '🏖️ Goa Trip', query: 'Goa trip' },
+  { label: '💳 Credit Cards', query: 'Paid via credit card' },
 ];

@@ -2068,30 +2068,7 @@ export const useExpenseStore = create<ExpenseState>()(
     // Filter by Smart Search Query using On-Device AI
     if (smartSearchQuery.trim().length > 0) {
       const aiResult = executeSmartQuery(smartSearchQuery, result, categories, accounts, currencySymbol);
-      if (aiResult.matchedTransactions.length > 0) {
-        return aiResult.matchedTransactions;
-      }
-
-      // Keyword fallback
-      const q = smartSearchQuery.toLowerCase();
-      result = result.filter((t) => {
-        const cat = categories.find((c) => c.id === t.categoryId);
-        const fromAcc = accounts.find((a) => a.id === t.accountId);
-        const toAcc = t.toAccountId ? accounts.find((a) => a.id === t.toAccountId) : null;
-        const matchFolderName = t.folderName ? t.folderName.toLowerCase().includes(q) : false;
-        const matchNote = t.note ? t.note.toLowerCase().includes(q) : false;
-        const matchTag = t.tag ? t.tag.toLowerCase().includes(q) : false;
-        const matchFriend = t.borrowerOrLender
-          ? t.borrowerOrLender.toLowerCase().includes(q)
-          : t.split?.friendNames
-          ? t.split.friendNames.toLowerCase().includes(q)
-          : false;
-        const matchCat = cat ? cat.name.toLowerCase().includes(q) : false;
-        const matchAcc = fromAcc ? fromAcc.name.toLowerCase().includes(q) : false;
-        const matchToAcc = toAcc ? toAcc.name.toLowerCase().includes(q) : false;
-        const matchAmount = t.amount.toString().includes(q);
-        return matchFolderName || matchNote || matchTag || matchFriend || matchCat || matchAcc || matchToAcc || matchAmount;
-      });
+      return aiResult.matchedTransactions;
     }
 
     return result;
